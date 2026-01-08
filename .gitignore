@@ -56,7 +56,7 @@ logs/
 wandb/
 
 # Data
-data/
+/data/
 datasets/
 *.pt
 *.pth
