@@ -1,0 +1,320 @@
+#!/usr/bin/env python
+"""Training script for graph generation models.
+
+This script trains a transformer model on synthetic graph data using
+the SENT tokenization scheme.
+
+Usage:
+    python scripts/train.py
+    python scripts/train.py experiment=synthetic
+    python scripts/train.py model.model_name=llama-s trainer.max_steps=200000
+    python scripts/train.py wandb.enabled=true wandb.project=my-project
+"""
+
+import logging
+import os
+import sys
+from pathlib import Path
+from typing import Optional
+
+import hydra
+import pytorch_lightning as pl
+from omegaconf import DictConfig, OmegaConf
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.data.datamodule import GraphDataModule
+from src.data.motif import MotifType
+from src.evaluation.metrics import GraphMetrics
+from src.evaluation.motif_metrics import MotifMetrics
+from src.models.transformer import GraphGeneratorModule
+from src.tokenizers.sent import SENTTokenizer
+
+log = logging.getLogger(__name__)
+
+
+def setup_wandb_logger(cfg: DictConfig) -> Optional[pl.loggers.WandbLogger]:
+    """Set up Weights & Biases logger with full configuration.
+
+    Args:
+        cfg: Hydra configuration.
+
+    Returns:
+        WandbLogger instance or None if disabled.
+    """
+    if not cfg.wandb.enabled:
+        return None
+
+    run_name = cfg.wandb.name
+    if run_name is None:
+        generators = "-".join(g["name"][:2] for g in cfg.data.generators)
+        run_name = f"{cfg.model.model_name}_{generators}_s{cfg.seed}"
+
+    tags = list(cfg.wandb.tags) if cfg.wandb.tags else []
+    tags.append(cfg.model.model_name.split("-")[0])
+    for gen in cfg.data.generators:
+        tags.append(gen["name"])
+
+    wandb_logger = pl.loggers.WandbLogger(
+        project=cfg.wandb.project,
+        entity=cfg.wandb.entity,
+        name=run_name,
+        tags=tags,
+        notes=cfg.wandb.notes,
+        config=OmegaConf.to_container(cfg, resolve=True),
+        save_dir=cfg.logs.path,
+        log_model=cfg.wandb.log_model,
+    )
+
+    return wandb_logger
+
+
+def log_generated_graphs_to_wandb(
+    wandb_logger: pl.loggers.WandbLogger,
+    graphs: list,
+    prefix: str = "generated",
+    max_graphs: int = 9,
+) -> None:
+    """Log generated graph visualizations to WandB.
+
+    Args:
+        wandb_logger: WandB logger instance.
+        graphs: List of generated graphs.
+        prefix: Prefix for the logged image name.
+        max_graphs: Maximum number of graphs to visualize.
+    """
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import networkx as nx
+        import wandb
+        from torch_geometric.data import Data
+        from torch_geometric.utils import to_networkx
+
+        n_graphs = min(len(graphs), max_graphs)
+        n_cols = 3
+        n_rows = (n_graphs + n_cols - 1) // n_cols
+
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 4 * n_rows))
+        axes = axes.flatten() if n_graphs > 1 else [axes]
+
+        for i in range(n_graphs):
+            ax = axes[i]
+            g = graphs[i]
+
+            if isinstance(g, Data):
+                G = to_networkx(g, to_undirected=True, remove_self_loops=True)
+            else:
+                G = g
+
+            if G.number_of_nodes() > 0:
+                pos = nx.spring_layout(G, seed=42)
+                nx.draw(
+                    G, pos, ax=ax,
+                    node_size=50,
+                    node_color="steelblue",
+                    edge_color="gray",
+                    width=0.5,
+                    with_labels=False,
+                )
+            ax.set_title(f"Graph {i+1} (n={G.number_of_nodes()}, e={G.number_of_edges()})")
+            ax.axis("off")
+
+        for i in range(n_graphs, len(axes)):
+            axes[i].axis("off")
+
+        plt.tight_layout()
+        wandb_logger.experiment.log({f"{prefix}/graphs": wandb.Image(fig)})
+        plt.close(fig)
+
+    except ImportError as e:
+        log.warning(f"Could not log graphs to WandB: {e}")
+    except Exception as e:
+        log.warning(f"Error logging graphs to WandB: {e}")
+
+
+def log_final_metrics_to_wandb(
+    wandb_logger: pl.loggers.WandbLogger,
+    metrics: dict,
+    prefix: str = "final",
+) -> None:
+    """Log final evaluation metrics to WandB.
+
+    Args:
+        wandb_logger: WandB logger instance.
+        metrics: Dictionary of metric names to values.
+        prefix: Prefix for metric names.
+    """
+    if wandb_logger is None:
+        return
+
+    log_dict = {f"{prefix}/{k}": v for k, v in metrics.items()}
+    wandb_logger.experiment.log(log_dict)
+
+
+def save_model_artifact(
+    wandb_logger: pl.loggers.WandbLogger,
+    checkpoint_path: str,
+    artifact_name: str = "model",
+    artifact_type: str = "model",
+) -> None:
+    """Save model checkpoint as WandB artifact.
+
+    Args:
+        wandb_logger: WandB logger instance.
+        checkpoint_path: Path to the checkpoint file.
+        artifact_name: Name for the artifact.
+        artifact_type: Type of artifact.
+    """
+    if wandb_logger is None:
+        return
+
+    try:
+        import wandb
+
+        artifact = wandb.Artifact(
+            name=artifact_name,
+            type=artifact_type,
+            description="Trained graph generation model",
+        )
+        artifact.add_file(checkpoint_path)
+        wandb_logger.experiment.log_artifact(artifact)
+        log.info(f"Saved model artifact: {artifact_name}")
+    except Exception as e:
+        log.warning(f"Could not save model artifact: {e}")
+
+
+@hydra.main(version_base="1.3", config_path="../configs", config_name="train")
+def main(cfg: DictConfig) -> None:
+    """Main training function.
+
+    Args:
+        cfg: Hydra configuration.
+    """
+    log.info(f"Configuration:\n{OmegaConf.to_yaml(cfg)}")
+
+    pl.seed_everything(cfg.seed, workers=True)
+
+    tokenizer = SENTTokenizer(
+        max_length=cfg.tokenizer.max_length,
+        truncation_length=cfg.tokenizer.truncation_length,
+        undirected=cfg.tokenizer.undirected,
+        seed=cfg.seed,
+    )
+
+    datamodule = GraphDataModule(
+        generator_configs=OmegaConf.to_container(cfg.data.generators),
+        tokenizer=tokenizer,
+        batch_size=cfg.data.batch_size,
+        num_workers=cfg.data.num_workers,
+        num_train=cfg.data.num_train,
+        num_val=cfg.data.num_val,
+        num_test=cfg.data.num_test,
+        seed=cfg.seed,
+    )
+
+    datamodule.setup()
+
+    model = GraphGeneratorModule(
+        tokenizer=tokenizer,
+        model_name=cfg.model.model_name,
+        learning_rate=cfg.model.learning_rate,
+        weight_decay=cfg.model.weight_decay,
+        warmup_steps=cfg.model.warmup_steps,
+        max_steps=cfg.model.max_steps,
+        sampling_top_k=cfg.sampling.top_k,
+        sampling_temperature=cfg.sampling.temperature,
+        sampling_max_length=cfg.sampling.max_length,
+        sampling_num_samples=cfg.sampling.num_samples,
+        sampling_batch_size=cfg.sampling.batch_size,
+    )
+
+    loggers = []
+    loggers.append(pl.loggers.CSVLogger(cfg.logs.path, name="csv_logs"))
+
+    wandb_logger = setup_wandb_logger(cfg)
+    if wandb_logger is not None:
+        loggers.append(wandb_logger)
+        log.info(f"WandB logging enabled: {cfg.wandb.project}")
+
+    callbacks = [
+        pl.callbacks.LearningRateMonitor(),
+        pl.callbacks.ModelCheckpoint(
+            monitor="val/loss",
+            dirpath=cfg.logs.path,
+            filename=cfg.model.model_name,
+            mode="min",
+        ),
+    ]
+
+    trainer = pl.Trainer(
+        max_steps=cfg.trainer.max_steps,
+        val_check_interval=cfg.trainer.val_check_interval,
+        precision=cfg.trainer.precision,
+        gradient_clip_val=cfg.trainer.gradient_clip_val,
+        accelerator=cfg.trainer.accelerator,
+        devices=cfg.trainer.devices,
+        logger=loggers,
+        callbacks=callbacks,
+    )
+
+    log.info("Starting training...")
+    trainer.fit(model, datamodule)
+
+    log.info("Saving final checkpoint...")
+    final_checkpoint_path = f"{cfg.logs.path}/{cfg.model.model_name}-last.ckpt"
+    trainer.save_checkpoint(final_checkpoint_path)
+
+    if wandb_logger is not None and cfg.wandb.log_model:
+        save_model_artifact(
+            wandb_logger,
+            final_checkpoint_path,
+            artifact_name=f"{cfg.model.model_name}-final",
+        )
+
+    log.info("Running evaluation on test set...")
+    trainer.test(model, datamodule)
+
+    log.info("Generating samples for evaluation...")
+    model.eval()
+    generated_graphs, gen_time = model.generate(num_samples=cfg.sampling.num_samples)
+    log.info(f"Generated {len(generated_graphs)} graphs in {gen_time:.4f}s per sample")
+
+    if wandb_logger is not None and cfg.wandb.log_graphs:
+        log.info("Logging generated graphs to WandB...")
+        log_generated_graphs_to_wandb(wandb_logger, generated_graphs, prefix="final")
+
+    log.info("Computing graph metrics...")
+    test_graphs = [datamodule.test_dataset[i] for i in range(len(datamodule.test_dataset))]
+    graph_metrics = GraphMetrics(
+        reference_graphs=[g for g in test_graphs],
+        compute_emd=False,
+    )
+    metrics = graph_metrics(generated_graphs)
+    for name, value in metrics.items():
+        log.info(f"  {name}: {value:.6f}")
+
+    log.info("Computing motif metrics...")
+    motif_metrics = MotifMetrics(reference_graphs=test_graphs)
+    motif_results = motif_metrics(generated_graphs)
+    for name, value in motif_results.items():
+        log.info(f"  {name}: {value:.6f}")
+
+    all_metrics = {
+        **metrics,
+        **motif_results,
+        "generation_time": gen_time,
+    }
+    log_final_metrics_to_wandb(wandb_logger, all_metrics)
+
+    if wandb_logger is not None:
+        import wandb
+        wandb.finish()
+        log.info("WandB run finished")
+
+    log.info("Training complete!")
+
+
+if __name__ == "__main__":
+    main()
