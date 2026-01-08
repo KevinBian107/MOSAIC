@@ -1,0 +1,51 @@
+# @package _global_
+
+defaults:
+  - _self_
+  - experiment: synthetic
+
+# Random seed
+seed: 42
+
+# Model configuration
+model:
+  model_name: gpt2-xs
+  checkpoint_path: null  # Required: path to trained model
+
+# Data configuration
+data:
+  generators:
+    - name: erdos_renyi
+      n: 50
+      p: 0.2
+  batch_size: 32
+  num_workers: 0
+  num_train: 0
+  num_val: 0
+  num_test: 100
+
+# Tokenizer configuration
+tokenizer:
+  max_length: -1
+  truncation_length: 2048
+  undirected: true
+
+# Sampling configuration for evaluation
+sampling:
+  num_samples: -1  # Use all test samples
+  batch_size: 32
+  top_k: 10
+  temperature: 1.0
+  max_length: 2048
+
+# Metrics configuration
+metrics:
+  compute_emd: false
+  metrics_list:
+    - degree
+    - spectral
+    - clustering
+
+# Logging configuration
+logs:
+  path: outputs/test/${now:%Y-%m-%d}/${now:%H-%M-%S}

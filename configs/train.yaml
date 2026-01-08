@@ -1,0 +1,67 @@
+# @package _global_
+
+defaults:
+  - _self_
+  - experiment: synthetic
+
+# Random seed
+seed: 42
+
+# Model configuration
+model:
+  model_name: gpt2-xs
+  learning_rate: 6e-4
+  weight_decay: 0.1
+  warmup_steps: 1000
+  max_steps: ${trainer.max_steps}
+
+# Data configuration
+data:
+  generators:
+    - name: erdos_renyi
+      n: 50
+      p: 0.2
+  batch_size: 32
+  num_workers: 0
+  num_train: 1000
+  num_val: 100
+  num_test: 100
+
+# Tokenizer configuration
+tokenizer:
+  max_length: -1
+  truncation_length: 2048
+  undirected: true
+
+# Training configuration
+trainer:
+  max_steps: 100000
+  val_check_interval: 1000
+  precision: 32
+  gradient_clip_val: 1.0
+  accelerator: auto
+  devices: 1
+
+# Sampling configuration for evaluation
+sampling:
+  num_samples: 100
+  batch_size: 32
+  top_k: 10
+  temperature: 1.0
+  max_length: 2048
+
+# Logging configuration
+logs:
+  path: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+
+# Weights & Biases configuration
+wandb:
+  enabled: false
+  project: motif-graph-gen
+  entity: null  # Your WandB username or team name
+  name: null  # Run name (auto-generated if null)
+  tags: []  # List of tags for filtering runs
+  notes: null  # Notes about this run
+  log_model: true  # Log model checkpoints as artifacts
+  log_graphs: true  # Log generated graph visualizations
+  log_freq: 1000  # How often to log (in steps)
