@@ -17,3 +17,5 @@ We have provided the `.claude` file for helping code developement and understand
 curl -fsSL https://claude.ai/install.sh | bash
 claude --dangerously-skip-permissions
 ```
+
+To use the skills we have created, just call the keyword `investigation` and claude should be conducting reasoning and coding in the structured manner that we have defined, with logging of each step into a \scratch folder that's gitignored.
