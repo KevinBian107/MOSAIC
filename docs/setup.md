@@ -7,7 +7,7 @@ The following should run without an issue on DSMLP and we copied over for convin
 
 ```bash
 conda env create -f environment.yaml
-conda activate motif-graph
+conda activate mosaic
 ```
 
 # Setup Claude Code
