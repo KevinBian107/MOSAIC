@@ -7,7 +7,6 @@ dependencies:
   - numpy
   - scipy
   - rdkit=2024.03.6
-  - graph-tool=2.68
   - networkx
   - pip:
     - torch==2.2.2
@@ -22,3 +21,5 @@ dependencies:
     - PyGSP==0.5.1
     - joblib
     - wandb
+    - molsets  # MOSES benchmark package
+    - fcd  # Frechet ChemNet Distance (optional, for FCD metric)

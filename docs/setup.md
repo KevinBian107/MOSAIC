@@ -10,6 +10,8 @@ conda env create -f environment.yaml
 conda activate mosaic
 ```
 
+Note that the above requires the installation of molsets, hence pomegranate, which is not supported on any Mac devices.
+
 # Setup Claude Code
 We have provided the `.claude` file for helping code developement and understanding of the codebase, install claude code as the following to automatically used the codebase instructions we have provided.
 

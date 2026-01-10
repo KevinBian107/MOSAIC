@@ -1,18 +1,17 @@
 #!/usr/bin/env python
-"""Training script for graph generation models.
+"""Training script for molecular graph generation models.
 
-This script trains a transformer model on synthetic graph data using
+This script trains a transformer model on molecular graph data using
 the SENT tokenization scheme.
 
 Usage:
     python scripts/train.py
-    python scripts/train.py experiment=synthetic
+    python scripts/train.py data.dataset_name=qm9
     python scripts/train.py model.model_name=llama-s trainer.max_steps=200000
     python scripts/train.py wandb.enabled=true wandb.project=my-project
 """
 
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -23,10 +22,9 @@ from omegaconf import DictConfig, OmegaConf
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.data.datamodule import GraphDataModule
-from src.data.motif import MotifType
-from src.evaluation.metrics import GraphMetrics
-from src.evaluation.motif_metrics import MotifMetrics
+from src.data.datamodule import MolecularDataModule
+from src.evaluation.molecular_metrics import MolecularMetrics
+from src.evaluation.motif_distribution import MotifDistributionMetric
 from src.models.transformer import GraphGeneratorModule
 from src.tokenizers.sent import SENTTokenizer
 
@@ -47,13 +45,11 @@ def setup_wandb_logger(cfg: DictConfig) -> Optional[pl.loggers.WandbLogger]:
 
     run_name = cfg.wandb.name
     if run_name is None:
-        generators = "-".join(g["name"][:2] for g in cfg.data.generators)
-        run_name = f"{cfg.model.model_name}_{generators}_s{cfg.seed}"
+        run_name = f"{cfg.model.model_name}_{cfg.data.dataset_name}_s{cfg.seed}"
 
     tags = list(cfg.wandb.tags) if cfg.wandb.tags else []
     tags.append(cfg.model.model_name.split("-")[0])
-    for gen in cfg.data.generators:
-        tags.append(gen["name"])
+    tags.append(cfg.data.dataset_name)
 
     wandb_logger = pl.loggers.WandbLogger(
         project=cfg.wandb.project,
@@ -69,69 +65,57 @@ def setup_wandb_logger(cfg: DictConfig) -> Optional[pl.loggers.WandbLogger]:
     return wandb_logger
 
 
-def log_generated_graphs_to_wandb(
+def log_generated_molecules_to_wandb(
     wandb_logger: pl.loggers.WandbLogger,
-    graphs: list,
+    smiles_list: list[str],
     prefix: str = "generated",
-    max_graphs: int = 9,
+    max_molecules: int = 9,
 ) -> None:
-    """Log generated graph visualizations to WandB.
+    """Log generated molecule visualizations to WandB.
 
     Args:
         wandb_logger: WandB logger instance.
-        graphs: List of generated graphs.
+        smiles_list: List of generated SMILES strings.
         prefix: Prefix for the logged image name.
-        max_graphs: Maximum number of graphs to visualize.
+        max_molecules: Maximum number of molecules to visualize.
     """
     try:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-        import networkx as nx
         import wandb
-        from torch_geometric.data import Data
-        from torch_geometric.utils import to_networkx
+        from rdkit import Chem
+        from rdkit.Chem import Draw
 
-        n_graphs = min(len(graphs), max_graphs)
+        valid_mols = []
+        valid_smiles = []
+        for smiles in smiles_list:
+            mol = Chem.MolFromSmiles(smiles)
+            if mol is not None and len(valid_mols) < max_molecules:
+                valid_mols.append(mol)
+                valid_smiles.append(smiles)
+
+        if not valid_mols:
+            return
+
+        # Draw molecules in a grid
+        n_mols = len(valid_mols)
         n_cols = 3
-        n_rows = (n_graphs + n_cols - 1) // n_cols
+        n_rows = (n_mols + n_cols - 1) // n_cols
 
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 4 * n_rows))
-        axes = axes.flatten() if n_graphs > 1 else [axes]
+        img = Draw.MolsToGridImage(
+            valid_mols,
+            molsPerRow=n_cols,
+            subImgSize=(300, 300),
+            legends=valid_smiles[:n_mols],
+        )
 
-        for i in range(n_graphs):
-            ax = axes[i]
-            g = graphs[i]
-
-            if isinstance(g, Data):
-                G = to_networkx(g, to_undirected=True, remove_self_loops=True)
-            else:
-                G = g
-
-            if G.number_of_nodes() > 0:
-                pos = nx.spring_layout(G, seed=42)
-                nx.draw(
-                    G, pos, ax=ax,
-                    node_size=50,
-                    node_color="steelblue",
-                    edge_color="gray",
-                    width=0.5,
-                    with_labels=False,
-                )
-            ax.set_title(f"Graph {i+1} (n={G.number_of_nodes()}, e={G.number_of_edges()})")
-            ax.axis("off")
-
-        for i in range(n_graphs, len(axes)):
-            axes[i].axis("off")
-
-        plt.tight_layout()
-        wandb_logger.experiment.log({f"{prefix}/graphs": wandb.Image(fig)})
-        plt.close(fig)
+        wandb_logger.experiment.log({f"{prefix}/molecules": wandb.Image(img)})
 
     except ImportError as e:
-        log.warning(f"Could not log graphs to WandB: {e}")
+        log.warning(f"Could not log molecules to WandB: {e}")
     except Exception as e:
-        log.warning(f"Error logging graphs to WandB: {e}")
+        log.warning(f"Error logging molecules to WandB: {e}")
 
 
 def log_final_metrics_to_wandb(
@@ -176,7 +160,7 @@ def save_model_artifact(
         artifact = wandb.Artifact(
             name=artifact_name,
             type=artifact_type,
-            description="Trained graph generation model",
+            description="Trained molecular graph generation model",
         )
         artifact.add_file(checkpoint_path)
         wandb_logger.experiment.log_artifact(artifact)
@@ -203,15 +187,17 @@ def main(cfg: DictConfig) -> None:
         seed=cfg.seed,
     )
 
-    datamodule = GraphDataModule(
-        generator_configs=OmegaConf.to_container(cfg.data.generators),
+    datamodule = MolecularDataModule(
+        dataset_name=cfg.data.dataset_name,
         tokenizer=tokenizer,
         batch_size=cfg.data.batch_size,
         num_workers=cfg.data.num_workers,
         num_train=cfg.data.num_train,
         num_val=cfg.data.num_val,
         num_test=cfg.data.num_test,
+        include_hydrogens=cfg.data.get("include_hydrogens", False),
         seed=cfg.seed,
+        data_root=cfg.data.get("data_root", "data"),
     )
 
     datamodule.setup()
@@ -281,23 +267,31 @@ def main(cfg: DictConfig) -> None:
     generated_graphs, gen_time = model.generate(num_samples=cfg.sampling.num_samples)
     log.info(f"Generated {len(generated_graphs)} graphs in {gen_time:.4f}s per sample")
 
-    if wandb_logger is not None and cfg.wandb.log_graphs:
-        log.info("Logging generated graphs to WandB...")
-        log_generated_graphs_to_wandb(wandb_logger, generated_graphs, prefix="final")
+    # Convert generated graphs to SMILES for molecular metrics
+    from src.data.molecular import graph_to_smiles
 
-    log.info("Computing graph metrics...")
-    test_graphs = [datamodule.test_dataset[i] for i in range(len(datamodule.test_dataset))]
-    graph_metrics = GraphMetrics(
-        reference_graphs=[g for g in test_graphs],
-        compute_emd=False,
-    )
-    metrics = graph_metrics(generated_graphs)
+    generated_smiles = []
+    for g in generated_graphs:
+        smiles = graph_to_smiles(g)
+        if smiles:
+            generated_smiles.append(smiles)
+    log.info(f"Successfully converted {len(generated_smiles)} graphs to SMILES")
+
+    if wandb_logger is not None and cfg.wandb.log_graphs:
+        log.info("Logging generated molecules to WandB...")
+        log_generated_molecules_to_wandb(
+            wandb_logger, generated_smiles, prefix="final"
+        )
+
+    log.info("Computing molecular metrics...")
+    mol_metrics = MolecularMetrics(reference_smiles=datamodule.train_smiles)
+    metrics = mol_metrics(generated_smiles)
     for name, value in metrics.items():
         log.info(f"  {name}: {value:.6f}")
 
-    log.info("Computing motif metrics...")
-    motif_metrics = MotifMetrics(reference_graphs=test_graphs)
-    motif_results = motif_metrics(generated_graphs)
+    log.info("Computing motif distribution metrics...")
+    motif_metrics = MotifDistributionMetric(reference_smiles=datamodule.train_smiles)
+    motif_results = motif_metrics(generated_smiles)
     for name, value in motif_results.items():
         log.info(f"  {name}: {value:.6f}")
 
