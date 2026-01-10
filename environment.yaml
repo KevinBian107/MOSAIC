@@ -1,4 +1,4 @@
-name: motif-graph
+name: mosaic
 channels:
   - conda-forge
 dependencies:

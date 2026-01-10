@@ -1,4 +1,4 @@
-# Motif-preserving Graph Tokenization for Biological Structure Generation
+# MOSAIC: MOtif-aware Structural Abstraction for graph tokenIzation and Composition
 This project explores a simple idea: instead of asking generative models to recover motif-level structure implicitly, we encode motifs directly into the representation used for graph generation or treat it as a loss regularization upon training, both independent of the inner processing of sequence transformer.
 
 The codebase is designed for flexibility, currently supporting synthetic datasets and the original AutoGraph tokenization scheme, with easy extensibility for additional datasets (e.g., molecules, proteins) and methods.
@@ -33,7 +33,7 @@ pytest
 ## Project Structure
 
 ```
-motif-preserving-tokenization/
+MOSAIC/
 ├── src/
 │   ├── data/           # Data loading, generation, and motif detection
 │   ├── tokenizers/     # Graph tokenization (SENT)
