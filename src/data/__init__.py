@@ -1,16 +1,24 @@
-"""Data loading and generation utilities."""
+"""Molecular data loading and processing utilities."""
 
-from src.data.datamodule import GraphDataModule
-from src.data.motif import MotifDetector, MotifType
-from src.data.synthetic import (
-    SyntheticGraphGenerator,
-    create_mixed_dataset,
+from src.data.datamodule import MolecularDataModule, MolecularGraphDataset
+from src.data.molecular import (
+    MolecularDataset,
+    load_moses_dataset,
+    load_qm9_smiles,
+    smiles_to_graph,
+    graph_to_smiles,
+    ATOM_TYPES,
+    BOND_TYPES,
 )
 
 __all__ = [
-    "GraphDataModule",
-    "MotifDetector",
-    "MotifType",
-    "SyntheticGraphGenerator",
-    "create_mixed_dataset",
+    "MolecularDataModule",
+    "MolecularGraphDataset",
+    "MolecularDataset",
+    "load_moses_dataset",
+    "load_qm9_smiles",
+    "smiles_to_graph",
+    "graph_to_smiles",
+    "ATOM_TYPES",
+    "BOND_TYPES",
 ]

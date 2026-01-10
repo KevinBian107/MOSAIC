@@ -1,0 +1,19 @@
+# @package _global_
+
+# MOSES dataset experiment configuration
+# Drug-like molecules from ZINC database
+
+data:
+  dataset_name: moses
+  num_train: 50000  # Use null for full 1.6M training set
+  num_val: 5000
+  num_test: 5000
+  include_hydrogens: false
+
+trainer:
+  max_steps: 100000
+  val_check_interval: 2000
+
+sampling:
+  num_samples: 1000
+  top_k: 50

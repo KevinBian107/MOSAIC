@@ -2,7 +2,7 @@
 
 defaults:
   - _self_
-  - experiment: synthetic
+  - experiment: moses
 
 # Random seed
 seed: 42
@@ -17,15 +17,14 @@ model:
 
 # Data configuration
 data:
-  generators:
-    - name: erdos_renyi
-      n: 50
-      p: 0.2
+  dataset_name: moses  # 'moses' or 'qm9'
   batch_size: 32
   num_workers: 0
-  num_train: 1000
-  num_val: 100
-  num_test: 100
+  num_train: 10000  # Use null for full dataset
+  num_val: 1000
+  num_test: 1000
+  include_hydrogens: false
+  data_root: data
 
 # Tokenizer configuration
 tokenizer:
@@ -57,11 +56,11 @@ logs:
 # Weights & Biases configuration
 wandb:
   enabled: false
-  project: motif-graph-gen
+  project: molecular-graph-gen
   entity: null  # Your WandB username or team name
   name: null  # Run name (auto-generated if null)
   tags: []  # List of tags for filtering runs
   notes: null  # Notes about this run
   log_model: true  # Log model checkpoints as artifacts
-  log_graphs: true  # Log generated graph visualizations
+  log_graphs: true  # Log generated molecule visualizations
   log_freq: 1000  # How often to log (in steps)

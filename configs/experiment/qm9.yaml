@@ -1,0 +1,19 @@
+# @package _global_
+
+# QM9 dataset experiment configuration
+# Small organic molecules with up to 9 heavy atoms
+
+data:
+  dataset_name: qm9
+  num_train: null  # Use full ~100K training set
+  num_val: null
+  num_test: null
+  include_hydrogens: false  # Set to true for explicit H modeling
+
+trainer:
+  max_steps: 50000
+  val_check_interval: 1000
+
+sampling:
+  num_samples: 1000
+  top_k: 50

@@ -1,12 +1,13 @@
 #!/usr/bin/env python
-"""Testing script for evaluating trained graph generation models.
+"""Testing script for evaluating trained molecular graph generation models.
 
 This script loads a trained model and evaluates its generation quality
-using both standard graph metrics and motif-specific metrics.
+using molecular metrics (validity, uniqueness, novelty, FCD, etc.)
+and motif distribution metrics.
 
 Usage:
     python scripts/test.py model.checkpoint_path=/path/to/model.ckpt
-    python scripts/test.py experiment=synthetic model.checkpoint_path=outputs/model.ckpt
+    python scripts/test.py data.dataset_name=qm9 model.checkpoint_path=outputs/model.ckpt
 """
 
 import json
@@ -16,14 +17,14 @@ from pathlib import Path
 
 import hydra
 import pytorch_lightning as pl
-import torch
 from omegaconf import DictConfig, OmegaConf
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.data.datamodule import GraphDataModule
-from src.evaluation.metrics import GraphMetrics, compute_validity_metrics
-from src.evaluation.motif_metrics import MotifMetrics
+from src.data.datamodule import MolecularDataModule
+from src.data.molecular import graph_to_smiles
+from src.evaluation.molecular_metrics import MolecularMetrics, compute_fcd
+from src.evaluation.motif_distribution import MotifDistributionMetric
 from src.models.transformer import GraphGeneratorModule
 from src.tokenizers.sent import SENTTokenizer
 
@@ -51,15 +52,17 @@ def main(cfg: DictConfig) -> None:
         seed=cfg.seed,
     )
 
-    datamodule = GraphDataModule(
-        generator_configs=OmegaConf.to_container(cfg.data.generators),
+    datamodule = MolecularDataModule(
+        dataset_name=cfg.data.dataset_name,
         tokenizer=tokenizer,
         batch_size=cfg.data.batch_size,
         num_workers=cfg.data.num_workers,
         num_train=cfg.data.num_train,
         num_val=cfg.data.num_val,
         num_test=cfg.data.num_test,
+        include_hydrogens=cfg.data.get("include_hydrogens", False),
         seed=cfg.seed,
+        data_root=cfg.data.get("data_root", "data"),
     )
 
     datamodule.setup(stage="test")
@@ -71,58 +74,85 @@ def main(cfg: DictConfig) -> None:
     )
     model.eval()
 
-    test_graphs = [datamodule.test_dataset[i] for i in range(len(datamodule.test_dataset))]
-    num_test = len(test_graphs)
+    num_test = len(datamodule.test_smiles)
 
     num_samples = cfg.sampling.num_samples
     if num_samples < 0:
         num_samples = num_test
 
-    log.info(f"Generating {num_samples} graphs...")
+    log.info(f"Generating {num_samples} molecules...")
     generated_graphs, gen_time = model.generate(num_samples=num_samples)
     log.info(f"Generated {len(generated_graphs)} graphs")
     log.info(f"Average generation time: {gen_time:.4f}s per sample")
 
+    # Convert to SMILES
+    generated_smiles = []
+    for g in generated_graphs:
+        smiles = graph_to_smiles(g)
+        if smiles:
+            generated_smiles.append(smiles)
+    log.info(f"Successfully converted {len(generated_smiles)} graphs to SMILES")
+
     log.info("\n" + "=" * 50)
-    log.info("STANDARD GRAPH METRICS")
+    log.info("MOLECULAR METRICS")
     log.info("=" * 50)
 
-    graph_metrics = GraphMetrics(
-        reference_graphs=test_graphs,
-        compute_emd=cfg.metrics.compute_emd,
-        metrics_list=cfg.metrics.metrics_list,
+    mol_metrics = MolecularMetrics(
+        reference_smiles=datamodule.train_smiles,
     )
-    standard_results = graph_metrics(generated_graphs)
+    mol_results = mol_metrics(generated_smiles)
 
-    for name, value in standard_results.items():
-        log.info(f"  {name:15s}: {value:.6f}")
-
-    log.info("\n" + "=" * 50)
-    log.info("VALIDITY METRICS")
-    log.info("=" * 50)
-
-    validity_results = compute_validity_metrics(generated_graphs, test_graphs)
-    for name, value in validity_results.items():
-        log.info(f"  {name:15s}: {value:.4f}")
+    for name, value in mol_results.items():
+        log.info(f"  {name:20s}: {value:.6f}")
 
     log.info("\n" + "=" * 50)
-    log.info("MOTIF METRICS")
+    log.info("MOTIF DISTRIBUTION METRICS")
     log.info("=" * 50)
 
-    motif_metrics = MotifMetrics(reference_graphs=test_graphs)
-    motif_results = motif_metrics(generated_graphs)
+    motif_metrics = MotifDistributionMetric(
+        reference_smiles=datamodule.train_smiles,
+    )
+    motif_results = motif_metrics(generated_smiles)
 
     for name, value in motif_results.items():
         log.info(f"  {name:20s}: {value:.6f}")
 
+    # Try to compute FCD if available
+    log.info("\n" + "=" * 50)
+    log.info("FCD METRIC")
+    log.info("=" * 50)
+
+    fcd_score = compute_fcd(generated_smiles, datamodule.test_smiles)
+    if not (fcd_score != fcd_score):  # Check for NaN
+        log.info(f"  FCD: {fcd_score:.6f}")
+    else:
+        log.info("  FCD: Not available (install moses or fcd package)")
+
+    # Compile all results
     all_results = {
-        **standard_results,
-        **validity_results,
+        **mol_results,
         **motif_results,
+        "fcd": fcd_score if not (fcd_score != fcd_score) else None,
         "generation_time": gen_time,
         "num_samples": num_samples,
+        "num_valid_smiles": len(generated_smiles),
     }
 
+    # Get motif summary for reference
+    log.info("\n" + "=" * 50)
+    log.info("MOTIF SUMMARY (Top 10)")
+    log.info("=" * 50)
+
+    summary = motif_metrics.get_motif_summary(generated_smiles[:100])
+    log.info("\nSMARTS Motifs found:")
+    for name, count in list(summary["smarts_motifs"].items())[:10]:
+        log.info(f"  {name}: {count}")
+
+    log.info("\nFunctional Groups found:")
+    for name, count in list(summary["functional_groups"].items())[:10]:
+        log.info(f"  {name}: {count}")
+
+    # Save results
     output_path = Path(cfg.logs.path)
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -130,6 +160,13 @@ def main(cfg: DictConfig) -> None:
     with open(results_file, "w") as f:
         json.dump(all_results, f, indent=2)
     log.info(f"\nResults saved to {results_file}")
+
+    # Save generated SMILES
+    smiles_file = output_path / "generated_smiles.txt"
+    with open(smiles_file, "w") as f:
+        for smi in generated_smiles:
+            f.write(smi + "\n")
+    log.info(f"Generated SMILES saved to {smiles_file}")
 
     log.info("\nEvaluation complete!")
 

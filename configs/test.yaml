@@ -2,27 +2,25 @@
 
 defaults:
   - _self_
-  - experiment: synthetic
+  - experiment: moses
 
 # Random seed
 seed: 42
 
 # Model configuration
 model:
-  model_name: gpt2-xs
-  checkpoint_path: null  # Required: path to trained model
+  checkpoint_path: null  # Required: path to model checkpoint
 
 # Data configuration
 data:
-  generators:
-    - name: erdos_renyi
-      n: 50
-      p: 0.2
+  dataset_name: moses  # 'moses' or 'qm9'
   batch_size: 32
   num_workers: 0
-  num_train: 0
-  num_val: 0
-  num_test: 100
+  num_train: 10000  # Used for reference in metrics
+  num_val: 1000
+  num_test: 1000
+  include_hydrogens: false
+  data_root: data
 
 # Tokenizer configuration
 tokenizer:
@@ -30,9 +28,9 @@ tokenizer:
   truncation_length: 2048
   undirected: true
 
-# Sampling configuration for evaluation
+# Sampling configuration
 sampling:
-  num_samples: -1  # Use all test samples
+  num_samples: 100  # -1 to use all test set
   batch_size: 32
   top_k: 10
   temperature: 1.0
@@ -40,11 +38,7 @@ sampling:
 
 # Metrics configuration
 metrics:
-  compute_emd: false
-  metrics_list:
-    - degree
-    - spectral
-    - clustering
+  compute_fcd: true  # Requires moses or fcd package
 
 # Logging configuration
 logs:

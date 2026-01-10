@@ -13,7 +13,6 @@ from src.evaluation.metrics import (
     spectral_histogram,
     clustering_histogram,
 )
-from src.evaluation.motif_metrics import MotifMetrics
 from tests.fixtures.graphs import sample_graph_list, erdos_renyi_graph
 
 
@@ -87,39 +86,6 @@ class TestGraphMetrics:
         result2 = metrics(sample_graph_list)
 
         assert result1.keys() == result2.keys()
-
-
-class TestMotifMetrics:
-    """Tests for MotifMetrics class."""
-
-    def test_init(self, sample_graph_list: list[Data]) -> None:
-        """Test initialization."""
-        metrics = MotifMetrics(sample_graph_list)
-        assert len(metrics.reference_graphs) == len(sample_graph_list)
-
-    def test_compute_msc(self, sample_graph_list: list[Data]) -> None:
-        """Test MSC computation."""
-        metrics = MotifMetrics(sample_graph_list)
-        msc = metrics.compute_msc(sample_graph_list)
-
-        assert isinstance(msc, float)
-        assert msc >= 0
-
-    def test_compute_mfd(self, sample_graph_list: list[Data]) -> None:
-        """Test MFD computation."""
-        metrics = MotifMetrics(sample_graph_list)
-        mfd = metrics.compute_mfd(sample_graph_list)
-
-        assert isinstance(mfd, dict)
-        assert "triangle" in mfd
-
-    def test_compute_all(self, sample_graph_list: list[Data]) -> None:
-        """Test compute returns all metrics."""
-        metrics = MotifMetrics(sample_graph_list)
-        result = metrics.compute(sample_graph_list)
-
-        assert "msc" in result
-        assert any(k.startswith("mfd_") for k in result.keys())
 
 
 class TestValidityMetrics:
