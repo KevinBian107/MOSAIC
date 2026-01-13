@@ -2,11 +2,12 @@
 """Training script for molecular graph generation models.
 
 This script trains a transformer model on molecular graph data using
-the SENT tokenization scheme.
+either SENT (flat) or H-SENT (hierarchical) tokenization.
 
 Usage:
     python scripts/train.py
     python scripts/train.py data.dataset_name=qm9
+    python scripts/train.py tokenizer.type=hsent  # Use hierarchical tokenization
     python scripts/train.py model.model_name=llama-s trainer.max_steps=200000
     python scripts/train.py wandb.enabled=true wandb.project=my-project
 """
@@ -26,7 +27,7 @@ from src.data.datamodule import MolecularDataModule
 from src.evaluation.molecular_metrics import MolecularMetrics
 from src.evaluation.motif_distribution import MotifDistributionMetric
 from src.models.transformer import GraphGeneratorModule
-from src.tokenizers.sent import SENTTokenizer
+from src.tokenizers import SENTTokenizer, HSENTTokenizer
 
 log = logging.getLogger(__name__)
 
@@ -180,12 +181,23 @@ def main(cfg: DictConfig) -> None:
 
     pl.seed_everything(cfg.seed, workers=True)
 
-    tokenizer = SENTTokenizer(
-        max_length=cfg.tokenizer.max_length,
-        truncation_length=cfg.tokenizer.truncation_length,
-        undirected=cfg.tokenizer.undirected,
-        seed=cfg.seed,
-    )
+    # Select tokenizer based on config
+    tokenizer_type = cfg.tokenizer.get("type", "sent").lower()
+    if tokenizer_type == "hsent":
+        log.info("Using hierarchical H-SENT tokenizer")
+        tokenizer = HSENTTokenizer(
+            max_length=cfg.tokenizer.max_length,
+            truncation_length=cfg.tokenizer.truncation_length,
+            seed=cfg.seed,
+        )
+    else:
+        log.info("Using flat SENT tokenizer")
+        tokenizer = SENTTokenizer(
+            max_length=cfg.tokenizer.max_length,
+            truncation_length=cfg.tokenizer.truncation_length,
+            undirected=cfg.tokenizer.undirected,
+            seed=cfg.seed,
+        )
 
     datamodule = MolecularDataModule(
         dataset_name=cfg.data.dataset_name,

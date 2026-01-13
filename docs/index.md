@@ -67,6 +67,24 @@ python scripts/visualize_motifs.py --dataset qm9 --num_molecules 6
 python scripts/visualize_motifs.py --smiles "CC(=O)Nc1ccc(O)cc1" --output paracetamol.png
 ```
 
+### Visualizing Hierarchical Tokenization
+
+```bash
+# Visualize hierarchical graph decomposition of a molecule
+python scripts/visualize_htoken.py --name cholesterol
+
+# Visualize by SMILES
+python scripts/visualize_htoken.py --smiles "CC(=O)OC1=CC=CC=C1C(=O)O" --output aspirin.png
+
+# Full 4-panel view with token sequence
+python scripts/visualize_htoken.py --name caffeine --full
+
+# Run demo with multiple complex molecules
+python scripts/visualize_htoken.py --demo
+```
+
+See [Hierarchical Tokenization Guide](hierarchical_tokenization.md) for details.
+
 ## Project Structure
 
 ```
@@ -162,5 +180,6 @@ Tokens: [SOS, 0, 1, [, 0, ], 2, EOS]
 ## Next Steps
 
 - [Architecture Guide](architecture.md)
+- [Hierarchical Tokenization Guide](hierarchical_tokenization.md)
 - [Setup Guide](setup.md)
 - [Contributing Guide](contributing.md)
