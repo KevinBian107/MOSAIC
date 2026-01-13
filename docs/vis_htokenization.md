@@ -32,6 +32,9 @@ python scripts/visualize_htoken.py --name morphine --full
 
 # Run demo with multiple complex molecules
 python scripts/visualize_htoken.py --demo --output-dir ./figures
+
+# Run demo comparing H-SENT and SENT
+python scripts/visualize_tokenization.py --demo --output-dir ./figures
 ```
 
 ### Available Molecules
