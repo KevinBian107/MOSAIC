@@ -35,6 +35,10 @@ python scripts/visualize_htoken.py --demo --output-dir ./figures
 
 # Run demo comparing H-SENT and SENT
 python scripts/visualize_tokenization.py --demo --output-dir ./figures
+
+# Compare standard vs motif-aware coarsening
+python scripts/visualize_motif_coarsening.py --name cholesterol --alpha 10.0
+python scripts/visualize_motif_coarsening.py --demo --output-dir ./figures
 ```
 
 ### Available Molecules
@@ -117,11 +121,96 @@ def smiles_to_graph(smiles: str) -> Data:
 data = smiles_to_graph("c1ccccc1")  # benzene
 ```
 
+## Motif-Aware Coarsening
+
+### Overview
+
+Motif-aware coarsening extends the standard spectral clustering to preserve molecular ring structures (motifs) during graph partitioning. It uses a modified affinity matrix:
+
+```
+A' = A + α · M
+```
+
+Where:
+- `A` = original adjacency matrix
+- `M` = motif co-membership matrix (`M[i,j]` = number of motifs containing both atoms i and j)
+- `α` = hyperparameter controlling motif influence (default: 1.0, higher = stronger preservation)
+
+### Comparing Coarsening Methods
+
+Use the comparison script to visualize the difference:
+
+```bash
+# Compare on a single molecule
+python scripts/visualize_motif_coarsening.py --name cholesterol --alpha 10.0
+
+# Compare with custom SMILES
+python scripts/visualize_motif_coarsening.py --smiles "c1ccc(-c2ccccc2)cc1" --name biphenyl
+
+# Run demo on complex molecules
+python scripts/visualize_motif_coarsening.py --demo --output-dir ./figures --no-show
+
+# List available molecules with motif counts
+python scripts/visualize_motif_coarsening.py --list
+```
+
+### Comparison Output
+
+The script generates a 4-panel comparison showing:
+
+| Panel | Description |
+|-------|-------------|
+| **Top-Left** | Standard spectral coarsening with community colors |
+| **Top-Right** | Standard block matrix |
+| **Bottom-Left** | Motif-aware coarsening with community colors |
+| **Bottom-Right** | Motif-aware block matrix |
+
+Each panel shows the cohesion metric (% of motifs kept intact in single communities).
+
+### Example Results (α=10.0)
+
+| Molecule | Atoms | Motifs | Std Cohesion | MA Cohesion | Improvement |
+|----------|-------|--------|--------------|-------------|-------------|
+| cholesterol | 28 | 4 | 50% | 100% | +50% |
+| morphine | 21 | 2 | 50% | 100% | +50% |
+| resveratrol | 17 | 2 | 0% | 100% | +100% |
+| quercetin | 22 | 2 | 50% | 100% | +50% |
+
+### Using Motif-Aware Tokenization
+
+```python
+from src.tokenizers.hierarchical import HSENTTokenizer
+
+# Enable motif-aware coarsening
+tokenizer = HSENTTokenizer(
+    seed=42,
+    motif_aware=True,      # Enable motif awareness
+    motif_alpha=2.0,       # Strength of motif preference (default: 1.0)
+)
+
+# Tokenize as usual
+tokenizer.set_num_nodes(100)
+tokens = tokenizer.tokenize(data)
+```
+
+### Tuning α
+
+| α Value | Effect |
+|---------|--------|
+| 0 | Standard spectral clustering (no motif awareness) |
+| 1.0 | Motif co-membership treated equally to actual edges |
+| 2.0-5.0 | Moderate preference for keeping motifs together |
+| 10.0+ | Strong preference; may reduce modularity |
+
+**Recommendation:** Start with α=1.0 and increase if ring structures are being split.
+
+---
+
 ## Hierarchical Decomposition
 
 ### How It Works
 
-1. **Spectral Clustering**: Graph is partitioned into communities using modularity-optimized spectral clustering
+1. **Spectral Clustering**: Graph is partitioned into communities using modularity-optimized spectral clustering (or motif-aware variant)
 
 2. **Partitions (Diagonal Blocks)**: Each community becomes a partition containing:
    - Induced subgraph edges (intra-community)

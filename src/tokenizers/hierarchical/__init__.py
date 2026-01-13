@@ -12,7 +12,17 @@ Key components:
 
 from src.tokenizers.hierarchical.coarsening import (
     CoarseningStrategy,
+    MotifAwareCoarsening,
     SpectralCoarsening,
+)
+from src.tokenizers.hierarchical.motifs import (
+    CLUSTERING_MOTIFS,
+    MotifInstance,
+    compute_motif_affinity_matrix,
+    compute_motif_cohesion,
+    detect_motifs_from_data,
+    detect_motifs_from_smiles,
+    get_motif_summary,
 )
 from src.tokenizers.hierarchical.hsent import HSENTTokenizer
 from src.tokenizers.hierarchical.ordering import (
@@ -39,7 +49,16 @@ __all__ = [
     "HSENTTokenizer",
     # Coarsening
     "SpectralCoarsening",
+    "MotifAwareCoarsening",
     "CoarseningStrategy",
+    # Motif detection
+    "MotifInstance",
+    "CLUSTERING_MOTIFS",
+    "detect_motifs_from_smiles",
+    "detect_motifs_from_data",
+    "compute_motif_affinity_matrix",
+    "compute_motif_cohesion",
+    "get_motif_summary",
     # Data structures
     "Partition",
     "Bipartite",

@@ -18,7 +18,10 @@ from torch import Tensor
 from torch_geometric.data import Data
 
 from src.tokenizers.base import BatchConverter, Tokenizer
-from src.tokenizers.hierarchical.coarsening import SpectralCoarsening
+from src.tokenizers.hierarchical.coarsening import (
+    MotifAwareCoarsening,
+    SpectralCoarsening,
+)
 from src.tokenizers.hierarchical.ordering import OrderingMethod, order_partition_nodes
 from src.tokenizers.hierarchical.structures import (
     Bipartite,
@@ -55,8 +58,10 @@ class HSENTTokenizer(Tokenizer):
         undirected: Whether to treat graphs as undirected.
         seed: Random seed for reproducibility.
         min_community_size: Minimum size for community decomposition.
-        coarsener: SpectralCoarsening instance for hierarchy building.
+        coarsener: Coarsening instance for hierarchy building.
         max_num_nodes: Maximum nodes (determines vocab size).
+        motif_aware: Whether to use motif-aware coarsening.
+        motif_alpha: Weight for motif affinity (if motif_aware=True).
     """
 
     # Special token IDs
@@ -104,6 +109,10 @@ class HSENTTokenizer(Tokenizer):
         k_min_factor: float = 0.7,
         k_max_factor: float = 1.3,
         n_init: int = 100,
+        motif_aware: bool = False,
+        motif_alpha: float = 1.0,
+        motif_patterns: Optional[dict[str, str]] = None,
+        normalize_by_motif_size: bool = False,
     ) -> None:
         """Initialize the H-SENT tokenizer.
 
@@ -118,6 +127,18 @@ class HSENTTokenizer(Tokenizer):
             k_min_factor: Factor for minimum cluster count in spectral clustering.
             k_max_factor: Factor for maximum cluster count in spectral clustering.
             n_init: Number of spectral clustering initializations.
+            motif_aware: Whether to use motif-aware coarsening. If True,
+                uses MotifAwareCoarsening which augments the affinity matrix
+                with motif co-membership to keep motifs together.
+            motif_alpha: Weight for motif affinity matrix (only used if
+                motif_aware=True). Higher values give stronger preference
+                to keeping motifs together. Default 1.0 treats motif
+                co-membership as equivalent to having an edge.
+            motif_patterns: Custom SMARTS patterns for motif detection
+                (only used if motif_aware=True). Defaults to ring-focused
+                patterns from CLUSTERING_MOTIFS.
+            normalize_by_motif_size: Whether to normalize motif contributions
+                by 1/motif_size (only used if motif_aware=True).
         """
         self.node_order = node_order
         self.max_length = max_length
@@ -125,14 +146,29 @@ class HSENTTokenizer(Tokenizer):
         self.undirected = undirected
         self.seed = seed
         self.min_community_size = min_community_size
+        self.motif_aware = motif_aware
+        self.motif_alpha = motif_alpha
 
-        self.coarsener = SpectralCoarsening(
-            k_min_factor=k_min_factor,
-            k_max_factor=k_max_factor,
-            n_init=n_init,
-            min_community_size=min_community_size,
-            seed=seed,
-        )
+        # Select coarsening strategy
+        if motif_aware:
+            self.coarsener = MotifAwareCoarsening(
+                alpha=motif_alpha,
+                motif_patterns=motif_patterns,
+                normalize_by_motif_size=normalize_by_motif_size,
+                k_min_factor=k_min_factor,
+                k_max_factor=k_max_factor,
+                n_init=n_init,
+                min_community_size=min_community_size,
+                seed=seed,
+            )
+        else:
+            self.coarsener = SpectralCoarsening(
+                k_min_factor=k_min_factor,
+                k_max_factor=k_max_factor,
+                n_init=n_init,
+                min_community_size=min_community_size,
+                seed=seed,
+            )
 
         self.max_num_nodes: Optional[int] = None
 
