@@ -1,48 +1,87 @@
 # Architecture Guide
 
-This document describes the architecture and design decisions of the molecular graph generation codebase.
+This document describes the architecture and design decisions of MOSAIC, a motif-preserving graph generation codebase.
+
+## Project Overview
+
+MOSAIC (MOtif-aware Structural Abstraction for graph tokenIzation and Composition) is a framework for state-of-the-art methods in motif-preserving graph generation. The codebase supports:
+
+- **Multiple datasets**: Synthetic and real molecular graphs (MOSES, QM9)
+- **Multiple tokenization schemes**: Flat (SENT) and hierarchical (H-SENT)
+- **Multiple evaluation metrics**: Standard graph metrics and molecular-specific measures
+
+## Directory Structure
+
+```
+MOSAIC/
+├── src/                          # Core source code
+│   ├── data/                     # Data loading and processing
+│   ├── tokenizers/               # Graph tokenization schemes
+│   │   ├── base.py               # Abstract tokenizer interface
+│   │   ├── sent.py               # Flat SENT tokenizer
+│   │   └── hierarchical/         # H-SENT hierarchical tokenizer
+│   │       ├── hsent.py          # Main tokenizer class
+│   │       ├── structures.py     # Partition, Bipartite, HierarchicalGraph
+│   │       ├── coarsening.py     # Spectral clustering
+│   │       ├── ordering.py       # Node ordering strategies
+│   │       └── visualization.py  # Visualization utilities
+│   ├── models/                   # Neural network models
+│   └── evaluation/               # Evaluation metrics
+├── tests/                        # Test suite
+│   └── fixtures/                 # Reusable test fixtures
+├── scripts/                      # Entry point scripts
+├── configs/                      # Hydra configuration files
+├── docs/                         # Documentation
+└── scratch/                      # Development workspace
+```
 
 ## Pipeline Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    TRAINING PIPELINE                                 │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  SMILES String        ┌──────────────────┐                          │
-│  (MOSES/QM9)          │   Molecular      │     PyG Data             │
-│       │               │   Conversion     │                          │
-│       ▼               │                  │                          │
-│  "CCO"               │  - Atom features │     edge_index,          │
-│  "c1ccccc1O"  ──────▶│  - Bond features │────▶ x, edge_attr,       │
-│  ...                 │  - Node/edge     │     smiles               │
-│                      └──────────────────┘                          │
-│                              │                                       │
-│                              ▼                                       │
-│                      ┌──────────────────┐     Token Sequence        │
-│                      │  SENT            │                           │
-│                      │  Tokenizer       │     [SOS, n0, n1, [,      │
-│                      │                  │──▶  n0, ], n2, ..., EOS]  │
-│                      │  - Random walk   │                           │
-│                      │  - Back-edges    │                           │
-│                      └──────────────────┘                           │
-│                              │                                       │
-│                              ▼                                       │
-│                      ┌──────────────────┐                           │
-│                      │  HF Transformer  │                           │
-│                      │  (GPT-2/LLaMA)   │                           │
-│                      │                  │                           │
-│                      │  Next token pred │                           │
-│                      └──────────────────┘                           │
-│                              │                                       │
-│                              ▼                                       │
-│                      ┌──────────────────┐     ┌──────────────────┐  │
-│                      │  Generation      │     │  Evaluation      │  │
-│                      │  (Top-k + Temp)  │────▶│  (Molecular +    │  │
-│                      │  → SMILES conv.  │     │   Motif Metrics) │  │
-│                      └──────────────────┘     └──────────────────┘  │
-│                                                                      │
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           TRAINING PIPELINE                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  SMILES String        ┌──────────────────┐                                  │
+│  (MOSES/QM9)          │   Molecular      │     PyG Data                     │
+│       │               │   Conversion     │                                  │
+│       ▼               │                  │                                  │
+│  "CCO"               │  - Atom features │     edge_index,                  │
+│  "c1ccccc1O"  ──────▶│  - Bond features │────▶ x, edge_attr,               │
+│  ...                 │  - Node/edge     │     smiles                       │
+│                      └──────────────────┘                                  │
+│                              │                                               │
+│               ┌──────────────┴──────────────┐                               │
+│               │                             │                               │
+│               ▼                             ▼                               │
+│      ┌──────────────────┐          ┌──────────────────┐                    │
+│      │  SENT Tokenizer  │          │ H-SENT Tokenizer │                    │
+│      │  (Flat)          │          │ (Hierarchical)   │                    │
+│      │                  │          │                  │                    │
+│      │  - Random walk   │          │  - Spectral      │                    │
+│      │  - Back-edges    │          │    clustering    │                    │
+│      │                  │          │  - Partition +   │                    │
+│      │                  │          │    bipartite     │                    │
+│      └────────┬─────────┘          └────────┬─────────┘                    │
+│               │                             │                               │
+│               └──────────────┬──────────────┘                               │
+│                              │                                               │
+│                              ▼                                               │
+│                      ┌──────────────────┐                                   │
+│                      │  HF Transformer  │                                   │
+│                      │  (GPT-2/LLaMA)   │                                   │
+│                      │                  │                                   │
+│                      │  Next token pred │                                   │
+│                      └──────────────────┘                                   │
+│                              │                                               │
+│                              ▼                                               │
+│                      ┌──────────────────┐     ┌──────────────────┐          │
+│                      │  Generation      │     │  Evaluation      │          │
+│                      │  (Top-k + Temp)  │────▶│  (Molecular +    │          │
+│                      │  → SMILES conv.  │     │   Motif Metrics) │          │
+│                      └──────────────────┘     └──────────────────┘          │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Module Structure
@@ -72,10 +111,34 @@ This document describes the architecture and design decisions of the molecular g
 - `BatchConverter`: Pads and batches token sequences
 
 **sent.py**
-- `SENTTokenizer`: SENT tokenization from AutoGraph
-  - Random walk traversal
+- `SENTTokenizer`: Flat SENT tokenization from AutoGraph
+  - Random walk traversal with deterministic seeding
   - Back-edge encoding with bracket tokens
   - Special tokens: SOS, EOS, RESET, LADJ, RADJ, PAD
+  - Linear sequence length in number of edges
+
+**hierarchical/** - H-SENT Hierarchical Tokenization
+- `HSENTTokenizer`: Main tokenizer class (hsent.py)
+  - Hierarchical decomposition via spectral clustering
+  - Recursive partition encoding with SENT-style walks
+  - Explicit bipartite encoding for inter-community edges
+  - Special tokens: SOS, EOS, PAD, RESET, LADJ, RADJ, LCOM, RCOM, LBIP, RBIP, SEP
+- `Partition`, `Bipartite`, `HierarchicalGraph`: Data structures (structures.py)
+  - `Partition`: Induced subgraph within a community
+  - `Bipartite`: Edges between two communities
+  - `HierarchicalGraph`: Container with `reconstruct()` method
+- `SpectralCoarsening`: Graph partitioning (coarsening.py)
+  - Modularity-optimized spectral clustering
+  - Configurable `min_community_size` for recursion depth
+- Node ordering strategies (ordering.py)
+  - BFS, DFS: Standard traversals from highest-degree node
+  - BFSAC, BFSDC: BFS with ascending/descending cutset weight
+- Visualization utilities (visualization.py)
+  - `visualize_hierarchy()`: HiGen-style block matrix visualization
+  - `visualize_graph_communities()`: Graph with community coloring
+  - `quick_visualize()`: Combined visualization
+
+See [H-SENT Documentation](htokenization.md) for mathematical details.
 
 ### `src/models/` - Model Module
 
@@ -176,6 +239,28 @@ SENT provides a lossless graph-to-sequence encoding that:
 - Preserves all structural information
 - Has linear sequence length in number of edges
 - Is compatible with standard transformer architectures
+
+### Why Hierarchical (H-SENT) Tokenization?
+
+H-SENT extends SENT with explicit hierarchical structure encoding:
+
+| Aspect | SENT (Flat) | H-SENT (Hierarchical) |
+|--------|-------------|----------------------|
+| Structure | Random walk | Community decomposition |
+| Motif preservation | Implicit | Explicit (same community) |
+| Sequence length | O(n + m) | O(n + m + overhead) |
+| Interpretability | Low | High (community structure visible) |
+| Generation constraints | None | Super-edge weights |
+
+H-SENT is preferred when:
+- Motif preservation is critical (molecular generation)
+- Interpretable token sequences are needed
+- The graph has natural community structure
+
+SENT is preferred when:
+- Simplicity is desired
+- Graphs lack hierarchical structure
+- Minimal token overhead is important
 
 ### Why Motif Distribution Analysis?
 

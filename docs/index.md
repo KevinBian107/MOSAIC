@@ -7,7 +7,7 @@ A framework for training and evaluating molecular graph generation models with *
 This codebase provides tools for:
 
 1. **Molecular dataset loading** from MOSES and QM9 benchmarks
-2. **Graph tokenization** using the SENT scheme from AutoGraph
+2. **Graph tokenization** using flat (SENT) and hierarchical (H-SENT) schemes
 3. **Transformer-based molecular generation** models
 4. **AutoGraph-style evaluation metrics** (validity, uniqueness, novelty, FCD, SNN, fragment/scaffold similarity)
 5. **Motif distribution analysis** comparing functional groups and fragments between training and generated molecules
@@ -67,19 +67,39 @@ python scripts/visualize_motifs.py --dataset qm9 --num_molecules 6
 python scripts/visualize_motifs.py --smiles "CC(=O)Nc1ccc(O)cc1" --output paracetamol.png
 ```
 
+### Visualizing Hierarchical Tokenization
+
+```bash
+# Visualize hierarchical graph decomposition of a molecule
+python scripts/visualize_htoken.py --name cholesterol
+
+# Visualize by SMILES
+python scripts/visualize_htoken.py --smiles "CC(=O)OC1=CC=CC=C1C(=O)O" --output aspirin.png
+
+# Full 4-panel view with token sequence
+python scripts/visualize_htoken.py --name caffeine --full
+
+# Run demo with multiple complex molecules
+python scripts/visualize_htoken.py --demo
+```
+
+See [H-SENT Tokenization Guide](htokenization.md) for details.
+
 ## Project Structure
 
 ```
 mosaic/
 ├── src/
-│   ├── data/           # Molecular data loading (MOSES, QM9)
-│   ├── tokenizers/     # Graph tokenization schemes
-│   ├── models/         # Neural network models
-│   └── evaluation/     # Evaluation metrics
-├── configs/            # Hydra configuration files
-├── scripts/            # Training, evaluation, and visualization scripts
-├── tests/              # Test suite
-└── docs/               # Documentation
+│   ├── data/               # Molecular data loading (MOSES, QM9)
+│   ├── tokenizers/         # Graph tokenization schemes
+│   │   ├── sent.py         # Flat SENT tokenizer
+│   │   └── hierarchical/   # H-SENT hierarchical tokenizer
+│   ├── models/             # Neural network models
+│   └── evaluation/         # Evaluation metrics
+├── configs/                # Hydra configuration files
+├── scripts/                # Training, evaluation, and visualization scripts
+├── tests/                  # Test suite
+└── docs/                   # Documentation
 ```
 
 ## Datasets
@@ -162,5 +182,7 @@ Tokens: [SOS, 0, 1, [, 0, ], 2, EOS]
 ## Next Steps
 
 - [Architecture Guide](architecture.md)
+- [H-SENT Tokenization](htokenization.md) - Mathematical formulation and algorithms
+- [H-SENT Visualization](vis_htokenization.md) - Visualization tools and examples
 - [Setup Guide](setup.md)
 - [Contributing Guide](contributing.md)

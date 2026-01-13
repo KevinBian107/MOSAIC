@@ -23,3 +23,7 @@ dependencies:
     - wandb
     - molsets  # MOSES benchmark package
     - fcd  # Frechet ChemNet Distance (optional, for FCD metric)
+    - scikit-learn  # For SpectralClustering in hierarchical tokenization
+    - python-louvain  # For modularity computation in graph coarsening
+    - pytest  # Testing framework
+    - pytest-cov  # Coverage reporting
