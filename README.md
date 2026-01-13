@@ -101,4 +101,6 @@ See the [docs/](docs/) directory for:
 
 ## Acknowledgement
 
-This codebase was developed based on insights from the official [AutoGraph](https://github.com/BorgwardtLab/AutoGraph) repository.
+This codebase was developed based on insights from：
+- The official [AutoGraph](https://github.com/BorgwardtLab/AutoGraph) repository.
+- The official [HiGen](https://github.com/Karami-m/HiGen_main) repository.
