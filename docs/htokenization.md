@@ -55,6 +55,110 @@ The partitioning uses **spectral clustering** with modularity optimization:
 
 4. **Select partition** with maximum modularity
 
+### Motif-Aware Coarsening
+
+Standard spectral clustering optimizes modularity but is agnostic to chemically meaningful structures. This can lead to **ring systems being split** across communities, which destroys motif semantics during generation.
+
+**Motif-aware coarsening** extends spectral clustering by biasing the affinity matrix to keep atoms belonging to the same motif (ring system) together.
+
+#### Modified Affinity Matrix
+
+The key insight is that spectral clustering only sees what the affinity matrix tells it. We augment the adjacency matrix with a **motif co-membership matrix**:
+
+$$A' = A + \alpha \cdot M$$
+
+where:
+- $A$ is the original adjacency matrix
+- $M$ is the motif co-membership matrix
+- $\alpha \geq 0$ is a hyperparameter controlling motif influence
+
+#### Motif Co-Membership Matrix
+
+The matrix $M$ encodes which atom pairs share membership in detected motifs:
+
+$$M_{ij} = \sum_{m \in \mathcal{M}} \mathbf{1}[i \in m \land j \in m]$$
+
+where $\mathcal{M}$ is the set of all detected motif instances and $\mathbf{1}[\cdot]$ is the indicator function.
+
+**Properties of $M$**:
+- Symmetric: $M_{ij} = M_{ji}$
+- Non-negative: $M_{ij} \geq 0$
+- Diagonal: $M_{ii} = $ number of motifs containing atom $i$
+- For overlapping motifs (e.g., fused rings), $M_{ij}$ can be $> 1$
+
+**Example**: For naphthalene (two fused benzene rings sharing atoms 3 and 8):
+- Atoms in benzene 1 only: $M_{ij} = 1$
+- Atoms in benzene 2 only: $M_{ij} = 1$
+- Atoms 3 and 8 (shared): $M_{3,8} = 2$ (both benzenes)
+
+#### Motif Detection
+
+Motifs are detected using **SMARTS patterns** via RDKit when a SMILES string is available on the graph:
+
+```python
+CLUSTERING_MOTIFS = {
+    # Aromatic 6-membered rings
+    "benzene": "c1ccccc1",
+    "pyridine": "c1ccncc1",
+    "pyrimidine": "c1cncnc1",
+    # Aromatic 5-membered rings
+    "pyrrole": "c1cc[nH]c1",
+    "furan": "c1ccoc1",
+    "thiophene": "c1ccsc1",
+    "imidazole": "c1cnc[nH]1",
+    # Fused ring systems
+    "naphthalene": "c1ccc2ccccc2c1",
+    "indole": "c1ccc2[nH]ccc2c1",
+    "quinoline": "c1ccc2ncccc2c1",
+    # Saturated rings
+    "cyclopentane": "C1CCCC1",
+    "cyclohexane": "C1CCCCC1",
+    "cyclohexene": "C1=CCCCC1",
+}
+```
+
+The focus is on **ring systems** rather than functional groups because:
+1. Rings form the structural backbone of molecules
+2. Splitting a ring destroys its chemical identity
+3. Functional groups (OH, COOH) are typically small and naturally cluster
+
+#### Effect on Spectral Clustering
+
+Adding $\alpha M$ to $A$ has several effects:
+
+1. **Increased intra-motif affinity**: Atoms in the same motif have higher pairwise affinity, making them more likely to cluster together.
+
+2. **Modified Laplacian**: The graph Laplacian $L = D - A$ becomes $L' = D' - A'$ where $D'$ incorporates the augmented degrees.
+
+3. **Shifted eigenvectors**: The Fiedler vector and subsequent eigenvectors shift to better respect motif boundaries.
+
+4. **Preserved modularity search**: The $k$-search still optimizes modularity, but on the augmented graph where motifs appear as denser substructures.
+
+#### The α Hyperparameter
+
+The parameter $\alpha$ controls the trade-off between standard modularity optimization and motif preservation:
+
+| $\alpha$ Value | Interpretation |
+|----------------|----------------|
+| $\alpha = 0$ | Standard spectral clustering (no motif awareness) |
+| $\alpha = 1$ | Motif co-membership weighted equally to actual edges |
+| $\alpha = 2$-$5$ | Moderate preference for motif preservation |
+| $\alpha = 10$+ | Strong motif preservation; may reduce modularity |
+
+**Tuning Guidelines**:
+- Start with $\alpha = 1.0$ (default)
+- Increase $\alpha$ if ring systems are being split
+- Decrease $\alpha$ if communities become too large (poor modularity)
+- For molecules with many overlapping motifs, use lower $\alpha$
+
+#### Motif Cohesion Metric
+
+We measure motif preservation using the **cohesion rate**:
+
+$$\text{Cohesion} = \frac{|\{m \in \mathcal{M} : m \subseteq C_i \text{ for some } i\}|}{|\mathcal{M}|}$$
+
+A motif is "intact" if all its atoms belong to a single community. Cohesion of 1.0 means all motifs are preserved; cohesion of 0.0 means all are split.
+
 ### Hierarchical Decomposition
 
 The partition defines two types of substructures:
@@ -406,8 +510,12 @@ class HierarchicalGraph:
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `node_order` | str | `"BFS"` | Ordering strategy: BFS, DFS, BFSAC, BFSDC |
-| `min_community_size` | int | `2` | Minimum nodes before stopping recursion |
+| `min_community_size` | int | `4` | Minimum nodes before stopping recursion |
 | `seed` | int | `None` | Random seed for reproducibility |
+| `motif_aware` | bool | `False` | Enable motif-aware coarsening |
+| `motif_alpha` | float | `1.0` | Motif affinity weight ($\alpha$ parameter) |
+| `motif_patterns` | dict | `None` | Custom SMARTS patterns (uses defaults if None) |
+| `normalize_by_motif_size` | bool | `False` | Normalize M by motif size to prevent large motifs from dominating |
 
 ### Usage Example
 
