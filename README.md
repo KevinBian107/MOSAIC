@@ -1,8 +1,6 @@
 # MOSAIC: MOtif-aware Structural Abstraction for graph tokenIzation and Composition
 This project explores a simple idea: instead of asking generative models to recover motif-level structure implicitly, we encode motifs directly into the representation used for graph generation or treat it as a loss regularization upon training, both independent of the inner processing of sequence transformer.
 
-The codebase is designed for flexibility, currently supporting synthetic datasets and molecular datasets (MOSES, QM9), with multiple tokenization schemes including the original AutoGraph SENT and hierarchical H-SENT tokenization.
-
 ## Quick Start
 
 ### Installation
@@ -96,6 +94,7 @@ MOSAIC/
 See the [docs/](docs/) directory for:
 - [Getting Started](docs/index.md)
 - [Hierarchical Tokenization (H-SENT)](docs/htokenization.md)
+- [Visualize Hierarchical Tokenization (H-SENT)](docs/vis_htokenization.md)
 - [Architecture Guide](docs/architecture.md)
 - [Setup Guide](docs/setup.md)
 - [Contributing Guide](docs/contributing.md)
