@@ -4,6 +4,7 @@ AutoGraph/
 # Scratch/exploration
 scratch/
 tmp/
+figures/
 
 # Python
 __pycache__/
