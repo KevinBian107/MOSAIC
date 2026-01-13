@@ -58,7 +58,7 @@ python scripts/visualize_motifs.py --smiles "c1ccccc1O"
 ### Running Tests
 
 ```bash
-pytest
+pytest tests/ -v
 ```
 
 ## Project Structure
