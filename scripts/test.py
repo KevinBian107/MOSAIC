@@ -5,18 +5,23 @@ This script loads a trained model and evaluates its generation quality
 using molecular metrics (validity, uniqueness, novelty, FCD, etc.)
 and motif distribution metrics.
 
+Supports both MOSAIC and AutoGraph pretrained checkpoints.
+
 Usage:
     python scripts/test.py model.checkpoint_path=/path/to/model.ckpt
     python scripts/test.py data.dataset_name=qm9 model.checkpoint_path=outputs/model.ckpt
+    python scripts/test.py model.checkpoint_path=/path/to/autograph.ckpt model.is_autograph=true
 """
 
 import json
 import logging
 import sys
 from pathlib import Path
+from typing import Optional
 
 import hydra
 import pytorch_lightning as pl
+import torch
 from omegaconf import DictConfig, OmegaConf
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -28,7 +33,60 @@ from src.evaluation.motif_distribution import MotifDistributionMetric
 from src.models.transformer import GraphGeneratorModule
 from src.tokenizers.sent import SENTTokenizer
 
+# Import AutoGraph conversion functions for handling AutoGraph checkpoints
+try:
+    import sys
+    from pathlib import Path
+    autograph_path = Path(__file__).parent.parent / "tmp" / "AutoGraph"
+    if str(autograph_path) not in sys.path:
+        sys.path.insert(0, str(autograph_path))
+    from autograph.evaluation.molsets import build_molecule, mol2smiles
+    AUTOGRAPH_AVAILABLE = True
+except ImportError:
+    AUTOGRAPH_AVAILABLE = False
+
 log = logging.getLogger(__name__)
+
+
+def autograph_graph_to_smiles(graph, atom_decoder: list[str]) -> Optional[str]:
+    """Convert AutoGraph PyG Data object to SMILES using AutoGraph's functions.
+
+    Args:
+        graph: PyG Data object with integer-encoded atom/bond types (AutoGraph format).
+        atom_decoder: List mapping atom type indices to atom symbols.
+
+    Returns:
+        SMILES string or None if conversion fails.
+    """
+    if not AUTOGRAPH_AVAILABLE:
+        return None
+    try:
+        mol = build_molecule(graph, atom_decoder)
+        return mol2smiles(mol)
+    except Exception:
+        return None
+
+
+def is_autograph_checkpoint(checkpoint_path: str) -> bool:
+    """Detect if a checkpoint is from AutoGraph or MOSAIC.
+
+    Args:
+        checkpoint_path: Path to the checkpoint file.
+
+    Returns:
+        True if AutoGraph checkpoint, False if MOSAIC checkpoint.
+    """
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        # AutoGraph checkpoints have a 'cfg' in hyper_parameters
+        if "hyper_parameters" in checkpoint:
+            hparams = checkpoint["hyper_parameters"]
+            # AutoGraph has 'cfg' key, MOSAIC doesn't
+            return "cfg" in hparams
+        return False
+    except Exception as e:
+        log.warning(f"Could not detect checkpoint type: {e}")
+        return False
 
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="test")
@@ -67,11 +125,30 @@ def main(cfg: DictConfig) -> None:
 
     datamodule.setup(stage="test")
 
-    log.info(f"Loading model from {cfg.model.checkpoint_path}...")
-    model = GraphGeneratorModule.load_from_checkpoint(
-        cfg.model.checkpoint_path,
-        tokenizer=tokenizer,
-    )
+    # Detect checkpoint type
+    use_autograph = cfg.model.get("is_autograph", False)
+    if not use_autograph:
+        use_autograph = is_autograph_checkpoint(cfg.model.checkpoint_path)
+
+    if use_autograph:
+        log.info(f"Detected AutoGraph checkpoint at {cfg.model.checkpoint_path}")
+        log.info("Loading model using AutoGraph adapter...")
+        from src.models.autograph_adapter import AutoGraphAdapter
+
+        model = AutoGraphAdapter.load_from_checkpoint(
+            cfg.model.checkpoint_path,
+            tokenizer=tokenizer,
+            sampling_batch_size=cfg.sampling.get("batch_size", 32),
+            sampling_top_k=cfg.sampling.get("top_k", 10),
+            sampling_temperature=cfg.sampling.get("temperature", 1.0),
+            sampling_max_length=cfg.sampling.get("max_length", 2048),
+        )
+    else:
+        log.info(f"Loading MOSAIC model from {cfg.model.checkpoint_path}...")
+        model = GraphGeneratorModule.load_from_checkpoint(
+            cfg.model.checkpoint_path,
+            tokenizer=tokenizer,
+        )
     model.eval()
 
     num_test = len(datamodule.test_smiles)
@@ -85,12 +162,24 @@ def main(cfg: DictConfig) -> None:
     log.info(f"Generated {len(generated_graphs)} graphs")
     log.info(f"Average generation time: {gen_time:.4f}s per sample")
 
-    # Convert to SMILES
+    # Convert to SMILES using appropriate converter
     generated_smiles = []
-    for g in generated_graphs:
-        smiles = graph_to_smiles(g)
-        if smiles:
-            generated_smiles.append(smiles)
+    if use_autograph:
+        # AutoGraph models - use AutoGraph's conversion functions
+        # MOSES atom decoder (from AutoGraph's MOSESDataset): ['C', 'N', 'S', 'O', 'F', 'Cl', 'Br', 'H']
+        atom_decoder = ['C', 'N', 'S', 'O', 'F', 'Cl', 'Br', 'H']
+        log.info("Converting AutoGraph graphs to SMILES...")
+        for g in generated_graphs:
+            smiles = autograph_graph_to_smiles(g, atom_decoder)
+            if smiles:
+                generated_smiles.append(smiles)
+    else:
+        # MOSAIC models - use MOSAIC's conversion function
+        log.info("Converting MOSAIC graphs to SMILES...")
+        for g in generated_graphs:
+            smiles = graph_to_smiles(g)
+            if smiles:
+                generated_smiles.append(smiles)
     log.info(f"Successfully converted {len(generated_smiles)} graphs to SMILES")
 
     log.info("\n" + "=" * 50)
@@ -128,16 +217,6 @@ def main(cfg: DictConfig) -> None:
     else:
         log.info("  FCD: Not available (install moses or fcd package)")
 
-    # Compile all results
-    all_results = {
-        **mol_results,
-        **motif_results,
-        "fcd": fcd_score if not (fcd_score != fcd_score) else None,
-        "generation_time": gen_time,
-        "num_samples": num_samples,
-        "num_valid_smiles": len(generated_smiles),
-    }
-
     # Get motif summary for reference
     log.info("\n" + "=" * 50)
     log.info("MOTIF SUMMARY (Top 10)")
@@ -151,6 +230,17 @@ def main(cfg: DictConfig) -> None:
     log.info("\nFunctional Groups found:")
     for name, count in list(summary["functional_groups"].items())[:10]:
         log.info(f"  {name}: {count}")
+
+    # Compile all results including motif summary
+    all_results = {
+        **mol_results,
+        **motif_results,
+        "fcd": fcd_score if not (fcd_score != fcd_score) else None,
+        "generation_time": gen_time,
+        "num_samples": num_samples,
+        "num_valid_smiles": len(generated_smiles),
+        "motif_summary": summary,  # Add detailed motif counts
+    }
 
     # Save results
     output_path = Path(cfg.logs.path)

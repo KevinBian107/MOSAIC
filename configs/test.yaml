@@ -10,6 +10,7 @@ seed: 42
 # Model configuration
 model:
   checkpoint_path: null  # Required: path to model checkpoint
+  is_autograph: false  # Set to true for AutoGraph checkpoints (auto-detected if false)
 
 # Data configuration
 data:
