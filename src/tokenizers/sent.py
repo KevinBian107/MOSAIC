@@ -214,7 +214,7 @@ class SENTTokenizer(Tokenizer):
         tokens = tokens[
             (tokens != self.pad) & (tokens != self.sos) & (tokens != self.eos)
         ]
-        tokens = tokens.numpy()
+        tokens = tokens.cpu().numpy()
 
         edges: list[tuple[int, int]] = []
         node_idx_to_real: dict[int, int] = {}
