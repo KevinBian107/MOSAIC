@@ -157,10 +157,10 @@ python scripts/train.py model.model_name=gpt2-s
 ```
 
 **Model Sizes:**
-- `gpt2-xs`: 20M params, 6 layers, 384 hidden, 6 heads (fastest, baseline)
-- `gpt2-s`: 50M params, 8 layers, 512 hidden, 8 heads (balanced)
-- `gpt2-m`: 100M params, 12 layers, 768 hidden, 12 heads (high capacity)
-- `gpt2-l`: 200M params, 16 layers, 1024 hidden, 16 heads (research)
+- `gpt2-xxs`: 2.7M params, 4 layers, 256 hidden, 4 heads (ultra-fast, debugging)
+- `gpt2-xs`: 11.1M params, 6 layers, 384 hidden, 12 heads (fast, baseline)
+- `gpt2-s`: 50M params, 12 layers, 768 hidden, 12 heads (balanced)
+- `gpt2-m`: 100M params, 24 layers, 1024 hidden, 16 heads (high capacity)
 
 #### Dataset Configuration
 
@@ -204,7 +204,7 @@ python scripts/train.py data.num_workers=8
 #### Learning Rate and Optimization
 
 ```bash
-# Learning rate (default: 3e-4)
+# Learning rate (default: 6e-4)
 python scripts/train.py model.learning_rate=5e-4
 
 # Weight decay (default: 0.01)
@@ -239,12 +239,18 @@ python scripts/train.py tokenizer.type=sent
 # Hierarchical H-SENT tokenization
 python scripts/train.py tokenizer.type=hsent
 
+# Labeled SENT (encode atom/bond types - RECOMMENDED for molecules)
+python scripts/train.py tokenizer.labeled_graph=true
+
 # Tokenizer parameters
 python scripts/train.py \
     tokenizer.max_length=2048 \
     tokenizer.truncation_length=512 \
-    tokenizer.undirected=true
+    tokenizer.undirected=true \
+    tokenizer.labeled_graph=true
 ```
+
+**Important:** For molecular generation, **always use `tokenizer.labeled_graph=true`**. This encodes chemical information (atom types, bond types) in addition to graph topology. Without labeled graphs, models only learn connectivity and generate chemically invalid molecules.
 
 #### Sampling/Generation Parameters
 
@@ -270,12 +276,12 @@ python scripts/train.py sampling.batch_size=32
 | Category | Parameter | Default | Description |
 |----------|-----------|---------|-------------|
 | **Model** | `model.model_name` | `gpt2-xs` | Model architecture size |
-| | `model.learning_rate` | `3e-4` | AdamW learning rate |
+| | `model.learning_rate` | `6e-4` | AdamW learning rate |
 | | `model.weight_decay` | `0.01` | L2 regularization |
 | | `model.warmup_steps` | `1000` | LR warmup duration |
 | | `model.max_steps` | `100000` | Total training steps |
 | **Data** | `data.dataset_name` | `moses` | Dataset to use |
-| | `data.batch_size` | `64` | Training batch size |
+| | `data.batch_size` | `32` | Training batch size |
 | | `data.num_workers` | `4` | DataLoader workers |
 | | `data.num_train` | `10000` | Training samples (-1 for all) |
 | | `data.num_val` | `1000` | Validation samples |
@@ -292,6 +298,7 @@ python scripts/train.py sampling.batch_size=32
 | | `tokenizer.max_length` | `2048` | Max sequence length |
 | | `tokenizer.truncation_length` | `512` | Truncation length |
 | | `tokenizer.undirected` | `true` | Treat graphs as undirected |
+| | `tokenizer.labeled_graph` | `true` | Encode atom/bond types |
 | **Sampling** | `sampling.num_samples` | `1000` | Samples per evaluation |
 | | `sampling.temperature` | `1.0` | Sampling temperature |
 | | `sampling.top_k` | `10` | Top-k sampling |
@@ -323,20 +330,30 @@ python scripts/train.py \
     trainer.val_check_interval=250
 ```
 
-#### Example 2: Full MOSES Training (GPU required)
+#### Example 2: MOSES Training with Labeled SENT (500K steps)
 ```bash
+# GPT2-XS (11.1M params) - Baseline
 python scripts/train.py \
-    model.model_name=gpt2-s \
-    data.dataset_name=moses \
-    data.num_train=-1 \
-    data.num_val=5000 \
-    data.num_test=5000 \
+    model.model_name=gpt2-xs \
     trainer.max_steps=500000 \
-    trainer.val_check_interval=5000 \
-    trainer.precision=bf16-mixed \
-    data.batch_size=128 \
-    data.num_workers=8
+    trainer.val_check_interval=1500 \
+    sampling.num_samples=1000 \
+    wandb.enabled=true \
+    wandb.project=mosaic-labeled-sent \
+    wandb.name=gpt2-xs-500k-labeled
+
+# GPT2-XXS (2.7M params) - Smaller/faster
+python scripts/train.py \
+    model.model_name=gpt2-xxs \
+    trainer.max_steps=500000 \
+    trainer.val_check_interval=1500 \
+    sampling.num_samples=1000 \
+    wandb.enabled=true \
+    wandb.project=mosaic-labeled-sent \
+    wandb.name=gpt2-xxs-500k-labeled
 ```
+
+**Note:** These commands use labeled SENT (enabled by default in `configs/train.yaml`). Expected validity after 500K steps: 80-95%.
 
 #### Example 3: With Wandb Logging
 ```bash
