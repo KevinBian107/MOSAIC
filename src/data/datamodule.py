@@ -140,13 +140,26 @@ class MolecularDataModule(pl.LightningDataModule):
         if self.tokenizer is not None:
             self.tokenizer.set_num_nodes(self.max_num_nodes)
 
+            # Configure labeled graph support (AutoGraph format)
+            if hasattr(self.tokenizer, 'labeled_graph') and self.tokenizer.labeled_graph:
+                from src.data.molecular import NUM_ATOM_TYPES, NUM_BOND_TYPES
+                self.tokenizer.set_num_node_and_edge_types(
+                    num_node_types=NUM_ATOM_TYPES,
+                    num_edge_types=NUM_BOND_TYPES,
+                )
+
     def _setup_moses(self, stage: Optional[str] = None) -> None:
         """Set up MOSES dataset."""
+        labeled = (self.tokenizer is not None and
+                  hasattr(self.tokenizer, 'labeled_graph') and
+                  self.tokenizer.labeled_graph)
+
         if stage == "fit" or stage is None:
             train_mol = MolecularDataset.from_moses(
                 split="train",
                 max_molecules=self.num_train,
                 include_hydrogens=self.include_hydrogens,
+                labeled=labeled,
             )
             self.train_smiles = train_mol.smiles_list
             self.max_num_nodes = max(self.max_num_nodes, train_mol.max_num_nodes)
@@ -160,6 +173,7 @@ class MolecularDataModule(pl.LightningDataModule):
                 split="test",
                 max_molecules=val_size,
                 include_hydrogens=self.include_hydrogens,
+                labeled=labeled,
             )
             self.val_smiles = val_mol.smiles_list
             self.max_num_nodes = max(self.max_num_nodes, val_mol.max_num_nodes)
@@ -172,6 +186,7 @@ class MolecularDataModule(pl.LightningDataModule):
                 split="test",
                 max_molecules=self.num_test,
                 include_hydrogens=self.include_hydrogens,
+                labeled=labeled,
             )
             self.test_smiles = test_mol.smiles_list
             self.max_num_nodes = max(self.max_num_nodes, test_mol.max_num_nodes)
@@ -183,6 +198,10 @@ class MolecularDataModule(pl.LightningDataModule):
         """Set up QM9 dataset with train/val/test splits."""
         from torch_geometric.datasets import QM9
         import numpy as np
+
+        labeled = (self.tokenizer is not None and
+                  hasattr(self.tokenizer, 'labeled_graph') and
+                  self.tokenizer.labeled_graph)
 
         # Load full QM9 dataset
         full_dataset = QM9(root=f"{self.data_root}/qm9")
@@ -222,6 +241,7 @@ class MolecularDataModule(pl.LightningDataModule):
                 train_smiles,
                 dataset_name="qm9_train",
                 include_hydrogens=self.include_hydrogens,
+                labeled=labeled,
             )
             self.train_smiles = train_mol.smiles_list
             self.max_num_nodes = max(self.max_num_nodes, train_mol.max_num_nodes)
@@ -234,6 +254,7 @@ class MolecularDataModule(pl.LightningDataModule):
                 val_smiles,
                 dataset_name="qm9_val",
                 include_hydrogens=self.include_hydrogens,
+                labeled=labeled,
             )
             self.val_smiles = val_mol.smiles_list
             self.max_num_nodes = max(self.max_num_nodes, val_mol.max_num_nodes)
@@ -247,6 +268,7 @@ class MolecularDataModule(pl.LightningDataModule):
                 test_smiles,
                 dataset_name="qm9_test",
                 include_hydrogens=self.include_hydrogens,
+                labeled=labeled,
             )
             self.test_smiles = test_mol.smiles_list
             self.max_num_nodes = max(self.max_num_nodes, test_mol.max_num_nodes)

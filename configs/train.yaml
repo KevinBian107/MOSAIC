@@ -32,6 +32,7 @@ tokenizer:
   max_length: -1
   truncation_length: 2048
   undirected: true
+  labeled_graph: true  # Enable labeled SENT (encode atom/bond types for molecules)
 
 # Training configuration
 trainer:

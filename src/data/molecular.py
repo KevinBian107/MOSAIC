@@ -33,6 +33,7 @@ def smiles_to_graph(
     smiles: str,
     include_hydrogens: bool = False,
     compute_2d_coords: bool = False,
+    labeled: bool = False,
 ) -> Optional[Data]:
     """Convert a SMILES string to a PyTorch Geometric Data object.
 
@@ -40,6 +41,7 @@ def smiles_to_graph(
         smiles: SMILES string representation of the molecule.
         include_hydrogens: Whether to include explicit hydrogens.
         compute_2d_coords: Whether to compute 2D coordinates.
+        labeled: If True, use integer labels (AutoGraph format). If False, use one-hot features.
 
     Returns:
         PyG Data object with node and edge features, or None if invalid.
@@ -54,60 +56,94 @@ def smiles_to_graph(
     if compute_2d_coords:
         AllChem.Compute2DCoords(mol)
 
-    # Node features
-    node_features = []
-    for atom in mol.GetAtoms():
-        # Atom type (one-hot)
-        atom_type_idx = ATOM_TYPE_TO_IDX.get(atom.GetSymbol(), NUM_ATOM_TYPES - 1)
-        atom_type_onehot = [0] * NUM_ATOM_TYPES
-        atom_type_onehot[atom_type_idx] = 1
+    if labeled:
+        # INTEGER LABELS (AutoGraph format - matches mol_dataset.py lines 147-167)
+        # Atom type indices
+        type_idx = []
+        for atom in mol.GetAtoms():
+            atom_idx = ATOM_TYPE_TO_IDX.get(atom.GetSymbol(), len(ATOM_TYPES))
+            type_idx.append(atom_idx)
 
-        # Additional features
-        features = atom_type_onehot + [
-            atom.GetAtomicNum(),
-            atom.GetFormalCharge(),
-            atom.GetTotalNumHs(),
-            int(atom.GetIsAromatic()),
-            int(atom.IsInRing()),
-            atom.GetDegree(),
-        ]
-        node_features.append(features)
+        # Edge indices and bond type indices
+        row, col, edge_type = [], [], []
+        for bond in mol.GetBonds():
+            start, end = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+            bond_idx = BOND_TYPE_TO_IDX.get(bond.GetBondType(), len(BOND_TYPES))
+            row += [start, end]
+            col += [end, start]
+            edge_type += 2 * [bond_idx]
 
-    if len(node_features) == 0:
-        return None
+        if row:
+            edge_index = torch.tensor([row, col], dtype=torch.long)
+            edge_type = torch.tensor(edge_type, dtype=torch.long)
 
-    x = torch.tensor(node_features, dtype=torch.float)
+            # Sort edges by (row * N + col) - matches AutoGraph line 161-163
+            N = len(type_idx)
+            perm = (edge_index[0] * N + edge_index[1]).argsort()
+            edge_index = edge_index[:, perm]
+            edge_type = edge_type[perm]
+        else:
+            edge_index = torch.zeros((2, 0), dtype=torch.long)
+            edge_type = torch.zeros((0,), dtype=torch.long)
 
-    # Edge index and features
-    edge_indices = []
-    edge_features = []
-    for bond in mol.GetBonds():
-        i = bond.GetBeginAtomIdx()
-        j = bond.GetEndAtomIdx()
-
-        # Bond type (one-hot)
-        bond_type = bond.GetBondType()
-        bond_type_idx = BOND_TYPE_TO_IDX.get(bond_type, NUM_BOND_TYPES - 1)
-        bond_type_onehot = [0] * NUM_BOND_TYPES
-        bond_type_onehot[bond_type_idx] = 1
-
-        # Additional bond features
-        bond_feat = bond_type_onehot + [
-            int(bond.GetIsAromatic()),
-            int(bond.IsInRing()),
-            int(bond.GetIsConjugated()),
-        ]
-
-        # Add both directions (undirected graph)
-        edge_indices.extend([[i, j], [j, i]])
-        edge_features.extend([bond_feat, bond_feat])
-
-    if edge_indices:
-        edge_index = torch.tensor(edge_indices, dtype=torch.long).t().contiguous()
-        edge_attr = torch.tensor(edge_features, dtype=torch.float)
+        x = torch.tensor(type_idx, dtype=torch.long)
+        edge_attr = edge_type
     else:
-        edge_index = torch.zeros((2, 0), dtype=torch.long)
-        edge_attr = torch.zeros((0, NUM_BOND_TYPES + 3), dtype=torch.float)
+        # ONE-HOT FEATURES (Original MOSAIC format)
+        # Node features
+        node_features = []
+        for atom in mol.GetAtoms():
+            # Atom type (one-hot)
+            atom_type_idx = ATOM_TYPE_TO_IDX.get(atom.GetSymbol(), NUM_ATOM_TYPES - 1)
+            atom_type_onehot = [0] * NUM_ATOM_TYPES
+            atom_type_onehot[atom_type_idx] = 1
+
+            # Additional features
+            features = atom_type_onehot + [
+                atom.GetAtomicNum(),
+                atom.GetFormalCharge(),
+                atom.GetTotalNumHs(),
+                int(atom.GetIsAromatic()),
+                int(atom.IsInRing()),
+                atom.GetDegree(),
+            ]
+            node_features.append(features)
+
+        if len(node_features) == 0:
+            return None
+
+        x = torch.tensor(node_features, dtype=torch.float)
+
+        # Edge index and features
+        edge_indices = []
+        edge_features = []
+        for bond in mol.GetBonds():
+            i = bond.GetBeginAtomIdx()
+            j = bond.GetEndAtomIdx()
+
+            # Bond type (one-hot)
+            bond_type = bond.GetBondType()
+            bond_type_idx = BOND_TYPE_TO_IDX.get(bond_type, NUM_BOND_TYPES - 1)
+            bond_type_onehot = [0] * NUM_BOND_TYPES
+            bond_type_onehot[bond_type_idx] = 1
+
+            # Additional bond features
+            bond_feat = bond_type_onehot + [
+                int(bond.GetIsAromatic()),
+                int(bond.IsInRing()),
+                int(bond.GetIsConjugated()),
+            ]
+
+            # Add both directions (undirected graph)
+            edge_indices.extend([[i, j], [j, i]])
+            edge_features.extend([bond_feat, bond_feat])
+
+        if edge_indices:
+            edge_index = torch.tensor(edge_indices, dtype=torch.long).t().contiguous()
+            edge_attr = torch.tensor(edge_features, dtype=torch.float)
+        else:
+            edge_index = torch.zeros((2, 0), dtype=torch.long)
+            edge_attr = torch.zeros((0, NUM_BOND_TYPES + 3), dtype=torch.float)
 
     # Store 2D coordinates if computed
     pos = None
@@ -135,7 +171,7 @@ def graph_to_smiles(data: Data) -> Optional[str]:
     """Convert a PyTorch Geometric Data object back to SMILES.
 
     Args:
-        data: PyG Data object with node and edge features.
+        data: PyG Data object with node and edge features (integer labels or one-hot).
 
     Returns:
         SMILES string or None if conversion fails.
@@ -147,21 +183,33 @@ def graph_to_smiles(data: Data) -> Optional[str]:
         # Create empty editable molecule
         mol = Chem.RWMol()
 
+        # Detect if using integer labels (AutoGraph) or one-hot features (original)
+        labeled = (data.x.dtype == torch.long or data.x.dtype == torch.int64)
+
         # Add atoms
         for i in range(num_nodes):
-            node_feat = data.x[i].numpy()
-            # Extract atom type from one-hot encoding
-            atom_type_idx = int(np.argmax(node_feat[:NUM_ATOM_TYPES]))
-            if atom_type_idx < len(ATOM_TYPES):
-                atom_symbol = ATOM_TYPES[atom_type_idx]
+            if labeled:
+                # INTEGER LABELS (AutoGraph format)
+                atom_type_idx = int(data.x[i])
+                if atom_type_idx < len(ATOM_TYPES):
+                    atom_symbol = ATOM_TYPES[atom_type_idx]
+                else:
+                    atom_symbol = "C"  # Default to carbon for unknown
             else:
-                atom_symbol = "C"  # Default to carbon for unknown
+                # ONE-HOT FEATURES (Original MOSAIC format)
+                node_feat = data.x[i].numpy()
+                # Extract atom type from one-hot encoding
+                atom_type_idx = int(np.argmax(node_feat[:NUM_ATOM_TYPES]))
+                if atom_type_idx < len(ATOM_TYPES):
+                    atom_symbol = ATOM_TYPES[atom_type_idx]
+                else:
+                    atom_symbol = "C"  # Default to carbon for unknown
 
             atom = Chem.Atom(atom_symbol)
 
-            # Set formal charge if available
-            if len(node_feat) > NUM_ATOM_TYPES + 1:
-                formal_charge = int(node_feat[NUM_ATOM_TYPES + 1])
+            # Set formal charge if available (only for one-hot features)
+            if not labeled and len(data.x[i]) > NUM_ATOM_TYPES + 1:
+                formal_charge = int(data.x[i][NUM_ATOM_TYPES + 1])
                 atom.SetFormalCharge(formal_charge)
 
             mol.AddAtom(atom)
@@ -176,8 +224,14 @@ def graph_to_smiles(data: Data) -> Optional[str]:
 
                 # Extract bond type from edge features
                 if data.edge_attr is not None and data.edge_attr.size(0) > k:
-                    edge_feat = data.edge_attr[k].numpy()
-                    bond_type_idx = int(np.argmax(edge_feat[:NUM_BOND_TYPES]))
+                    if labeled:
+                        # INTEGER LABELS (AutoGraph format)
+                        bond_type_idx = int(data.edge_attr[k])
+                    else:
+                        # ONE-HOT FEATURES (Original MOSAIC format)
+                        edge_feat = data.edge_attr[k].numpy()
+                        bond_type_idx = int(np.argmax(edge_feat[:NUM_BOND_TYPES]))
+
                     if bond_type_idx < len(BOND_TYPES):
                         bond_type = BOND_TYPES[bond_type_idx]
                     else:
@@ -205,12 +259,30 @@ def load_moses_dataset(split: str = "train") -> list[str]:
     Returns:
         List of SMILES strings.
     """
+    # Workaround: Read directly from CSV files to avoid rdkit.six import error
+    import pandas as pd
+    import os
+
+    csv_file = f"data/moses/{split}.csv"
+    if os.path.exists(csv_file):
+        df = pd.read_csv(csv_file)
+        # MOSES CSV has 'SMILES' column
+        if 'SMILES' in df.columns:
+            return df['SMILES'].tolist()
+        elif 'smiles' in df.columns:
+            return df['smiles'].tolist()
+        else:
+            # Assume first column is SMILES
+            return df.iloc[:, 0].tolist()
+
+    # Fallback to moses package if CSV doesn't exist
     try:
         import moses
         return moses.get_dataset(split)
     except ImportError:
         raise ImportError(
-            "MOSES package not installed. Install with: pip install molsets"
+            f"MOSES CSV file not found at {csv_file} and moses package not installed. "
+            "Download MOSES data or install with: pip install molsets"
         )
 
 
@@ -260,6 +332,7 @@ class MolecularDataset:
         dataset_name: str = "molecular",
         include_hydrogens: bool = False,
         max_molecules: Optional[int] = None,
+        labeled: bool = False,
     ) -> None:
         """Initialize molecular dataset.
 
@@ -268,9 +341,11 @@ class MolecularDataset:
             dataset_name: Name identifier for the dataset.
             include_hydrogens: Whether to include explicit hydrogens.
             max_molecules: Maximum number of molecules to include.
+            labeled: If True, use integer labels (AutoGraph format).
         """
         self.dataset_name = dataset_name
         self.include_hydrogens = include_hydrogens
+        self.labeled = labeled
 
         if max_molecules is not None:
             smiles_list = smiles_list[:max_molecules]
@@ -279,7 +354,11 @@ class MolecularDataset:
         self.graphs = []
 
         for smiles in smiles_list:
-            graph = smiles_to_graph(smiles, include_hydrogens=include_hydrogens)
+            graph = smiles_to_graph(
+                smiles,
+                include_hydrogens=include_hydrogens,
+                labeled=labeled,
+            )
             if graph is not None:
                 graph.dataset_name = dataset_name
                 self.smiles_list.append(smiles)
@@ -304,6 +383,7 @@ class MolecularDataset:
         split: str = "train",
         max_molecules: Optional[int] = None,
         include_hydrogens: bool = False,
+        labeled: bool = False,
     ) -> "MolecularDataset":
         """Create dataset from MOSES.
 
@@ -311,6 +391,7 @@ class MolecularDataset:
             split: Dataset split ('train', 'test', 'test_scaffolds').
             max_molecules: Maximum number of molecules to load.
             include_hydrogens: Whether to include explicit hydrogens.
+            labeled: If True, use integer labels (AutoGraph format).
 
         Returns:
             MolecularDataset instance.
@@ -321,6 +402,7 @@ class MolecularDataset:
             dataset_name=f"moses_{split}",
             include_hydrogens=include_hydrogens,
             max_molecules=max_molecules,
+            labeled=labeled,
         )
 
     @classmethod
@@ -329,6 +411,7 @@ class MolecularDataset:
         root: str = "data/qm9",
         max_molecules: Optional[int] = None,
         include_hydrogens: bool = False,
+        labeled: bool = False,
     ) -> "MolecularDataset":
         """Create dataset from QM9.
 
@@ -336,6 +419,7 @@ class MolecularDataset:
             root: Root directory for data storage.
             max_molecules: Maximum number of molecules to load.
             include_hydrogens: Whether to include explicit hydrogens.
+            labeled: If True, use integer labels (AutoGraph format).
 
         Returns:
             MolecularDataset instance.
@@ -346,4 +430,5 @@ class MolecularDataset:
             dataset_name="qm9",
             include_hydrogens=include_hydrogens,
             max_molecules=max_molecules,
+            labeled=labeled,
         )
