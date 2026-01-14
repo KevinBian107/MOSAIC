@@ -141,11 +141,29 @@ def main(cfg: DictConfig) -> None:
                 checkpoint_vocab_size = checkpoint["state_dict"][wte_key].shape[0]
                 log.info(f"Checkpoint vocab size: {checkpoint_vocab_size}")
 
-                # Update tokenizer to match checkpoint vocab size
-                # vocab_size = idx_offset (6) + max_num_nodes
-                checkpoint_max_num_nodes = checkpoint_vocab_size - tokenizer.idx_offset
-                log.info(f"Setting tokenizer max_num_nodes to {checkpoint_max_num_nodes}")
-                tokenizer.set_num_nodes(checkpoint_max_num_nodes)
+                # Detect if this is a labeled graph model
+                # Unlabeled: vocab_size = idx_offset (6) + max_num_nodes
+                # Labeled: vocab_size = idx_offset (6) + max_num_nodes + num_node_types + num_edge_types
+                from src.data.molecular import NUM_ATOM_TYPES, NUM_BOND_TYPES
+
+                # Try labeled first
+                checkpoint_max_num_nodes_labeled = checkpoint_vocab_size - tokenizer.idx_offset - NUM_ATOM_TYPES - NUM_BOND_TYPES
+
+                if checkpoint_max_num_nodes_labeled > 0 and checkpoint_max_num_nodes_labeled <= 100:
+                    # This is likely a labeled graph model
+                    log.info("Detected labeled SENT checkpoint")
+                    tokenizer.labeled_graph = True
+                    tokenizer.set_num_nodes(checkpoint_max_num_nodes_labeled)
+                    tokenizer.set_num_node_and_edge_types(
+                        num_node_types=NUM_ATOM_TYPES,
+                        num_edge_types=NUM_BOND_TYPES,
+                    )
+                    log.info(f"Set tokenizer: max_num_nodes={checkpoint_max_num_nodes_labeled}, labeled_graph=True")
+                else:
+                    # Unlabeled model
+                    checkpoint_max_num_nodes = checkpoint_vocab_size - tokenizer.idx_offset
+                    log.info(f"Setting tokenizer max_num_nodes to {checkpoint_max_num_nodes}")
+                    tokenizer.set_num_nodes(checkpoint_max_num_nodes)
 
     if use_autograph:
         log.info(f"Detected AutoGraph checkpoint at {cfg.model.checkpoint_path}")
