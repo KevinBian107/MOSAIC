@@ -28,6 +28,15 @@ class TransformerLM(nn.Module):
     """
 
     MODEL_SIZES = {
+        "xxs": {
+            "hidden_size": 256,
+            "num_hidden_layers": 4,
+            "num_attention_heads": 4,
+            "intermediate_size": 4 * 256,
+            "n_embd": 256,
+            "n_head": 4,
+            "n_layer": 4,
+        },
         "xs": {
             "hidden_size": 384,
             "num_hidden_layers": 6,
@@ -159,7 +168,11 @@ class TransformerLM(nn.Module):
             if return_tokens:
                 results.append(generated[i])
             else:
-                results.append(self.tokenizer.decode(generated[i]))
+                try:
+                    results.append(self.tokenizer.decode(generated[i]))
+                except Exception:
+                    # Skip invalid sequences (will be counted as invalid in metrics)
+                    pass
 
         return results
 
