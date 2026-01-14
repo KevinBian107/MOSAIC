@@ -303,6 +303,8 @@ def compare_tokenization(
     output: str | None = None,
     show: bool = True,
     seed: int = 42,
+    motif_aware: bool = False,
+    motif_alpha: float = 10.0,
 ) -> plt.Figure | None:
     """Create side-by-side comparison of SENT and H-SENT tokenization.
 
@@ -312,6 +314,8 @@ def compare_tokenization(
         output: Output path to save figure.
         show: Whether to display the plot.
         seed: Random seed.
+        motif_aware: Enable motif-aware coarsening for H-SENT.
+        motif_alpha: Motif affinity weight (alpha parameter).
 
     Returns:
         Matplotlib figure or None if invalid SMILES.
@@ -325,11 +329,18 @@ def compare_tokenization(
     if data is None:
         return None
 
+    # Store SMILES on data for motif detection
+    data.smiles = smiles
+
     # Create tokenizers
     sent_tokenizer = SENTTokenizer(seed=seed)
     sent_tokenizer.set_num_nodes(max(100, data.num_nodes + 20))
 
-    hsent_tokenizer = HSENTTokenizer(seed=seed)
+    hsent_tokenizer = HSENTTokenizer(
+        seed=seed,
+        motif_aware=motif_aware,
+        motif_alpha=motif_alpha,
+    )
     hsent_tokenizer.set_num_nodes(max(100, data.num_nodes + 20))
 
     # Tokenize
@@ -359,8 +370,11 @@ def compare_tokenization(
 
     # Right column: H-SENT
     ax2 = fig.add_subplot(2, 2, 2)
+    hsent_label = "H-SENT"
+    if motif_aware:
+        hsent_label += f" (motif-aware, α={motif_alpha})"
     plot_graph_with_communities(ax2, data, hg,
-                                f"H-SENT: {hg.num_communities} Communities")
+                                f"{hsent_label}: {hg.num_communities} Communities")
 
     ax4 = fig.add_subplot(2, 2, 4)
     plot_tokens(ax4, hsent_tokens.tolist(), hsent_tokenizer,
@@ -386,7 +400,12 @@ def compare_tokenization(
     return fig
 
 
-def run_demo(output_dir: str | None = None, show: bool = True):
+def run_demo(
+    output_dir: str | None = None,
+    show: bool = True,
+    motif_aware: bool = False,
+    motif_alpha: float = 10.0,
+):
     """Run demo with several molecules."""
     demo_molecules = [
         ("benzene", MOLECULES["benzene"]),
@@ -399,18 +418,23 @@ def run_demo(output_dir: str | None = None, show: bool = True):
         print(f"\n{'='*60}")
         print(f"Comparing tokenization: {name}")
         print(f"SMILES: {smiles}")
+        if motif_aware:
+            print(f"Motif-aware coarsening: α={motif_alpha}")
         print("=" * 60)
 
         output = None
         if output_dir:
             Path(output_dir).mkdir(parents=True, exist_ok=True)
-            output = f"{output_dir}/{name}_comparison.png"
+            suffix = "_motif" if motif_aware else ""
+            output = f"{output_dir}/{name}_comparison{suffix}.png"
 
         compare_tokenization(
             smiles,
             name=name.replace("_", " ").title(),
             output=output,
             show=show,
+            motif_aware=motif_aware,
+            motif_alpha=motif_alpha,
         )
 
 
@@ -423,6 +447,8 @@ Examples:
     %(prog)s --smiles "c1ccccc1"
     %(prog)s --name caffeine --output caffeine_compare.png
     %(prog)s --demo --output-dir ./figures
+    %(prog)s --name cholesterol --motif-aware --alpha 10.0
+    %(prog)s --demo --motif-aware --output-dir ./figures
 
 Available molecules: {', '.join(sorted(MOLECULES.keys()))}
 """,
@@ -435,6 +461,14 @@ Available molecules: {', '.join(sorted(MOLECULES.keys()))}
     parser.add_argument("--list", action="store_true", help="List available molecules")
     parser.add_argument("--no-show", action="store_true", help="Don't display (only save)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument(
+        "--motif-aware", action="store_true",
+        help="Enable motif-aware coarsening for H-SENT"
+    )
+    parser.add_argument(
+        "--alpha", type=float, default=10.0,
+        help="Motif affinity weight for motif-aware coarsening (default: 10.0)"
+    )
 
     args = parser.parse_args()
 
@@ -447,7 +481,12 @@ Available molecules: {', '.join(sorted(MOLECULES.keys()))}
         return
 
     if args.demo:
-        run_demo(output_dir=args.output_dir, show=not args.no_show)
+        run_demo(
+            output_dir=args.output_dir,
+            show=not args.no_show,
+            motif_aware=args.motif_aware,
+            motif_alpha=args.alpha,
+        )
         return
 
     # Get SMILES
@@ -472,6 +511,8 @@ Available molecules: {', '.join(sorted(MOLECULES.keys()))}
         output=args.output,
         show=not args.no_show,
         seed=args.seed,
+        motif_aware=args.motif_aware,
+        motif_alpha=args.alpha,
     )
 
 

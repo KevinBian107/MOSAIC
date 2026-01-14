@@ -4,7 +4,7 @@ This document provides a comprehensive technical description of the Hierarchical
 
 ## Introduction
 
-H-SENT extends the flat SENT tokenization with hierarchical graph decomposition, enabling explicit encoding of multi-level graph structure. The approach is inspired by [HiGen](https://arxiv.org/abs/2305.19843)'s hierarchical generation paradigm, adapted for transformer-based autoregressive models.
+H-SENT extends the flat SENT tokenization with hierarchical graph decomposition, enabling explicit encoding of multi-level graph structure. The approach is inspired by [HiGen](https://arxiv.org/abs/2305.19337)'s hierarchical generation paradigm, adapted for transformer-based autoregressive models.
 
 ### Motivation
 
@@ -261,15 +261,54 @@ Inter-community edges are encoded as:
 
 where `left_local` and `right_local` are **local indices** within their respective partitions.
 
+### Token Structure Reference
+
+All integer values are encoded as `value + IDX_OFFSET` (where IDX_OFFSET = 11).
+
+**Full sequence structure:**
+```
+[SOS] <num_communities> <partitions...> <bipartites...> [EOS]
+```
+
+**Partition block:**
+```
+[LCOM] <part_id> <num_nodes> <global_idx_0> ... <global_idx_{n-1}> [SEP] <sent_walk> [RCOM]
+        ↓          ↓              ↓
+      which      how many     mapping from local → global indices
+    partition    nodes        (local 0 = global_idx_0, etc.)
+```
+
+**SENT walk** (inside partition, uses local indices):
+```
+<node_0> <node_1> [LADJ] <back_edge_targets...> [RADJ] <node_2> ...
+   ↓        ↓               ↓
+ start   walk to      edges to previously visited nodes
+         next node    (not covered by the walk)
+```
+
+**Bipartite block:**
+```
+[LBIP] <left_part_id> <right_part_id> <num_edges> <left_0> <right_0> ... [RBIP]
+            ↓               ↓             ↓          ↓        ↓
+       partition i     partition j    edge count   local    local
+                                                   idx in   idx in
+                                                   part i   part j
+```
+
 ### Example: Two Connected Triangles
 
 Consider a graph with nodes $\{0,1,2,3,4,5\}$ forming two triangles $(0,1,2)$ and $(3,4,5)$ connected by edge $(2,3)$:
 
 ```
 Graph Structure:
-    0---1          3---4
-     \ /    2-3     \ /
-      2-----------3  5
+
+    0---1       4---5
+     \ /         \ /
+      2-----------3
+
+  Triangle 1    Triangle 2
+  (0,1,2)       (3,4,5)
+         edge (2,3)
 ```
 
 **Hierarchical Decomposition**:
@@ -281,15 +320,27 @@ Graph Structure:
 ```
 [SOS]
 13                                    # 2 communities (2 + 11 = 13)
-[LCOM] 11 13 11 12 13 [SEP]           # Part 0: 2 nodes [0,1,2]
-    11 12 14 [LADJ] 12 [RADJ]         # SENT walk with back-edge
+[LCOM] 11 14 11 12 13 [SEP]           # Part 0: id=0, 3 nodes, globals=[0,1,2]
+    11 12 13 [LADJ] 11 [RADJ]         # Walk 0→1→2, back-edge 2→0
 [RCOM]
-[LCOM] 12 13 14 15 16 [SEP]           # Part 1: 2 nodes [3,4,5]
-    14 15 17 [LADJ] 15 [RADJ]         # SENT walk with back-edge
+[LCOM] 12 14 14 15 16 [SEP]           # Part 1: id=1, 3 nodes, globals=[3,4,5]
+    14 15 16 [LADJ] 14 [RADJ]         # Walk 3→4→5, back-edge 5→3
 [RCOM]
-[LBIP] 11 12 11 15 16 17 [RBIP]       # Bipartite: 1 edge
+[LBIP] 11 12 12 13 11 [RBIP]          # Bipartite: parts 0&1, 1 edge, local_2→local_0
 [EOS]
 ```
+
+**Decoding the tokens** (IDX_OFFSET = 11):
+
+| Token | Value | Meaning |
+|-------|-------|---------|
+| 13 | 2 | 2 communities |
+| 11 | 0 | partition id / node 0 / local index 0 |
+| 12 | 1 | partition id / node 1 / local index 1 |
+| 13 | 2 | node 2 / local index 2 |
+| 14 | 3 | 3 nodes / node 3 |
+| 15 | 4 | node 4 |
+| 16 | 5 | node 5 |
 
 ## Decoding Algorithm
 
@@ -550,7 +601,7 @@ assert reconstructed.num_nodes == graph.num_nodes
 
 ## References
 
-1. **HiGen**: Hierarchical Graph Generative Networks - [arXiv:2305.19843](https://arxiv.org/abs/2305.19843)
+1. **HiGen**: Hierarchical Graph Generative Networks - [arXiv:2305.19843](https://arxiv.org/abs/2305.19337)
 2. **AutoGraph**: SENT tokenization scheme - [arXiv:2306.10310](https://arxiv.org/abs/2306.10310)
 3. **Spectral Clustering**: Ng, Jordan, Weiss (2001) - On Spectral Clustering
 4. **Modularity**: Newman (2006) - Modularity and community structure in networks
