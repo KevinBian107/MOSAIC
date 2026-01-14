@@ -196,6 +196,7 @@ def main(cfg: DictConfig) -> None:
             max_length=cfg.tokenizer.max_length,
             truncation_length=cfg.tokenizer.truncation_length,
             undirected=cfg.tokenizer.undirected,
+            labeled_graph=cfg.tokenizer.get("labeled_graph", False),
             seed=cfg.seed,
         )
 
