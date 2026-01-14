@@ -4,7 +4,7 @@ This document describes the hierarchical graph tokenization system and how to vi
 
 ## Overview
 
-H-SENT (Hierarchical SENT) extends the SENT tokenization scheme with hierarchical graph decomposition inspired by [HiGen](https://arxiv.org/abs/2305.19843). Instead of treating the graph as a flat structure, H-SENT:
+H-SENT (Hierarchical SENT) extends the SENT tokenization scheme with hierarchical graph decomposition inspired by [HiGen](https://arxiv.org/abs/2305.19337). Instead of treating the graph as a flat structure, H-SENT:
 
 1. **Decomposes** the graph into communities using spectral clustering
 2. **Encodes** each community (partition) separately using SENT-style walks
@@ -32,13 +32,38 @@ python scripts/visualize_htoken.py --name morphine --full
 
 # Run demo with multiple complex molecules
 python scripts/visualize_htoken.py --demo --output-dir ./figures
+```
 
+Comparing SENT and H-SENT:
+
+```python
 # Run demo comparing H-SENT and SENT
 python scripts/visualize_tokenization.py --demo --output-dir ./figures
+python scripts/visualize_tokenization.py --motif-aware --alpha 10.0 --name cholesterol
+```
 
+Compare standard vs motif-aware coarsening:
+
+```python
 # Compare standard vs motif-aware coarsening
 python scripts/visualize_motif_coarsening.py --name cholesterol --alpha 10.0
 python scripts/visualize_motif_coarsening.py --demo --output-dir ./figures
+```
+
+Visualize the $M$ matrix:
+
+```python
+# Custom SMILES                                                                                            
+python scripts/visualize_m.py --smiles "c1ccc2ccccc2c1" --name naphthalene                                 
+                                                                                                            
+# Demo with 9 complex molecules                                                                            
+python scripts/visualize_m.py --demo --output-dir ./figures                                                
+                                                                                                            
+# List all molecules with motif counts                                                                     
+python scripts/visualize_m.py --list                                                                       
+                                                                                                            
+# Normalize M by motif size (prevents large motifs from dominating)                                        
+python scripts/visualize_m.py --name cholesterol --normalize
 ```
 
 ### Available Molecules
@@ -281,5 +306,5 @@ pip install scikit-learn
 
 ## References
 
-- [HiGen: Hierarchical Graph Generative Networks](https://arxiv.org/abs/2305.19843) - Hierarchical decomposition approach
+- [HiGen: Hierarchical Graph Generative Networks](https://arxiv.org/abs/2305.19337) - Hierarchical decomposition approach
 - [AutoGraph](https://arxiv.org/abs/2306.10310) - SENT tokenization scheme
