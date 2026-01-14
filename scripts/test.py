@@ -130,6 +130,23 @@ def main(cfg: DictConfig) -> None:
     if not use_autograph:
         use_autograph = is_autograph_checkpoint(cfg.model.checkpoint_path)
 
+    # For MOSAIC checkpoints, extract vocab size and update tokenizer
+    if not use_autograph:
+        log.info(f"Extracting vocab size from checkpoint: {cfg.model.checkpoint_path}")
+        checkpoint = torch.load(cfg.model.checkpoint_path, map_location="cpu")
+        if "state_dict" in checkpoint:
+            # Extract vocab size from embedding weight shape
+            wte_key = "model.model.transformer.wte.weight"
+            if wte_key in checkpoint["state_dict"]:
+                checkpoint_vocab_size = checkpoint["state_dict"][wte_key].shape[0]
+                log.info(f"Checkpoint vocab size: {checkpoint_vocab_size}")
+
+                # Update tokenizer to match checkpoint vocab size
+                # vocab_size = idx_offset (6) + max_num_nodes
+                checkpoint_max_num_nodes = checkpoint_vocab_size - tokenizer.idx_offset
+                log.info(f"Setting tokenizer max_num_nodes to {checkpoint_max_num_nodes}")
+                tokenizer.set_num_nodes(checkpoint_max_num_nodes)
+
     if use_autograph:
         log.info(f"Detected AutoGraph checkpoint at {cfg.model.checkpoint_path}")
         log.info("Loading model using AutoGraph adapter...")
