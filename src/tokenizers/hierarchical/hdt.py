@@ -321,6 +321,10 @@ class HDTTokenizer(Tokenizer):
     ) -> None:
         """Recursive DFS serialization of hierarchical graph.
 
+        Each partition is wrapped with ENTER/EXIT tokens to preserve partition
+        boundaries during roundtrip. The traversal follows the pattern:
+        Parent -> Child1 -> (back to Parent) -> Child2 -> (back to Parent) -> ...
+
         Args:
             hg: HierarchicalGraph at current level.
             level: Current hierarchy level (0 = root).
@@ -334,14 +338,19 @@ class HDTTokenizer(Tokenizer):
         tokens.append(self.IDX_OFFSET + level)
         tokens.append(self.IDX_OFFSET + local_id)
 
-        # Process each partition
+        # Process each partition - ALWAYS wrap with ENTER/EXIT to preserve
+        # partition boundaries during roundtrip
         for part in hg.partitions:
+            # Emit ENTER for this partition
+            tokens.append(self.ENTER)
+            tokens.append(self.IDX_OFFSET + level + 1)
+            tokens.append(self.IDX_OFFSET + part.part_id)
+
             if part.child_hierarchy is not None:
-                # Recurse into nested hierarchy
-                self._dfs_serialize(
+                # Recurse into nested hierarchy's partitions
+                self._serialize_nested_partitions(
                     hg=part.child_hierarchy,
                     level=level + 1,
-                    local_id=part.part_id,
                     tokens=tokens,
                     visited_atoms=visited_atoms,
                     full_adj=full_adj,
@@ -350,8 +359,53 @@ class HDTTokenizer(Tokenizer):
                 # Leaf partition: emit atoms with back-edges
                 self._serialize_atoms(part, tokens, visited_atoms, full_adj)
 
-        # Emit exit token
+            # Emit EXIT for this partition (back to parent level)
+            tokens.append(self.EXIT)
+
+        # Emit exit token for the current level
         tokens.append(self.EXIT)
+
+    def _serialize_nested_partitions(
+        self,
+        hg: HierarchicalGraph,
+        level: int,
+        tokens: list[int],
+        visited_atoms: list[int],
+        full_adj: dict[int, set[int]],
+    ) -> None:
+        """Serialize partitions within a nested hierarchy.
+
+        This handles the case where a partition has a child_hierarchy.
+        Each partition in the child hierarchy gets its own ENTER/EXIT wrapper.
+
+        Args:
+            hg: Child HierarchicalGraph to serialize.
+            level: Current hierarchy level.
+            tokens: Token list to append to.
+            visited_atoms: List of already visited atom indices.
+            full_adj: Full adjacency map including bipartite edges.
+        """
+        for part in hg.partitions:
+            # Emit ENTER for this partition
+            tokens.append(self.ENTER)
+            tokens.append(self.IDX_OFFSET + level + 1)
+            tokens.append(self.IDX_OFFSET + part.part_id)
+
+            if part.child_hierarchy is not None:
+                # Recurse deeper
+                self._serialize_nested_partitions(
+                    hg=part.child_hierarchy,
+                    level=level + 1,
+                    tokens=tokens,
+                    visited_atoms=visited_atoms,
+                    full_adj=full_adj,
+                )
+            else:
+                # Leaf partition: emit atoms
+                self._serialize_atoms(part, tokens, visited_atoms, full_adj)
+
+            # Emit EXIT for this partition
+            tokens.append(self.EXIT)
 
     def _serialize_atoms(
         self,

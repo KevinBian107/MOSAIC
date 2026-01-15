@@ -1,45 +1,59 @@
-# Visualize Hierarchical Graph Tokenization (H-SENT)
+# Visualize Graph Tokenization Schemes
 
-This document describes the hierarchical graph tokenization system and how to visualize it.
+This document describes the graph tokenization systems and how to visualize them.
 
 ## Overview
 
-H-SENT (Hierarchical SENT) extends the SENT tokenization scheme with hierarchical graph decomposition inspired by [HiGen](https://arxiv.org/abs/2305.19337). Instead of treating the graph as a flat structure, H-SENT:
+MOSAIC provides three tokenization schemes for converting graphs to sequences:
 
-1. **Decomposes** the graph into communities using spectral clustering
-2. **Encodes** each community (partition) separately using SENT-style walks
-3. **Connects** communities via bipartite edge encodings
-4. **Reconstructs** the original graph from tokens (roundtrip verified)
+| Scheme | Description | Key Feature |
+|--------|-------------|-------------|
+| **SENT** | Flat random walk with back-edges | Simple, baseline |
+| **H-SENT** | Hierarchical with explicit partition blocks | Interpretable structure |
+| **HDT** | Hierarchical DFS with implicit nesting | ~45% fewer tokens |
 
 ## Visualization
 
-### Quick Start
+### Quick Start: Compare All Three Schemes
 
 ```bash
 conda activate mosaic
 
-# Visualize a molecule by name
+# Compare SENT, H-SENT, and HDT on a molecule
+python scripts/visualize_tokenization.py --name cholesterol
+
+# Run demo with complex molecules (cholesterol, morphine, caffeine, penicillin)
+python scripts/visualize_tokenization.py --demo --output-dir ./figures
+
+# Save without displaying
+python scripts/visualize_tokenization.py --name morphine --output morphine.png --no-show
+
+# List available molecules
+python scripts/visualize_tokenization.py --list
+```
+
+### Visualization Panels
+
+The 4-column comparison shows:
+
+| Panel | Description |
+|-------|-------------|
+| **Molecule with Motifs** | Original graph with detected ring structures highlighted |
+| **SENT** | Random walk traversal with visit order on nodes |
+| **H-SENT** | Community structure with cross-community edges |
+| **HDT** | Hierarchical tree with bidirectional parent↔child arrows |
+
+### H-SENT Only Visualization
+
+```bash
+# Visualize H-SENT hierarchical structure
 python scripts/visualize_htoken.py --name cholesterol
-
-# Visualize by SMILES string
-python scripts/visualize_htoken.py --smiles "CC(=O)OC1=CC=CC=C1C(=O)O"
-
-# Save to file without displaying
-python scripts/visualize_htoken.py --name caffeine --output caffeine.png --no-show
 
 # Full 4-panel view (includes token sequence)
 python scripts/visualize_htoken.py --name morphine --full
 
-# Run demo with multiple complex molecules
+# Run H-SENT demo
 python scripts/visualize_htoken.py --demo --output-dir ./figures
-```
-
-Comparing SENT and H-SENT:
-
-```python
-# Run demo comparing H-SENT and SENT
-python scripts/visualize_tokenization.py --demo --output-dir ./figures
-python scripts/visualize_tokenization.py --motif-aware --alpha 10.0 --name cholesterol
 ```
 
 Compare standard vs motif-aware coarsening:

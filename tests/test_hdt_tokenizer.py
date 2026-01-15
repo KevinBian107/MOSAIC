@@ -584,3 +584,131 @@ class TestFullAdjacency:
 
             # Original graph has edge (2,3)
             assert (2, 3) in all_edges, "Cross-community edge (2,3) not in full adjacency"
+
+
+# ===========================================================================
+# Structure Preservation Tests - Verify Partition Boundaries
+# ===========================================================================
+
+
+class TestStructurePreservation:
+    """Tests to verify hierarchical structure is preserved during roundtrip.
+
+    These tests go beyond edge preservation to verify that partition
+    membership and community structure are correctly maintained.
+    """
+
+    def test_partition_count_preserved(self, two_triangles: Data) -> None:
+        """Number of partitions should be preserved in roundtrip."""
+        tokenizer = HDTTokenizer(seed=42, min_community_size=2)
+        tokenizer.set_num_nodes(10)
+
+        hg_original = tokenizer.coarsener.build_hierarchy(two_triangles)
+        tokens = tokenizer.tokenize_hierarchy(hg_original)
+        hg_decoded = tokenizer.parse_tokens(tokens)
+
+        assert len(hg_original.partitions) == len(hg_decoded.partitions), (
+            f"Partition count changed: {len(hg_original.partitions)} -> "
+            f"{len(hg_decoded.partitions)}"
+        )
+
+    def test_partition_membership_preserved(self, two_triangles: Data) -> None:
+        """Partition membership (which nodes are in which partition) preserved."""
+        tokenizer = HDTTokenizer(seed=42, min_community_size=2)
+        tokenizer.set_num_nodes(10)
+
+        hg_original = tokenizer.coarsener.build_hierarchy(two_triangles)
+        tokens = tokenizer.tokenize_hierarchy(hg_original)
+        hg_decoded = tokenizer.parse_tokens(tokens)
+
+        # Collect partition node sets from both
+        original_sets = [set(p.global_node_indices) for p in hg_original.partitions]
+        decoded_sets = [set(p.global_node_indices) for p in hg_decoded.partitions]
+
+        # Sort for comparison (order may differ)
+        original_sorted = sorted(original_sets, key=lambda s: min(s))
+        decoded_sorted = sorted(decoded_sets, key=lambda s: min(s))
+
+        assert original_sorted == decoded_sorted, (
+            f"Partition membership changed!\n"
+            f"Original: {original_sorted}\n"
+            f"Decoded: {decoded_sorted}"
+        )
+
+    def test_bipartite_count_preserved(self, two_triangles: Data) -> None:
+        """Number of bipartite edge sets should be preserved."""
+        tokenizer = HDTTokenizer(seed=42, min_community_size=2)
+        tokenizer.set_num_nodes(10)
+
+        hg_original = tokenizer.coarsener.build_hierarchy(two_triangles)
+        tokens = tokenizer.tokenize_hierarchy(hg_original)
+        hg_decoded = tokenizer.parse_tokens(tokens)
+
+        assert len(hg_original.bipartites) == len(hg_decoded.bipartites), (
+            f"Bipartite count changed: {len(hg_original.bipartites)} -> "
+            f"{len(hg_decoded.bipartites)}"
+        )
+
+    def test_structure_preserved_larger_graph(self, larger_graph: Data) -> None:
+        """Structure preservation for larger graph with 3 communities."""
+        tokenizer = HDTTokenizer(seed=42, min_community_size=3)
+        tokenizer.set_num_nodes(20)
+
+        hg_original = tokenizer.coarsener.build_hierarchy(larger_graph)
+        tokens = tokenizer.tokenize_hierarchy(hg_original)
+        hg_decoded = tokenizer.parse_tokens(tokens)
+
+        # Check partition count
+        assert len(hg_original.partitions) == len(hg_decoded.partitions)
+
+        # Check partition membership
+        original_sets = sorted(
+            [set(p.global_node_indices) for p in hg_original.partitions],
+            key=lambda s: min(s),
+        )
+        decoded_sets = sorted(
+            [set(p.global_node_indices) for p in hg_decoded.partitions],
+            key=lambda s: min(s),
+        )
+        assert original_sets == decoded_sets
+
+    def test_token_sequence_has_partition_markers(self, two_triangles: Data) -> None:
+        """Token sequence should have ENTER/EXIT for each partition."""
+        tokenizer = HDTTokenizer(seed=42, min_community_size=2)
+        tokenizer.set_num_nodes(10)
+
+        hg = tokenizer.coarsener.build_hierarchy(two_triangles)
+        tokens = tokenizer.tokenize_hierarchy(hg)
+        tokens_list = tokens.tolist()
+
+        # Count ENTER tokens
+        enter_count = sum(1 for t in tokens_list if t == tokenizer.ENTER)
+        exit_count = sum(1 for t in tokens_list if t == tokenizer.EXIT)
+
+        # Should have at least: 1 for root + N for each partition
+        min_expected = 1 + len(hg.partitions)
+        assert enter_count >= min_expected, (
+            f"Expected at least {min_expected} ENTER tokens, got {enter_count}"
+        )
+        assert enter_count == exit_count, "ENTER/EXIT counts should match"
+
+    @pytest.mark.skipif(not HAS_RDKIT, reason="RDKit not available")
+    def test_molecular_structure_preservation(self) -> None:
+        """Structure preservation for molecular graph (caffeine)."""
+        data = smiles_to_graph("CN1C=NC2=C1C(=O)N(C(=O)N2C)C")
+        assert data is not None
+
+        tokenizer = HDTTokenizer(seed=42, min_community_size=3)
+        tokenizer.set_num_nodes(50)
+
+        hg_original = tokenizer.coarsener.build_hierarchy(data)
+        tokens = tokenizer.tokenize_hierarchy(hg_original)
+        hg_decoded = tokenizer.parse_tokens(tokens)
+
+        # Verify partition count
+        assert len(hg_original.partitions) == len(hg_decoded.partitions)
+
+        # Verify total nodes match
+        original_nodes = sum(len(p.global_node_indices) for p in hg_original.partitions)
+        decoded_nodes = sum(len(p.global_node_indices) for p in hg_decoded.partitions)
+        assert original_nodes == decoded_nodes

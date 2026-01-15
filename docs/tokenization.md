@@ -219,9 +219,34 @@ assert reconstructed.num_nodes == graph.num_nodes
 
 ---
 
-# HDT: Hierarchical Depth Trial
+# HDT: Hierarchical DFS Tokenization
 
-HDT is a simplified DFS-based tokenization scheme that achieves **~45% token reduction** over H-SENT by encoding hierarchy structure implicitly via DFS nesting rather than explicit partition and bipartite blocks.
+HDT is a DFS-based tokenization scheme that achieves **~45% token reduction** over H-SENT by encoding hierarchy structure implicitly via DFS nesting rather than explicit partition and bipartite blocks.
+
+## HDT Traversal Pattern
+
+The key insight of HDT is the **parent→child→parent** traversal pattern:
+
+```
+ROOT
+  ↓ (descend)
+  PARTITION 0
+    ↓ (descend)
+    atoms...
+  ↑ (return to ROOT)
+  ↓ (descend)
+  PARTITION 1
+    ↓ (descend)
+    atoms...
+  ↑ (return to ROOT)
+↑ (exit ROOT)
+```
+
+Each level has **bidirectional arrows**:
+- **Down arrow (↓)**: Enter child node via `[ENTER] level local_id`
+- **Up arrow (↑)**: Return to parent via `[EXIT]`
+
+This pattern ensures partition boundaries are explicitly marked, preserving hierarchical structure during roundtrip tokenization.
 
 ## Key Differences from H-SENT
 
@@ -231,6 +256,7 @@ HDT is a simplified DFS-based tokenization scheme that achieves **~45% token red
 | Cross-community edges | Explicit `[LBIP]...[RBIP]` blocks | Back-edges to visited atoms |
 | Vocabulary size | IDX_OFFSET = 11 | IDX_OFFSET = 7 |
 | Token count | Baseline | ~45% fewer |
+| Partition boundaries | Explicit in blocks | Marked by ENTER/EXIT pairs |
 
 ## HDT Token Vocabulary
 
@@ -365,19 +391,28 @@ Graph Structure:
 [EOS]
 ```
 
-### HDT Token Sequence (~20 tokens)
+### HDT Token Sequence (~25 tokens)
 
 ```
 [SOS]
-  [ENTER] L0 :0              // Enter root hierarchy
-    8 9 10 [LEDGE] 8 [REDGE] // Atoms 0,1,2 with back-edge 2→0
-    11 [LEDGE] 10 [REDGE]    // Atom 3 with back-edge 3→2 (CROSS!)
-    12 13 [LEDGE] 11 [REDGE] // Atoms 4,5 with back-edge 5→3
-  [EXIT]
+  [ENTER] L0 :0                    // Enter ROOT
+    [ENTER] L1 :0                  // Enter PARTITION 0 (triangle 0-1-2)
+      8 9 10 [LEDGE] 8 [REDGE]     // Atoms 0,1,2 with back-edge 2→0
+    [EXIT]                         // Return to ROOT
+    [ENTER] L1 :1                  // Enter PARTITION 1 (triangle 3-4-5)
+      11 [LEDGE] 10 [REDGE]        // Atom 3 with back-edge 3→2 (CROSS-PARTITION!)
+      12 13 [LEDGE] 11 [REDGE]     // Atoms 4,5 with back-edge 5→3
+    [EXIT]                         // Return to ROOT
+  [EXIT]                           // Exit ROOT
 [EOS]
 ```
 
-**Token savings**: ~33% fewer tokens for this simple example.
+**Key observations:**
+- Each partition has explicit `[ENTER]...[EXIT]` markers
+- Cross-partition edge (2→3) captured as back-edge when visiting atom 3
+- Partition boundaries preserved during roundtrip decoding
+
+**Token savings**: ~30% fewer tokens compared to H-SENT.
 
 ## Extended Example: Indole-Benzene Compound (18 atoms)
 
