@@ -10,7 +10,7 @@ channels:
 dependencies:
   - python=3.11
   - pip
-  - numpy
+  - numpy<2.0  # Pin to 1.x for PyTorch 2.2.1 compatibility
   - scipy
   - rdkit=2024.03.6
   - networkx
