@@ -215,6 +215,23 @@ def main(cfg: DictConfig) -> None:
 
     datamodule.setup()
 
+    # Calculate steps per epoch and adjust val_check_interval if needed
+    train_dataset_size = len(datamodule.train_dataset)
+    steps_per_epoch = train_dataset_size // cfg.data.batch_size
+    val_check_interval = cfg.trainer.val_check_interval
+
+    # If val_check_interval exceeds steps per epoch, use steps per epoch (1 eval per epoch)
+    if val_check_interval > steps_per_epoch:
+        log.warning(
+            f"val_check_interval ({val_check_interval}) exceeds steps per epoch ({steps_per_epoch}). "
+            f"Setting val_check_interval={steps_per_epoch} (1 validation per epoch)"
+        )
+        val_check_interval = steps_per_epoch
+
+    log.info(f"Training dataset size: {train_dataset_size:,} samples")
+    log.info(f"Steps per epoch: {steps_per_epoch:,}")
+    log.info(f"Validation check interval: {val_check_interval:,} steps")
+
     model = GraphGeneratorModule(
         tokenizer=tokenizer,
         model_name=cfg.model.model_name,
@@ -249,7 +266,7 @@ def main(cfg: DictConfig) -> None:
 
     trainer = pl.Trainer(
         max_steps=cfg.trainer.max_steps,
-        val_check_interval=cfg.trainer.val_check_interval,
+        val_check_interval=val_check_interval,  # Use calculated value
         precision=cfg.trainer.precision,
         gradient_clip_val=cfg.trainer.gradient_clip_val,
         accelerator=cfg.trainer.accelerator,
