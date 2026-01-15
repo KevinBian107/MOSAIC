@@ -1,0 +1,28 @@
+# HDT (Hierarchical DFS-based Tokenizer) configuration
+#
+# HDT is a simplified DFS-based tokenization scheme that achieves ~45% token
+# reduction over H-SENT by:
+# - Using ENTER/EXIT tokens to encode hierarchy structure implicitly via DFS nesting
+# - Eliminating bipartite blocks - cross-community edges become back-edges
+# - Using a smaller vocabulary (IDX_OFFSET=7 vs 11)
+#
+# Usage:
+#   python scripts/train.py tokenizer=hdt
+#   python scripts/train.py tokenizer=hdt tokenizer.node_order=DFS
+
+# Tokenizer type identifier
+type: hdt
+
+# Sequence length settings
+max_length: -1              # Maximum sequence length (-1 for unlimited)
+truncation_length: 2048     # Truncate sequences longer than this
+
+# Node ordering within partitions
+# Options: BFS, DFS, BFSAC (ascending cutset), BFSDC (descending cutset)
+node_order: BFS
+
+# Coarsening settings
+min_community_size: 4       # Minimum nodes before stopping recursion
+
+# Motif-aware coarsening (disabled by default)
+motif_aware: false

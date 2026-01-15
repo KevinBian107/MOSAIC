@@ -1,0 +1,17 @@
+# Flat SENT tokenizer configuration
+#
+# SENT (Sequence of Edge-indicating Neighborhoods) converts molecular graphs
+# to token sequences via random walk with back-edge encoding.
+#
+# Usage:
+#   python scripts/train.py tokenizer=sent
+
+# Tokenizer type identifier
+type: sent
+
+# Sequence length settings
+max_length: -1              # Maximum sequence length (-1 for unlimited)
+truncation_length: 2048     # Truncate sequences longer than this
+
+# SENT-specific settings
+undirected: true            # Treat graph as undirected

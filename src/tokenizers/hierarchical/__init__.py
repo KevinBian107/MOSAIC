@@ -24,6 +24,7 @@ from src.tokenizers.hierarchical.motifs import (
     detect_motifs_from_smiles,
     get_motif_summary,
 )
+from src.tokenizers.hierarchical.hdt import HDTTokenizer
 from src.tokenizers.hierarchical.hsent import HSENTTokenizer
 from src.tokenizers.hierarchical.ordering import (
     OrderingMethod,
@@ -45,8 +46,9 @@ from src.tokenizers.hierarchical.visualization import (
 )
 
 __all__ = [
-    # Main tokenizer
+    # Main tokenizers
     "HSENTTokenizer",
+    "HDTTokenizer",
     # Coarsening
     "SpectralCoarsening",
     "MotifAwareCoarsening",
