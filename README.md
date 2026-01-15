@@ -92,12 +92,12 @@ MOSAIC/
 ## Documentation
 
 See the [docs/](docs/) directory for:
-- [Getting Started](docs/index.md)
-- [Hierarchical Tokenization (H-SENT)](docs/htokenization.md)
-- [Visualize Hierarchical Tokenization (H-SENT)](docs/vis_htokenization.md)
-- [Architecture Guide](docs/architecture.md)
+- [Codebase Guide](docs/codebase.md)
 - [Setup Guide](docs/setup.md)
 - [Contributing Guide](docs/contributing.md)
+- [H-graph Construction](docs/hgraph.md)
+- [Tokenization](docs/tokenization.md)
+- [Visualize Tokenization](docs/visualization.md)
 
 ## Acknowledgement
 

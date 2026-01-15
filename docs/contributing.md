@@ -1,27 +1,5 @@
 # Contributing Guide
 
-Thank you for your interest in contributing to the motif-preserving graph generation project!
-
-## Development Setup
-
-### Prerequisites
-
-- Python 3.10+
-- Conda (recommended) or venv
-- Git
-
-### Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/user/motif-preserving-tokenization.git
-cd motif-preserving-tokenization
-
-# Create conda environment
-conda env create -f environment.yaml
-conda activate motif-graph
-```
-
 ## Development Workflow
 
 ### 1. Create a Feature Branch

@@ -73,6 +73,9 @@ MOLECULES = {
     "quercetin": "C1=CC(=C(C=C1C2=C(C(=O)C3=C(C=C(C=C3O2)O)O)O)O)O",
     "resveratrol": "C1=CC(=CC=C1C=CC2=CC(=CC(=C2)O)O)O",
     "curcumin": "COC1=C(C=CC(=C1)C=CC(=O)CC(=O)C=CC2=CC(=C(C=C2)O)OC)O",
+    # Neurotransmitters
+    "dopamine": "NCCc1ccc(O)c(O)c1",
+    "serotonin": "NCCc1c[nH]c2ccc(O)cc12",
     # Antibiotics
     "penicillin_g": "CC1(C)SC2C(NC(=O)CC3=CC=CC=C3)C(=O)N2C1C(=O)O",
     "ciprofloxacin": "C1CC1N2C=C(C(=O)C3=CC(=C(C=C32)N4CCNCC4)F)C(=O)O",
@@ -407,6 +410,7 @@ def visualize_m(
 def run_demo(output_dir: str | None = None, show: bool = True, normalize: bool = False):
     """Run demo with complex molecules."""
     demo_molecules = [
+        "dopamine",
         "naphthalene",
         "pyrene",
         "cholesterol",

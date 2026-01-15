@@ -1,0 +1,36 @@
+# H-SENT with motif-aware coarsening configuration
+#
+# Extends spectral clustering by augmenting the affinity matrix with a motif
+# co-membership matrix to preserve ring systems and other structural motifs.
+#
+# The modified affinity: A' = A + alpha * M
+# where M[i,j] = number of motifs containing both atoms i and j
+#
+# Usage:
+#   python scripts/train.py tokenizer=hsent_motif
+#   python scripts/train.py tokenizer=hsent_motif tokenizer.motif_alpha=2.0
+
+# Tokenizer type identifier
+type: hsent
+
+# Sequence length settings
+max_length: -1              # Maximum sequence length (-1 for unlimited)
+truncation_length: 2048     # Truncate sequences longer than this
+
+# Node ordering within partitions
+# Options: BFS, DFS, BFSAC (ascending cutset), BFSDC (descending cutset)
+node_order: BFS
+
+# Coarsening settings
+min_community_size: 4       # Minimum nodes before stopping recursion
+
+# Motif-aware coarsening settings
+motif_aware: true
+motif_alpha: 1.0            # Weight for motif affinity (higher = stronger preservation)
+                            # alpha=0: standard spectral clustering
+                            # alpha=1: motif edges weighted equally to graph edges
+                            # alpha=2-5: moderate motif preference
+                            # alpha=10+: strong motif preservation
+
+normalize_by_motif_size: false  # Normalize motif contribution by 1/motif_size
+                                # Prevents large motifs from dominating

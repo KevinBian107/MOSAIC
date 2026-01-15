@@ -1,0 +1,25 @@
+# Hierarchical H-SENT tokenizer configuration (spectral coarsening)
+#
+# H-SENT extends SENT with hierarchical graph decomposition using spectral
+# clustering to discover community structure.
+#
+# Usage:
+#   python scripts/train.py tokenizer=hsent
+#   python scripts/train.py tokenizer=hsent tokenizer.node_order=DFS
+
+# Tokenizer type identifier
+type: hsent
+
+# Sequence length settings
+max_length: -1              # Maximum sequence length (-1 for unlimited)
+truncation_length: 2048     # Truncate sequences longer than this
+
+# Node ordering within partitions
+# Options: BFS, DFS, BFSAC (ascending cutset), BFSDC (descending cutset)
+node_order: BFS
+
+# Coarsening settings
+min_community_size: 4       # Minimum nodes before stopping recursion
+
+# Motif-aware coarsening (disabled for standard spectral clustering)
+motif_aware: false
