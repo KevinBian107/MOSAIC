@@ -266,7 +266,7 @@ def plot_molecule_with_motifs(
     ax.set_aspect("equal")
     ax.axis("off")
 
-    # Set limits
+    # Set axis limits
     xs = [p[0] for p in pos.values()]
     ys = [p[1] for p in pos.values()]
     margin = 0.3
@@ -288,26 +288,11 @@ def plot_sent_walks(
 ) -> None:
     """Plot SENT showing walk on original molecule graph.
 
-    Uses graph isomorphism to map decoded nodes back to original positions.
-    Shows visit order numbers along the walk paths.
+    Shows visit order numbers on nodes based on walk sequence.
     """
-    # Decode the tokens to get the reconstructed graph
-    decoded = tokenizer.decode(torch.tensor(tokens))
-    decoded_G = to_networkx(decoded, to_undirected=True)
-    original_G = to_networkx(data, to_undirected=True)
-
-    # Find isomorphism mapping from decoded to original graph
-    from networkx.algorithms import isomorphism
-    GM = isomorphism.GraphMatcher(decoded_G, original_G)
-
-    # Get mapping: decoded_node -> original_node
-    decoded_to_original = {}
-    if GM.is_isomorphic():
-        decoded_to_original = GM.mapping
-    else:
-        # Fallback: try to match by degree sequence or use identity
-        for i in range(min(decoded.num_nodes, data.num_nodes)):
-            decoded_to_original[i] = i
+    # Parse tokens into walk segments (visit order)
+    # Use identity mapping since SENT preserves node count
+    decoded_to_original = {i: i for i in range(data.num_nodes)}
 
     # Parse tokens into walk segments (visit order indices)
     segments = []
@@ -325,7 +310,7 @@ def plot_sent_walks(
                 current_segment = []
         elif tok >= tokenizer.idx_offset and not inside_adj:
             visit_idx = tok - tokenizer.idx_offset
-            if visit_idx < decoded.num_nodes:
+            if visit_idx < data.num_nodes:
                 current_segment.append(visit_idx)
 
     if current_segment:
@@ -780,84 +765,69 @@ def plot_tokens(
     tokens: list[int],
     tokenizer,
     title: str,
-    max_tokens: int = 40,
+    max_tokens: int = 80,
 ) -> None:
-    """Plot token sequence as colored blocks."""
+    """Plot token sequence as flattened text with actual token symbols."""
+    # Build token name mappings
     if hasattr(tokenizer, "ENTER"):
-        token_colors = {
-            tokenizer.SOS: "#2ecc71", tokenizer.EOS: "#e74c3c",
-            tokenizer.PAD: "#bdc3c7", tokenizer.ENTER: "#9b59b6",
-            tokenizer.EXIT: "#9b59b6", tokenizer.LEDGE: "#3498db",
-            tokenizer.REDGE: "#3498db",
-        }
+        # HDT tokenizer
         token_names = {
-            tokenizer.SOS: "S", tokenizer.EOS: "E", tokenizer.PAD: "P",
-            tokenizer.ENTER: "v", tokenizer.EXIT: "^",
+            tokenizer.SOS: "[SOS]", tokenizer.EOS: "[EOS]", tokenizer.PAD: "[PAD]",
+            tokenizer.ENTER: "↓", tokenizer.EXIT: "↑",
             tokenizer.LEDGE: "[", tokenizer.REDGE: "]",
         }
         idx_offset = tokenizer.IDX_OFFSET
     elif hasattr(tokenizer, "SOS"):
-        token_colors = {
-            tokenizer.SOS: "#2ecc71", tokenizer.EOS: "#e74c3c",
-            tokenizer.PAD: "#bdc3c7", tokenizer.RESET: "#9b59b6",
-            tokenizer.LADJ: "#3498db", tokenizer.RADJ: "#3498db",
-            tokenizer.LCOM: "#f39c12", tokenizer.RCOM: "#f39c12",
-            tokenizer.LBIP: "#1abc9c", tokenizer.RBIP: "#1abc9c",
-            tokenizer.SEP: "#95a5a6",
-        }
+        # H-SENT tokenizer
         token_names = {
-            tokenizer.SOS: "S", tokenizer.EOS: "E", tokenizer.PAD: "P",
-            tokenizer.RESET: "R", tokenizer.LADJ: "[", tokenizer.RADJ: "]",
+            tokenizer.SOS: "[SOS]", tokenizer.EOS: "[EOS]", tokenizer.PAD: "[PAD]",
+            tokenizer.RESET: "[R]", tokenizer.LADJ: "[", tokenizer.RADJ: "]",
             tokenizer.LCOM: "{", tokenizer.RCOM: "}",
             tokenizer.LBIP: "<", tokenizer.RBIP: ">", tokenizer.SEP: "|",
         }
         idx_offset = tokenizer.IDX_OFFSET
     else:
-        token_colors = {
-            tokenizer.sos: "#2ecc71", tokenizer.eos: "#e74c3c",
-            tokenizer.pad: "#bdc3c7", tokenizer.reset: "#9b59b6",
-            tokenizer.ladj: "#3498db", tokenizer.radj: "#3498db",
-        }
+        # SENT tokenizer
         token_names = {
-            tokenizer.sos: "S", tokenizer.eos: "E", tokenizer.pad: "P",
-            tokenizer.reset: "R", tokenizer.ladj: "[", tokenizer.radj: "]",
+            tokenizer.sos: "[SOS]", tokenizer.eos: "[EOS]", tokenizer.pad: "[PAD]",
+            tokenizer.reset: "[R]", tokenizer.ladj: "[", tokenizer.radj: "]",
         }
         idx_offset = tokenizer.idx_offset
 
+    # Convert tokens to string symbols
     display_tokens = tokens[:max_tokens]
     truncated = len(tokens) > max_tokens
 
-    cols = min(12, len(display_tokens))
-    rows = (len(display_tokens) + cols - 1) // cols
-
-    ax.set_xlim(-0.5, cols - 0.5)
-    ax.set_ylim(-0.5, rows - 0.5)
-
-    for idx, tok in enumerate(display_tokens):
-        row = idx // cols
-        col = idx % cols
-        y = rows - 1 - row
-
-        if tok in token_colors:
-            color = token_colors[tok]
+    token_strs = []
+    for tok in display_tokens:
+        if tok in token_names:
+            token_strs.append(token_names[tok])
         elif tok >= idx_offset:
-            color = plt.cm.Pastel1((tok - idx_offset) % 9)
+            token_strs.append(str(tok - idx_offset))
         else:
-            color = "#ecf0f1"
+            token_strs.append(f"?{tok}")
 
-        rect = plt.Rectangle(
-            (col - 0.45, y - 0.45), 0.9, 0.9,
-            facecolor=color, edgecolor="black", linewidth=0.5,
-            joinstyle="round"
-        )
-        ax.add_patch(rect)
+    # Join tokens with line breaks every N tokens
+    tokens_per_line = 20
+    lines = []
+    for i in range(0, len(token_strs), tokens_per_line):
+        lines.append(" ".join(token_strs[i:i + tokens_per_line]))
+    token_text = "\n".join(lines)
+    if truncated:
+        token_text += " ..."
 
-        label = str(tok - idx_offset) if tok >= idx_offset else token_names.get(tok, "?")
-        ax.text(col, y, label, ha="center", va="center", fontsize=6, fontweight="bold")
+    # Display as multi-line text
+    ax.text(
+        0.5, 0.5, token_text,
+        ha="center", va="center",
+        fontsize=6,
+        fontfamily="monospace",
+        transform=ax.transAxes,
+        bbox=dict(boxstyle="round,pad=0.3", facecolor="#f8f9fa", edgecolor="#dee2e6"),
+    )
 
-    title_text = f"{title}" + (f" ({max_tokens}/{len(tokens)})" if truncated else "")
-    ax.set_title(title_text, fontsize=9, fontweight="bold")
-    ax.set_aspect("equal")
+    title_text = title + (f" ({max_tokens}/{len(tokens)})" if truncated else "")
+    ax.set_title(title_text, fontsize=10, fontweight="bold")
     ax.axis("off")
 
 
@@ -906,7 +876,7 @@ def compare_all_tokenizations(
     hdt_hg = hdt_tokenizer.coarsener.build_hierarchy(data)
 
     # Create figure: 4 columns x 2 rows
-    fig = plt.figure(figsize=(20, 10))
+    fig = plt.figure(figsize=(22, 12))
 
     # Title
     title = name or smiles[:35]
@@ -917,35 +887,42 @@ def compare_all_tokenizations(
         fontsize=14, fontweight="bold"
     )
 
+    # Use GridSpec for better control - HDT gets more width, tokens row is taller
+    from matplotlib.gridspec import GridSpec
+    gs = GridSpec(
+        2, 5, figure=fig,
+        height_ratios=[2, 1],
+        width_ratios=[1, 1, 1, 1.5, 0.5],  # HDT column wider
+        hspace=0.4, wspace=0.3
+    )
+
     # Row 1: Graph visualizations
-    ax1 = fig.add_subplot(2, 4, 1)
+    ax1 = fig.add_subplot(gs[0, 0])
     plot_molecule_with_motifs(ax1, data, smiles, pos)
 
-    ax2 = fig.add_subplot(2, 4, 2)
+    ax2 = fig.add_subplot(gs[0, 1])
     plot_sent_walks(ax2, data, sent_tokens, sent_tokenizer, pos)
 
-    ax3 = fig.add_subplot(2, 4, 3)
+    ax3 = fig.add_subplot(gs[0, 2])
     plot_hsent_structure(ax3, data, hsent_hg, hsent_tokens, hsent_tokenizer, pos)
 
-    ax4 = fig.add_subplot(2, 4, 4)
+    ax4 = fig.add_subplot(gs[0, 3:])  # HDT spans last 2 columns for more space
     plot_hdt_tree(ax4, data, hdt_hg, hdt_tokens, hdt_tokenizer)
 
-    # Row 2: Token sequences
-    ax5 = fig.add_subplot(2, 4, 5)
+    # Row 2: Token sequences (show all tokens for H-SENT and HDT)
+    ax5 = fig.add_subplot(gs[1, 0])
     ax5.axis("off")
     ax5.text(0.5, 0.5, "Motif patterns detected\nin the molecule above",
-             ha="center", va="center", fontsize=10, style="italic", color="gray")
+             ha="center", va="center", fontsize=9, style="italic", color="gray")
 
-    ax6 = fig.add_subplot(2, 4, 6)
+    ax6 = fig.add_subplot(gs[1, 1])
     plot_tokens(ax6, sent_tokens, sent_tokenizer, f"SENT ({len(sent_tokens)} tok)")
 
-    ax7 = fig.add_subplot(2, 4, 7)
-    plot_tokens(ax7, hsent_tokens, hsent_tokenizer, f"H-SENT ({len(hsent_tokens)} tok)")
+    ax7 = fig.add_subplot(gs[1, 2])
+    plot_tokens(ax7, hsent_tokens, hsent_tokenizer, f"H-SENT ({len(hsent_tokens)} tok)", max_tokens=500)
 
-    ax8 = fig.add_subplot(2, 4, 8)
-    plot_tokens(ax8, hdt_tokens, hdt_tokenizer, f"HDT ({len(hdt_tokens)} tok)")
-
-    plt.tight_layout()
+    ax8 = fig.add_subplot(gs[1, 3:])
+    plot_tokens(ax8, hdt_tokens, hdt_tokenizer, f"HDT ({len(hdt_tokens)} tok)", max_tokens=500)
 
     # Stats
     stats = (
