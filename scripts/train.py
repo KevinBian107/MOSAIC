@@ -260,12 +260,9 @@ def main(cfg: DictConfig) -> None:
         pl.callbacks.ModelCheckpoint(
             monitor="val/loss",
             dirpath=cfg.logs.path,
-            filename="{epoch:02d}-{val_loss:.4f}",  # Include epoch and val_loss in filename
-            save_top_k=3,  # Keep best 3 checkpoints
+            filename="best",  # Simple name for best checkpoint
+            save_last=True,  # Saves last.ckpt automatically
             mode="min",
-            save_last=True,  # Also save last.ckpt
-            every_n_train_steps=None,  # Only save on validation
-            save_on_train_epoch_end=False,  # Save on validation, not epoch end
         ),
     ]
 
@@ -283,33 +280,18 @@ def main(cfg: DictConfig) -> None:
     # Check for existing checkpoint to resume from
     ckpt_path = None
     if cfg.get("resume", True):  # Default to auto-resume
-        # Look for checkpoints in priority order
-        last_ckpt = os.path.join(cfg.logs.path, "last.ckpt")  # New format
-        old_last_ckpt = os.path.join(cfg.logs.path, f"{cfg.model.model_name}-last.ckpt")  # Old format
-        old_best_ckpt = os.path.join(cfg.logs.path, f"{cfg.model.model_name}.ckpt")  # Old format
+        # Look for last.ckpt first (most recent), then best.ckpt
+        last_ckpt = os.path.join(cfg.logs.path, "last.ckpt")
+        best_ckpt = os.path.join(cfg.logs.path, "best.ckpt")
 
         if os.path.exists(last_ckpt):
-            log.info(f"Found last checkpoint: {last_ckpt}")
+            log.info(f"Resuming from last checkpoint: {last_ckpt}")
             ckpt_path = last_ckpt
-        elif os.path.exists(old_last_ckpt):
-            log.info(f"Found last checkpoint: {old_last_ckpt}")
-            ckpt_path = old_last_ckpt
-        elif os.path.exists(old_best_ckpt):
-            log.info(f"Found best checkpoint: {old_best_ckpt}")
-            ckpt_path = old_best_ckpt
+        elif os.path.exists(best_ckpt):
+            log.info(f"Resuming from best checkpoint: {best_ckpt}")
+            ckpt_path = best_ckpt
         else:
-            # Search for any checkpoint in the directory
-            import glob
-            ckpt_files = glob.glob(os.path.join(cfg.logs.path, "*.ckpt"))
-            if ckpt_files:
-                # Get the most recent checkpoint
-                ckpt_path = max(ckpt_files, key=os.path.getmtime)
-                log.info(f"Found checkpoint: {ckpt_path}")
-            else:
-                log.info("No existing checkpoint found. Starting fresh training.")
-
-        if ckpt_path:
-            log.info("Resuming training from checkpoint...")
+            log.info("No checkpoint found. Starting fresh training.")
 
     log.info("Starting training...")
     trainer.fit(model, datamodule, ckpt_path=ckpt_path)
