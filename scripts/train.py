@@ -182,6 +182,29 @@ def main(cfg: DictConfig) -> None:
 
     pl.seed_everything(cfg.seed, workers=True)
 
+    # Check for checkpoint BEFORE loading data (saves time if resuming)
+    ckpt_path = None
+    if cfg.get("resume", True):
+        output_dir = cfg.logs.path
+        last_ckpt = os.path.join(output_dir, "last.ckpt")
+        best_ckpt = os.path.join(output_dir, "best.ckpt")
+
+        if os.path.exists(last_ckpt):
+            log.info(f"✓ Found checkpoint: {last_ckpt}")
+            log.info("Will resume training after setup...")
+            ckpt_path = last_ckpt
+        elif os.path.exists(best_ckpt):
+            log.info(f"✓ Found checkpoint: {best_ckpt}")
+            log.info("Will resume training after setup...")
+            ckpt_path = best_ckpt
+        else:
+            log.info("No checkpoint found. Starting fresh training.")
+    else:
+        log.info("Resume disabled (resume=false). Starting fresh training.")
+
+    # Now load data (expensive operation)
+    log.info("Setting up dataset and tokenizer...")
+
     # Select tokenizer based on config
     tokenizer_type = cfg.tokenizer.get("type", "sent").lower()
     if tokenizer_type == "hsent":
@@ -277,21 +300,11 @@ def main(cfg: DictConfig) -> None:
         callbacks=callbacks,
     )
 
-    # Check for existing checkpoint to resume from
-    ckpt_path = None
-    if cfg.get("resume", True):  # Default to auto-resume
-        # Look for last.ckpt first (most recent), then best.ckpt
-        last_ckpt = os.path.join(cfg.logs.path, "last.ckpt")
-        best_ckpt = os.path.join(cfg.logs.path, "best.ckpt")
-
-        if os.path.exists(last_ckpt):
-            log.info(f"Resuming from last checkpoint: {last_ckpt}")
-            ckpt_path = last_ckpt
-        elif os.path.exists(best_ckpt):
-            log.info(f"Resuming from best checkpoint: {best_ckpt}")
-            ckpt_path = best_ckpt
-        else:
-            log.info("No checkpoint found. Starting fresh training.")
+    # Checkpoint detection was already done earlier to save time
+    if ckpt_path:
+        log.info(f"Resuming training from: {ckpt_path}")
+    else:
+        log.info("Starting fresh training...")
 
     log.info("Starting training...")
     trainer.fit(model, datamodule, ckpt_path=ckpt_path)
