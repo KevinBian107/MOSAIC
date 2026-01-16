@@ -257,7 +257,11 @@ class GraphGeneratorModule(pl.LightningModule):
         logits = logits.view(-1, logits.shape[-1])
         y = y.reshape(-1)
         loss = self.loss_fn(logits, y)
-        self.log(f"{phase}/loss", loss, on_step=False, on_epoch=True, sync_dist=True)
+
+        # Log per-step for train, per-epoch for val/test
+        on_step = (phase == "train")
+        on_epoch = True
+        self.log(f"{phase}/loss", loss, on_step=on_step, on_epoch=on_epoch, sync_dist=True, prog_bar=True)
         return loss
 
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
