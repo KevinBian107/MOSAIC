@@ -7,6 +7,9 @@ defaults:
 # Random seed
 seed: 42
 
+# Auto-resume from checkpoint if available (set to false to start fresh)
+resume: true
+
 # Model configuration
 model:
   model_name: gpt2-xs

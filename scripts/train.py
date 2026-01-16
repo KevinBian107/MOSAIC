@@ -13,6 +13,7 @@ Usage:
 """
 
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -261,6 +262,7 @@ def main(cfg: DictConfig) -> None:
             dirpath=cfg.logs.path,
             filename=cfg.model.model_name,
             mode="min",
+            save_last=True,  # Also save last checkpoint for resuming
         ),
     ]
 
@@ -275,8 +277,26 @@ def main(cfg: DictConfig) -> None:
         callbacks=callbacks,
     )
 
+    # Check for existing checkpoint to resume from
+    ckpt_path = None
+    if cfg.get("resume", True):  # Default to auto-resume
+        # Look for last checkpoint first (preferred)
+        last_ckpt = os.path.join(cfg.logs.path, f"{cfg.model.model_name}-last.ckpt")
+        best_ckpt = os.path.join(cfg.logs.path, f"{cfg.model.model_name}.ckpt")
+
+        if os.path.exists(last_ckpt):
+            log.info(f"Found last checkpoint: {last_ckpt}")
+            log.info("Resuming training from last checkpoint...")
+            ckpt_path = last_ckpt
+        elif os.path.exists(best_ckpt):
+            log.info(f"Found best checkpoint: {best_ckpt}")
+            log.info("Resuming training from best checkpoint...")
+            ckpt_path = best_ckpt
+        else:
+            log.info("No existing checkpoint found. Starting fresh training.")
+
     log.info("Starting training...")
-    trainer.fit(model, datamodule)
+    trainer.fit(model, datamodule, ckpt_path=ckpt_path)
 
     log.info("Saving final checkpoint...")
     final_checkpoint_path = f"{cfg.logs.path}/{cfg.model.model_name}-last.ckpt"
