@@ -433,28 +433,73 @@ def compute_fcd(
     Returns:
         FCD score (lower is better).
     """
-    try:
-        # Try using MOSES package
-        import moses
-        metrics = moses.get_all_metrics(generated_smiles, test=reference_smiles)
-        return metrics.get("FCD/Test", float("inf"))
-    except ImportError:
-        pass
+    # Validate inputs - ensure they are lists of strings
+    if not isinstance(generated_smiles, list) or not isinstance(reference_smiles, list):
+        print(f"ERROR: Invalid input types - gen: {type(generated_smiles)}, ref: {type(reference_smiles)}")
+        return float("nan")
+
+    if len(generated_smiles) == 0 or len(reference_smiles) == 0:
+        print(f"ERROR: Empty input lists - gen: {len(generated_smiles)}, ref: {len(reference_smiles)}")
+        return float("nan")
+
+    # Check that elements are strings, not something else
+    if not all(isinstance(s, str) for s in generated_smiles[:5]):
+        print(f"ERROR: Generated SMILES contains non-string elements: {[type(s) for s in generated_smiles[:5]]}")
+        return float("nan")
+
+    if not all(isinstance(s, str) for s in reference_smiles[:5]):
+        print(f"ERROR: Reference SMILES contains non-string elements: {[type(s) for s in reference_smiles[:5]]}")
+        return float("nan")
 
     try:
-        # Try using fcd package directly
+        # Try using fcd package directly first (more reliable than MOSES)
         from fcd import get_fcd, load_ref_model, canonical_smiles
 
         model = load_ref_model()
-        gen_canonical = [canonical_smiles(s) for s in generated_smiles if s]
-        ref_canonical = [canonical_smiles(s) for s in reference_smiles if s]
-        gen_canonical = [s for s in gen_canonical if s]
-        ref_canonical = [s for s in ref_canonical if s]
+
+        # Canonicalize SMILES
+        gen_canonical = []
+        for s in generated_smiles:
+            if s and isinstance(s, str):
+                can = canonical_smiles(s)
+                if can:
+                    gen_canonical.append(can)
+
+        ref_canonical = []
+        for s in reference_smiles:
+            if s and isinstance(s, str):
+                can = canonical_smiles(s)
+                if can:
+                    ref_canonical.append(can)
 
         if not gen_canonical or not ref_canonical:
+            print(f"ERROR: No valid canonical SMILES - gen: {len(gen_canonical)}, ref: {len(ref_canonical)}")
             return float("inf")
 
         return get_fcd(gen_canonical, ref_canonical, model)
     except ImportError:
+        pass
+
+    try:
+        # Fall back to MOSES package (but it has multiprocessing bugs)
+        import moses
+
+        # MOSES expects lists of strings - double check
+        gen_list = list(generated_smiles)  # Ensure it's a list
+        ref_list = list(reference_smiles)  # Ensure it's a list
+
+        # Call MOSES with explicit parameters to avoid multiprocessing issues
+        metrics = moses.get_all_metrics(
+            gen=gen_list,
+            test=ref_list,
+            n_jobs=1,  # Force single-threaded to avoid multiprocessing bugs
+        )
+        return metrics.get("FCD/Test", float("inf"))
+    except ImportError:
         # FCD not available, return NaN
+        return float("nan")
+    except Exception as e:
+        print(f"ERROR in FCD computation: {e}")
+        import traceback
+        traceback.print_exc()
         return float("nan")
