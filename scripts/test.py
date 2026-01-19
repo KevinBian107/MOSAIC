@@ -246,11 +246,17 @@ def main(cfg: DictConfig) -> None:
     log.info("FCD METRIC")
     log.info("=" * 50)
 
-    fcd_score = compute_fcd(generated_smiles, datamodule.test_smiles)
-    if not (fcd_score != fcd_score):  # Check for NaN
-        log.info(f"  FCD: {fcd_score:.6f}")
-    else:
-        log.info("  FCD: Not available (install moses or fcd package)")
+    try:
+        fcd_score = compute_fcd(generated_smiles, datamodule.test_smiles)
+        if not (fcd_score != fcd_score):  # Check for NaN
+            log.info(f"  FCD: {fcd_score:.6f}")
+        else:
+            log.info("  FCD: Not available (install moses or fcd package)")
+    except KeyboardInterrupt:
+        raise
+    except Exception as e:
+        log.error(f"  FCD: Failed with error: {e}")
+        log.info("  FCD: Skipping due to error")
 
     # Get motif summary for reference
     log.info("\n" + "=" * 50)

@@ -451,34 +451,84 @@ def compute_fcd(
         print(f"ERROR: Reference SMILES contains non-string elements: {[type(s) for s in reference_smiles[:5]]}")
         return float("nan")
 
+    # Set environment variables to disable multiprocessing in PyTorch (used by FCD)
+    import os
+    old_num_threads = os.environ.get('OMP_NUM_THREADS')
+    old_mkl_threads = os.environ.get('MKL_NUM_THREADS')
+    os.environ['OMP_NUM_THREADS'] = '1'
+    os.environ['MKL_NUM_THREADS'] = '1'
+
     try:
         # Try using fcd package directly first (more reliable than MOSES)
         from fcd import get_fcd, load_ref_model, canonical_smiles
+        from rdkit import Chem
+        import torch
 
-        model = load_ref_model()
+        # Disable PyTorch multiprocessing
+        torch.set_num_threads(1)
 
-        # Canonicalize SMILES
+        # Use RDKit to canonicalize instead of fcd's function to avoid multiprocessing
         gen_canonical = []
         for s in generated_smiles:
             if s and isinstance(s, str):
-                can = canonical_smiles(s)
-                if can:
-                    gen_canonical.append(can)
+                try:
+                    mol = Chem.MolFromSmiles(s)
+                    if mol is not None:
+                        can = Chem.MolToSmiles(mol)
+                        gen_canonical.append(can)
+                except Exception:
+                    pass
 
         ref_canonical = []
         for s in reference_smiles:
             if s and isinstance(s, str):
-                can = canonical_smiles(s)
-                if can:
-                    ref_canonical.append(can)
+                try:
+                    mol = Chem.MolFromSmiles(s)
+                    if mol is not None:
+                        can = Chem.MolToSmiles(mol)
+                        ref_canonical.append(can)
+                except Exception:
+                    pass
 
         if not gen_canonical or not ref_canonical:
             print(f"ERROR: No valid canonical SMILES - gen: {len(gen_canonical)}, ref: {len(ref_canonical)}")
             return float("inf")
 
-        return get_fcd(gen_canonical, ref_canonical, model)
+        model = load_ref_model()
+
+        # Wrap in try-except to catch multiprocessing errors
+        try:
+            fcd_score = get_fcd(gen_canonical, ref_canonical, model)
+            # Restore environment variables
+            if old_num_threads:
+                os.environ['OMP_NUM_THREADS'] = old_num_threads
+            else:
+                os.environ.pop('OMP_NUM_THREADS', None)
+            if old_mkl_threads:
+                os.environ['MKL_NUM_THREADS'] = old_mkl_threads
+            else:
+                os.environ.pop('MKL_NUM_THREADS', None)
+            return fcd_score
+        except Exception as e:
+            print(f"ERROR in get_fcd: {e}")
+            raise  # Re-raise to fall through to MOSES
     except ImportError:
         pass
+    except Exception as e:
+        print(f"ERROR in FCD package: {e}")
+        import traceback
+        traceback.print_exc()
+        pass
+    finally:
+        # Restore environment variables
+        if old_num_threads:
+            os.environ['OMP_NUM_THREADS'] = old_num_threads
+        else:
+            os.environ.pop('OMP_NUM_THREADS', None)
+        if old_mkl_threads:
+            os.environ['MKL_NUM_THREADS'] = old_mkl_threads
+        else:
+            os.environ.pop('MKL_NUM_THREADS', None)
 
     try:
         # Fall back to MOSES package (but it has multiprocessing bugs)
