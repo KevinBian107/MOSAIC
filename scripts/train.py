@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+Y#!/usr/bin/env python
 """Training script for molecular graph generation models.
 
 This script trains a transformer model on molecular graph data using

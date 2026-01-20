@@ -198,6 +198,7 @@ def main(cfg: DictConfig) -> None:
     log.info(f"Average generation time: {gen_time:.4f}s per sample")
 
     # Convert to SMILES using appropriate converter
+    # IMPORTANT: Include all attempts (even failures) for accurate validity metric
     generated_smiles = []
     if use_autograph:
         # AutoGraph models - use AutoGraph's conversion functions
@@ -206,16 +207,18 @@ def main(cfg: DictConfig) -> None:
         log.info("Converting AutoGraph graphs to SMILES...")
         for g in generated_graphs:
             smiles = autograph_graph_to_smiles(g, atom_decoder)
-            if smiles:
-                generated_smiles.append(smiles)
+            # Use empty string for failed conversions (None is not a valid SMILES)
+            generated_smiles.append(smiles if smiles else "")
     else:
         # MOSAIC models - use MOSAIC's conversion function
         log.info("Converting MOSAIC graphs to SMILES...")
         for g in generated_graphs:
             smiles = graph_to_smiles(g)
-            if smiles:
-                generated_smiles.append(smiles)
-    log.info(f"Successfully converted {len(generated_smiles)} graphs to SMILES")
+            # Use empty string for failed conversions (None is not a valid SMILES)
+            generated_smiles.append(smiles if smiles else "")
+
+    valid_count = sum(1 for s in generated_smiles if s)
+    log.info(f"Successfully converted {valid_count}/{len(generated_smiles)} graphs to SMILES")
 
     log.info("\n" + "=" * 50)
     log.info("MOLECULAR METRICS")

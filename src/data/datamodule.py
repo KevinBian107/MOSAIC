@@ -182,6 +182,17 @@ class MolecularDataModule(pl.LightningDataModule):
             )
 
         if stage == "test" or stage is None:
+            # Load train SMILES for metrics even in test mode
+            if stage == "test" and not hasattr(self, 'train_smiles'):
+                train_mol = MolecularDataset.from_moses(
+                    split="train",
+                    max_molecules=self.num_train,
+                    include_hydrogens=self.include_hydrogens,
+                    labeled=labeled,
+                )
+                self.train_smiles = train_mol.smiles_list
+                self.max_num_nodes = max(self.max_num_nodes, train_mol.max_num_nodes)
+
             test_mol = MolecularDataset.from_moses(
                 split="test",
                 max_molecules=self.num_test,
