@@ -199,6 +199,8 @@ def main(cfg: DictConfig) -> None:
 
     # Convert to SMILES using appropriate converter
     # IMPORTANT: Include all attempts (even failures) for accurate validity metric
+    # Use a sentinel value for failed conversions that RDKit will reject
+    INVALID_SMILES_SENTINEL = "INVALID"
     generated_smiles = []
     if use_autograph:
         # AutoGraph models - use AutoGraph's conversion functions
@@ -207,17 +209,15 @@ def main(cfg: DictConfig) -> None:
         log.info("Converting AutoGraph graphs to SMILES...")
         for g in generated_graphs:
             smiles = autograph_graph_to_smiles(g, atom_decoder)
-            # Use empty string for failed conversions (None is not a valid SMILES)
-            generated_smiles.append(smiles if smiles else "")
+            generated_smiles.append(smiles if smiles else INVALID_SMILES_SENTINEL)
     else:
         # MOSAIC models - use MOSAIC's conversion function
         log.info("Converting MOSAIC graphs to SMILES...")
         for g in generated_graphs:
             smiles = graph_to_smiles(g)
-            # Use empty string for failed conversions (None is not a valid SMILES)
-            generated_smiles.append(smiles if smiles else "")
+            generated_smiles.append(smiles if smiles else INVALID_SMILES_SENTINEL)
 
-    valid_count = sum(1 for s in generated_smiles if s)
+    valid_count = sum(1 for s in generated_smiles if s != INVALID_SMILES_SENTINEL)
     log.info(f"Successfully converted {valid_count}/{len(generated_smiles)} graphs to SMILES")
 
     log.info("\n" + "=" * 50)
