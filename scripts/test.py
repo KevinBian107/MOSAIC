@@ -35,8 +35,6 @@ from src.tokenizers.sent import SENTTokenizer
 
 # Import AutoGraph conversion functions for handling AutoGraph checkpoints
 try:
-    import sys
-    from pathlib import Path
     autograph_path = Path(__file__).parent.parent / "tmp" / "AutoGraph"
     if str(autograph_path) not in sys.path:
         sys.path.insert(0, str(autograph_path))
@@ -249,17 +247,20 @@ def main(cfg: DictConfig) -> None:
     log.info("FCD METRIC")
     log.info("=" * 50)
 
+    fcd_score = None
     try:
         fcd_score = compute_fcd(generated_smiles, datamodule.test_smiles)
         if not (fcd_score != fcd_score):  # Check for NaN
             log.info(f"  FCD: {fcd_score:.6f}")
         else:
             log.info("  FCD: Not available (install moses or fcd package)")
+            fcd_score = None
     except KeyboardInterrupt:
         raise
     except Exception as e:
         log.error(f"  FCD: Failed with error: {e}")
         log.info("  FCD: Skipping due to error")
+        fcd_score = None
 
     # Get motif summary for reference
     log.info("\n" + "=" * 50)
@@ -279,10 +280,10 @@ def main(cfg: DictConfig) -> None:
     all_results = {
         **mol_results,
         **motif_results,
-        "fcd": fcd_score if not (fcd_score != fcd_score) else None,
+        "fcd": fcd_score,
         "generation_time": gen_time,
         "num_samples": num_samples,
-        "num_valid_smiles": len(generated_smiles),
+        "num_valid_smiles": valid_count,
         "motif_summary": summary,  # Add detailed motif counts
     }
 
@@ -295,11 +296,12 @@ def main(cfg: DictConfig) -> None:
         json.dump(all_results, f, indent=2)
     log.info(f"\nResults saved to {results_file}")
 
-    # Save generated SMILES
+    # Save generated SMILES (only valid ones, excluding sentinel values)
     smiles_file = output_path / "generated_smiles.txt"
     with open(smiles_file, "w") as f:
         for smi in generated_smiles:
-            f.write(smi + "\n")
+            if smi != INVALID_SMILES_SENTINEL:
+                f.write(smi + "\n")
     log.info(f"Generated SMILES saved to {smiles_file}")
 
     log.info("\nEvaluation complete!")

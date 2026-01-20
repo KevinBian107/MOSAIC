@@ -1,4 +1,4 @@
-Y#!/usr/bin/env python
+#!/usr/bin/env python
 """Training script for molecular graph generation models.
 
 This script trains a transformer model on molecular graph data using
@@ -25,6 +25,7 @@ from omegaconf import DictConfig, OmegaConf
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.data.datamodule import MolecularDataModule
+from src.data.molecular import graph_to_smiles
 from src.evaluation.molecular_metrics import MolecularMetrics
 from src.evaluation.motif_distribution import MotifDistributionMetric
 from src.models.transformer import GraphGeneratorModule
@@ -309,17 +310,6 @@ def main(cfg: DictConfig) -> None:
     log.info("Starting training...")
     trainer.fit(model, datamodule, ckpt_path=ckpt_path)
 
-    log.info("Saving final checkpoint...")
-    final_checkpoint_path = f"{cfg.logs.path}/{cfg.model.model_name}-last.ckpt"
-    trainer.save_checkpoint(final_checkpoint_path)
-
-    if wandb_logger is not None and cfg.wandb.log_model:
-        save_model_artifact(
-            wandb_logger,
-            final_checkpoint_path,
-            artifact_name=f"{cfg.model.model_name}-final",
-        )
-
     log.info("Running evaluation on test set...")
     trainer.test(model, datamodule)
 
@@ -329,14 +319,15 @@ def main(cfg: DictConfig) -> None:
     log.info(f"Generated {len(generated_graphs)} graphs in {gen_time:.4f}s per sample")
 
     # Convert generated graphs to SMILES for molecular metrics
-    from src.data.molecular import graph_to_smiles
-
+    # Use sentinel value for failed conversions to compute accurate metrics
+    INVALID_SMILES_SENTINEL = "INVALID"
     generated_smiles = []
     for g in generated_graphs:
         smiles = graph_to_smiles(g)
-        if smiles:
-            generated_smiles.append(smiles)
-    log.info(f"Successfully converted {len(generated_smiles)} graphs to SMILES")
+        generated_smiles.append(smiles if smiles else INVALID_SMILES_SENTINEL)
+
+    valid_count = sum(1 for s in generated_smiles if s != INVALID_SMILES_SENTINEL)
+    log.info(f"Successfully converted {valid_count}/{len(generated_smiles)} graphs to SMILES")
 
     if wandb_logger is not None and cfg.wandb.log_graphs:
         log.info("Logging generated molecules to WandB...")
