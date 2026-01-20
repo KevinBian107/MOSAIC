@@ -13,6 +13,33 @@ from rdkit import Chem, DataStructs
 from rdkit.Chem import AllChem, BRICS
 from rdkit.Chem.Scaffolds import MurckoScaffold
 
+# Use new MorganGenerator API to avoid deprecation warnings
+try:
+    from rdkit.Chem import rdMolDescriptors
+    MORGAN_GENERATOR = rdMolDescriptors.GetMorganGenerator
+    USE_NEW_API = True
+except (ImportError, AttributeError):
+    # Fall back to old API if new one not available
+    USE_NEW_API = False
+
+
+def get_morgan_fingerprint(mol, radius: int = 2, n_bits: int = 2048):
+    """Get Morgan fingerprint using new or old RDKit API.
+
+    Args:
+        mol: RDKit molecule object.
+        radius: Fingerprint radius.
+        n_bits: Number of bits in fingerprint.
+
+    Returns:
+        Morgan fingerprint bit vector.
+    """
+    if USE_NEW_API:
+        gen = MORGAN_GENERATOR(radius=radius, fpSize=n_bits)
+        return gen.GetFingerprint(mol)
+    else:
+        return AllChem.GetMorganFingerprintAsBitVect(mol, radius, nBits=n_bits)
+
 
 def compute_validity(smiles_list: list[str]) -> float:
     """Compute the fraction of valid SMILES strings.
@@ -137,7 +164,7 @@ def compute_snn(
         mol = Chem.MolFromSmiles(smiles)
         if mol is not None:
             try:
-                fp = AllChem.GetMorganFingerprintAsBitVect(mol, fp_radius, nBits=fp_bits)
+                fp = get_morgan_fingerprint(mol, fp_radius, fp_bits)
                 ref_fps.append(fp)
             except Exception:
                 pass
@@ -151,7 +178,7 @@ def compute_snn(
         mol = Chem.MolFromSmiles(smiles)
         if mol is not None:
             try:
-                fp = AllChem.GetMorganFingerprintAsBitVect(mol, fp_radius, nBits=fp_bits)
+                fp = get_morgan_fingerprint(mol, fp_radius, fp_bits)
                 # Find nearest neighbor
                 sims = DataStructs.BulkTanimotoSimilarity(fp, ref_fps)
                 max_sim = max(sims) if sims else 0.0
@@ -316,7 +343,7 @@ def compute_internal_diversity(
         mol = Chem.MolFromSmiles(smiles)
         if mol is not None:
             try:
-                fp = AllChem.GetMorganFingerprintAsBitVect(mol, fp_radius, nBits=fp_bits)
+                fp = get_morgan_fingerprint(mol, fp_radius, fp_bits)
                 fps.append(fp)
             except Exception:
                 pass
@@ -375,9 +402,7 @@ class MolecularMetrics:
             mol = Chem.MolFromSmiles(smiles)
             if mol is not None:
                 try:
-                    fp = AllChem.GetMorganFingerprintAsBitVect(
-                        mol, fp_radius, nBits=fp_bits
-                    )
+                    fp = get_morgan_fingerprint(mol, fp_radius, fp_bits)
                     self._ref_fps.append(fp)
                     self._ref_canonical.add(Chem.MolToSmiles(mol))
                 except Exception:
