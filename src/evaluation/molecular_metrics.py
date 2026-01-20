@@ -7,11 +7,16 @@ fragment similarity, and scaffold similarity.
 
 from collections import Counter
 from typing import Optional
+import warnings
 
 import numpy as np
-from rdkit import Chem, DataStructs
+from rdkit import Chem, DataStructs, RDLogger
 from rdkit.Chem import AllChem, BRICS
 from rdkit.Chem.Scaffolds import MurckoScaffold
+
+# Suppress RDKit deprecation warnings globally
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+RDLogger.DisableLog('rdApp.warning')
 
 # Use new MorganGenerator API to avoid deprecation warnings
 try:
@@ -38,6 +43,7 @@ def get_morgan_fingerprint(mol, radius: int = 2, n_bits: int = 2048):
         gen = MORGAN_GENERATOR(radius=radius, fpSize=n_bits)
         return gen.GetFingerprint(mol)
     else:
+        # Use old API with warnings suppressed
         return AllChem.GetMorganFingerprintAsBitVect(mol, radius, nBits=n_bits)
 
 
