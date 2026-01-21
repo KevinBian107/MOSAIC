@@ -31,7 +31,7 @@ from src.data.molecular import graph_to_smiles
 from src.evaluation.molecular_metrics import MolecularMetrics, compute_fcd
 from src.evaluation.motif_distribution import MotifDistributionMetric
 from src.models.transformer import GraphGeneratorModule
-from src.tokenizers.sent import SENTTokenizer
+from src.tokenizers import SENTTokenizer, HSENTTokenizer
 
 # Import AutoGraph conversion functions for handling AutoGraph checkpoints
 try:
@@ -101,12 +101,36 @@ def main(cfg: DictConfig) -> None:
 
     pl.seed_everything(cfg.seed, workers=True)
 
-    tokenizer = SENTTokenizer(
-        max_length=cfg.tokenizer.max_length,
-        truncation_length=cfg.tokenizer.truncation_length,
-        undirected=cfg.tokenizer.undirected,
-        seed=cfg.seed,
-    )
+    # Select tokenizer based on config
+    tokenizer_type = cfg.tokenizer.get("type", "sent").lower()
+    if tokenizer_type == "hsent":
+        motif_aware = cfg.tokenizer.get("motif_aware", False)
+        if motif_aware:
+            log.info("Using hierarchical H-SENT tokenizer with motif-aware coarsening")
+            log.info(f"  motif_alpha: {cfg.tokenizer.get('motif_alpha', 1.0)}")
+        else:
+            log.info("Using hierarchical H-SENT tokenizer with spectral coarsening")
+        log.info(f"  node_order: {cfg.tokenizer.get('node_order', 'BFS')}")
+        log.info(f"  min_community_size: {cfg.tokenizer.get('min_community_size', 4)}")
+
+        tokenizer = HSENTTokenizer(
+            max_length=cfg.tokenizer.max_length,
+            truncation_length=cfg.tokenizer.truncation_length,
+            node_order=cfg.tokenizer.get("node_order", "BFS"),
+            min_community_size=cfg.tokenizer.get("min_community_size", 4),
+            motif_aware=motif_aware,
+            motif_alpha=cfg.tokenizer.get("motif_alpha", 1.0),
+            normalize_by_motif_size=cfg.tokenizer.get("normalize_by_motif_size", False),
+            seed=cfg.seed,
+        )
+    else:
+        log.info("Using flat SENT tokenizer")
+        tokenizer = SENTTokenizer(
+            max_length=cfg.tokenizer.max_length,
+            truncation_length=cfg.tokenizer.truncation_length,
+            undirected=cfg.tokenizer.get("undirected", True),
+            seed=cfg.seed,
+        )
 
     datamodule = MolecularDataModule(
         dataset_name=cfg.data.dataset_name,

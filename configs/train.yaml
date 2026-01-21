@@ -3,6 +3,7 @@
 defaults:
   - _self_
   - experiment: moses
+  - tokenizer: sent    # Options: sent, hsent, hsent_motif
 
 # Random seed
 seed: 42
@@ -28,14 +29,6 @@ data:
   num_test: 1000
   include_hydrogens: false
   data_root: data
-
-# Tokenizer configuration
-tokenizer:
-  type: sent  # 'sent' (flat SENT) or 'hsent' (hierarchical H-SENT)
-  max_length: -1
-  truncation_length: 2048
-  undirected: true
-  labeled_graph: true  # Enable labeled SENT (encode atom/bond types for molecules)
 
 # Training configuration
 trainer:

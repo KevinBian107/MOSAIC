@@ -209,10 +209,23 @@ def main(cfg: DictConfig) -> None:
     # Select tokenizer based on config
     tokenizer_type = cfg.tokenizer.get("type", "sent").lower()
     if tokenizer_type == "hsent":
-        log.info("Using hierarchical H-SENT tokenizer")
+        motif_aware = cfg.tokenizer.get("motif_aware", False)
+        if motif_aware:
+            log.info("Using hierarchical H-SENT tokenizer with motif-aware coarsening")
+            log.info(f"  motif_alpha: {cfg.tokenizer.get('motif_alpha', 1.0)}")
+        else:
+            log.info("Using hierarchical H-SENT tokenizer with spectral coarsening")
+        log.info(f"  node_order: {cfg.tokenizer.get('node_order', 'BFS')}")
+        log.info(f"  min_community_size: {cfg.tokenizer.get('min_community_size', 4)}")
+
         tokenizer = HSENTTokenizer(
             max_length=cfg.tokenizer.max_length,
             truncation_length=cfg.tokenizer.truncation_length,
+            node_order=cfg.tokenizer.get("node_order", "BFS"),
+            min_community_size=cfg.tokenizer.get("min_community_size", 4),
+            motif_aware=motif_aware,
+            motif_alpha=cfg.tokenizer.get("motif_alpha", 1.0),
+            normalize_by_motif_size=cfg.tokenizer.get("normalize_by_motif_size", False),
             seed=cfg.seed,
         )
     else:
@@ -220,7 +233,7 @@ def main(cfg: DictConfig) -> None:
         tokenizer = SENTTokenizer(
             max_length=cfg.tokenizer.max_length,
             truncation_length=cfg.tokenizer.truncation_length,
-            undirected=cfg.tokenizer.undirected,
+            undirected=cfg.tokenizer.get("undirected", True),
             labeled_graph=cfg.tokenizer.get("labeled_graph", False),
             seed=cfg.seed,
         )
