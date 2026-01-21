@@ -140,9 +140,7 @@ L2 distance between normalized BRICS fragment frequency distributions.
 
 ---
 
-## 4. Planned Metrics
-
-The following metrics are planned for future implementation:
+## 4. Additional Motif Metrics
 
 ### Motif Histogram Distribution
 
@@ -156,6 +154,11 @@ Distribution comparison of individual motif frequencies across molecules.
 
 $$D_{\text{motif}}(m) = D_{KL}(P_{\text{gen}}(\text{count}(m)) \| P_{\text{ref}}(\text{count}(m)))$$
 
+**Output Metrics**:
+- `motif_hist_mean`: Average KL divergence across all motif types
+- `motif_hist_max`: Maximum KL divergence (worst motif)
+- `motif_hist_{name}`: Per-motif KL divergence
+
 ### Motif Co-occurrence (Combinations)
 
 Measures which motifs tend to appear together in the same molecule.
@@ -164,15 +167,21 @@ Measures which motifs tend to appear together in the same molecule.
 
 **Approach**:
 - Build motif co-occurrence matrix C where Cᵢⱼ = P(motif j present | motif i present)
-- Compare matrices using Frobenius norm or element-wise KL divergence
+- Compare matrices using Frobenius norm
 
 $$C_{ij} = \frac{|\{M : m_i \in M \land m_j \in M\}|}{|\{M : m_i \in M\}|}$$
 
 $$D_{\text{co-occur}} = \|C_{\text{gen}} - C_{\text{ref}}\|_F$$
 
-**Extensions**:
-- Motif adjacency: which motifs are directly bonded
-- Motif distance: average shortest path between motif instances
+**Output Metrics**:
+- `motif_cooccur_frobenius`: Frobenius norm of matrix difference
+- `motif_cooccur_mean_abs`: Mean absolute element-wise difference
+
+---
+
+## 5. Planned Metrics
+
+The following metrics are planned for future implementation:
 
 ### PolyGraph
 
@@ -230,6 +239,33 @@ results = evaluator.compute(generated_smiles)
 summary = evaluator.get_motif_summary(generated_smiles)
 ```
 
+### MotifHistogramMetric
+
+```python
+from src.evaluation import MotifHistogramMetric
+
+evaluator = MotifHistogramMetric(reference_smiles, distance_fn="kl")
+results = evaluator.compute(generated_smiles)
+# {'motif_hist_mean': 0.05, 'motif_hist_max': 0.12, 'motif_hist_benzene': 0.03, ...}
+
+# Use Wasserstein distance instead of KL divergence
+evaluator_w = MotifHistogramMetric(reference_smiles, distance_fn="wasserstein")
+```
+
+### MotifCooccurrenceMetric
+
+```python
+from src.evaluation import MotifCooccurrenceMetric
+
+evaluator = MotifCooccurrenceMetric(reference_smiles)
+results = evaluator.compute(generated_smiles)
+# {'motif_cooccur_frobenius': 0.15, 'motif_cooccur_mean_abs': 0.02}
+
+# Get top co-occurring motif pairs
+summary = evaluator.get_cooccurrence_summary(generated_smiles, top_k=10)
+# {'top_pairs': [('benzene', 'hydroxyl', 0.85), ...]}
+```
+
 ---
 
 ## Metric Summary Table
@@ -248,6 +284,9 @@ summary = evaluator.get_motif_summary(generated_smiles)
 | Spectral MMD | [0, ∞) | 0.0 | Spectral properties |
 | Clustering MMD | [0, ∞) | 0.0 | Local clustering |
 | Motif MMD | [0, ∞) | 0.0 | Motif preservation |
+| Motif Hist Mean | [0, ∞) | 0.0 | Per-motif count distributions |
+| Motif Hist Max | [0, ∞) | 0.0 | Worst motif distribution |
+| Motif Co-occur | [0, ∞) | 0.0 | Motif combination patterns |
 
 ---
 

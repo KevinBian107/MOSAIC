@@ -57,7 +57,7 @@ logs:
 
 # Weights & Biases configuration
 wandb:
-  enabled: false
+  enabled: true
   project: molecular-graph-gen
   entity: null  # Your WandB username or team name
   name: null  # Run name (auto-generated if null)
@@ -65,4 +65,11 @@ wandb:
   notes: null  # Notes about this run
   log_model: true  # Log model checkpoints as artifacts
   log_graphs: true  # Log generated molecule visualizations
-  log_freq: 1000  # How often to log (in steps)
+  log_freq: 1000  # How often to log (in steps) - deprecated, use eval_every_n_val
+
+  # Enhanced molecule visualization with color-coded motif highlighting
+  max_logged_molecules: 12  # Number of molecules to visualize in WandB
+
+  # Intermediate evaluation during training (set to 0 to disable)
+  eval_every_n_val: 1  # Run generation eval every N validation epochs
+  eval_num_samples: 50  # Number of molecules to generate per intermediate eval

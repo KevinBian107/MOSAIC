@@ -3,6 +3,11 @@
 This module provides metrics for comparing the distribution of molecular
 motifs (functional groups, ring systems, BRICS fragments) between
 training data and generated molecules.
+
+Includes:
+- MotifDistributionMetric: MMD-based comparison of per-molecule motif vectors
+- MotifHistogramMetric: KL/Wasserstein comparison of per-motif count distributions
+- MotifCooccurrenceMetric: Frobenius norm comparison of motif co-occurrence matrices
 """
 
 from collections import Counter
@@ -11,6 +16,7 @@ from typing import Optional
 import numpy as np
 from rdkit import Chem
 from rdkit.Chem import BRICS, Fragments, rdMolDescriptors
+from scipy.stats import wasserstein_distance as scipy_wasserstein
 
 from src.evaluation.dist_helper import compute_mmd, gaussian
 
@@ -448,3 +454,336 @@ class MotifDistributionMetric:
             "ring_systems": dict(ring_total),
             "brics_fragments": dict(brics_total.most_common(20)),
         }
+
+
+# =============================================================================
+# Motif Histogram Distribution Metric
+# =============================================================================
+
+
+def compute_motif_histogram(
+    smiles_list: list[str],
+    motif_name: str,
+    max_count: int = 10,
+) -> np.ndarray:
+    """Compute histogram of motif counts across molecules.
+
+    For a given motif type, builds a probability distribution over the number
+    of times that motif appears in each molecule (0, 1, 2, ..., max_count).
+
+    Args:
+        smiles_list: List of SMILES strings.
+        motif_name: Name of motif (must be in MOLECULAR_MOTIFS).
+        max_count: Maximum count to track (counts >= max_count binned together).
+
+    Returns:
+        Probability distribution over counts [0, 1, 2, ..., max_count].
+    """
+    counts = []
+    for smiles in smiles_list:
+        motif_counts = get_motif_counts(smiles)
+        counts.append(motif_counts.get(motif_name, 0))
+
+    # Build histogram
+    hist = np.zeros(max_count + 1)
+    for c in counts:
+        hist[min(c, max_count)] += 1
+
+    # Normalize to probability
+    total = hist.sum()
+    if total > 0:
+        return hist / total
+    return hist
+
+
+def kl_divergence(p: np.ndarray, q: np.ndarray, eps: float = 1e-10) -> float:
+    """Compute KL divergence D_KL(P || Q) with smoothing.
+
+    Args:
+        p: First probability distribution (generated).
+        q: Second probability distribution (reference).
+        eps: Small constant for numerical stability.
+
+    Returns:
+        KL divergence value (non-negative, 0 if distributions are identical).
+    """
+    # Add smoothing to avoid log(0)
+    p_smooth = np.clip(p, eps, 1.0)
+    q_smooth = np.clip(q, eps, 1.0)
+
+    # Normalize after clipping
+    p_smooth = p_smooth / p_smooth.sum()
+    q_smooth = q_smooth / q_smooth.sum()
+
+    return float(np.sum(p_smooth * np.log(p_smooth / q_smooth)))
+
+
+def compute_wasserstein_distance(p: np.ndarray, q: np.ndarray) -> float:
+    """Compute 1-Wasserstein distance between discrete distributions.
+
+    Args:
+        p: First probability distribution.
+        q: Second probability distribution.
+
+    Returns:
+        Wasserstein distance (non-negative, 0 if distributions are identical).
+    """
+    support = np.arange(len(p))
+    return float(scipy_wasserstein(support, support, p, q))
+
+
+class MotifHistogramMetric:
+    """Compare per-motif count distributions between reference and generated.
+
+    For each motif type, computes the distribution of counts (0, 1, 2, ...)
+    across molecules and compares using KL divergence or Wasserstein distance.
+
+    This differs from MotifDistributionMetric which compares per-molecule
+    feature vectors using MMD. MotifHistogramMetric answers: "Does the model
+    generate benzene rings with the same frequency distribution as training?"
+
+    Attributes:
+        reference_smiles: List of reference SMILES strings.
+        motif_names: List of motif names to track.
+        max_count: Maximum count to track in histograms.
+        distance_fn: Distance function ('kl' or 'wasserstein').
+    """
+
+    def __init__(
+        self,
+        reference_smiles: list[str],
+        motif_names: list[str] | None = None,
+        max_count: int = 10,
+        distance_fn: str = "kl",
+    ) -> None:
+        """Initialize the motif histogram metric.
+
+        Args:
+            reference_smiles: Reference SMILES strings (typically training set).
+            motif_names: List of motif names to track. If None, uses all
+                MOLECULAR_MOTIFS.
+            max_count: Maximum count to track (counts >= max_count binned).
+            distance_fn: Distance function ('kl' or 'wasserstein').
+        """
+        # Filter to valid SMILES
+        self.reference_smiles = [
+            s
+            for s in reference_smiles
+            if s and s not in ["INVALID", ""] and Chem.MolFromSmiles(s) is not None
+        ]
+        self.motif_names = motif_names or list(MOLECULAR_MOTIFS.keys())
+        self.max_count = max_count
+        self.distance_fn = distance_fn
+
+        # Precompute reference histograms
+        self._ref_histograms: dict[str, np.ndarray] = {}
+        for name in self.motif_names:
+            self._ref_histograms[name] = compute_motif_histogram(
+                self.reference_smiles, name, self.max_count
+            )
+
+    def compute(self, generated_smiles: list[str]) -> dict[str, float]:
+        """Compute per-motif histogram distances.
+
+        Args:
+            generated_smiles: List of generated SMILES strings.
+
+        Returns:
+            Dictionary with:
+            - 'motif_hist_{name}': Distance for each motif
+            - 'motif_hist_mean': Average across all motifs
+            - 'motif_hist_max': Maximum distance (worst motif)
+        """
+        # Filter to valid SMILES
+        valid_smiles = [
+            s
+            for s in generated_smiles
+            if s and s not in ["INVALID", ""] and Chem.MolFromSmiles(s) is not None
+        ]
+
+        if not valid_smiles:
+            return {"motif_hist_mean": float("inf"), "motif_hist_max": float("inf")}
+
+        distances = {}
+        for name in self.motif_names:
+            gen_hist = compute_motif_histogram(valid_smiles, name, self.max_count)
+            ref_hist = self._ref_histograms[name]
+
+            if self.distance_fn == "kl":
+                dist = kl_divergence(gen_hist, ref_hist)
+            else:
+                dist = compute_wasserstein_distance(gen_hist, ref_hist)
+
+            distances[f"motif_hist_{name}"] = dist
+
+        all_dists = list(distances.values())
+        distances["motif_hist_mean"] = float(np.mean(all_dists))
+        distances["motif_hist_max"] = float(np.max(all_dists))
+
+        return distances
+
+    def __call__(self, generated_smiles: list[str]) -> dict[str, float]:
+        """Compute metrics (callable interface)."""
+        return self.compute(generated_smiles)
+
+
+# =============================================================================
+# Motif Co-occurrence Metric
+# =============================================================================
+
+
+def compute_cooccurrence_matrix(
+    smiles_list: list[str],
+    motif_names: list[str],
+) -> np.ndarray:
+    """Compute motif co-occurrence matrix.
+
+    C[i,j] = P(motif j present | motif i present)
+           = count(both i and j present) / count(i present)
+
+    Args:
+        smiles_list: List of SMILES strings.
+        motif_names: Ordered list of motif names.
+
+    Returns:
+        Co-occurrence matrix of shape (n_motifs, n_motifs).
+    """
+    n_motifs = len(motif_names)
+    n_molecules = len(smiles_list)
+
+    if n_molecules == 0:
+        return np.zeros((n_motifs, n_motifs))
+
+    # Build presence matrix: presence_matrix[i, j] = True if motif j in molecule i
+    presence_matrix = np.zeros((n_molecules, n_motifs), dtype=bool)
+
+    for i, smiles in enumerate(smiles_list):
+        counts = get_motif_counts(smiles)
+        for j, name in enumerate(motif_names):
+            presence_matrix[i, j] = counts.get(name, 0) > 0
+
+    # Compute co-occurrence: C[i,j] = sum(both present) / sum(i present)
+    cooccur = np.zeros((n_motifs, n_motifs))
+    for i in range(n_motifs):
+        count_i = presence_matrix[:, i].sum()
+        if count_i > 0:
+            for j in range(n_motifs):
+                count_both = (presence_matrix[:, i] & presence_matrix[:, j]).sum()
+                cooccur[i, j] = count_both / count_i
+
+    return cooccur
+
+
+class MotifCooccurrenceMetric:
+    """Compare motif co-occurrence patterns between reference and generated.
+
+    Builds conditional probability matrices P(motif_j | motif_i) and compares
+    using Frobenius norm. This captures higher-order structural patterns -
+    certain motifs naturally co-occur (e.g., benzene + hydroxyl in phenols).
+
+    Attributes:
+        reference_smiles: List of reference SMILES strings.
+        motif_names: List of motif names to track.
+    """
+
+    def __init__(
+        self,
+        reference_smiles: list[str],
+        motif_names: list[str] | None = None,
+    ) -> None:
+        """Initialize the motif co-occurrence metric.
+
+        Args:
+            reference_smiles: Reference SMILES strings (typically training set).
+            motif_names: List of motif names to track. If None, uses all
+                MOLECULAR_MOTIFS.
+        """
+        # Filter to valid SMILES
+        self.reference_smiles = [
+            s
+            for s in reference_smiles
+            if s and s not in ["INVALID", ""] and Chem.MolFromSmiles(s) is not None
+        ]
+        self.motif_names = motif_names or list(MOLECULAR_MOTIFS.keys())
+
+        # Precompute reference co-occurrence matrix
+        self._ref_cooccur = compute_cooccurrence_matrix(
+            self.reference_smiles, self.motif_names
+        )
+
+    def compute(self, generated_smiles: list[str]) -> dict[str, float]:
+        """Compute co-occurrence distance.
+
+        Args:
+            generated_smiles: List of generated SMILES strings.
+
+        Returns:
+            Dictionary with:
+            - 'motif_cooccur_frobenius': Frobenius norm of matrix difference
+            - 'motif_cooccur_mean_abs': Mean absolute element-wise difference
+        """
+        # Filter to valid SMILES
+        valid_smiles = [
+            s
+            for s in generated_smiles
+            if s and s not in ["INVALID", ""] and Chem.MolFromSmiles(s) is not None
+        ]
+
+        if not valid_smiles:
+            return {
+                "motif_cooccur_frobenius": float("inf"),
+                "motif_cooccur_mean_abs": float("inf"),
+            }
+
+        gen_cooccur = compute_cooccurrence_matrix(valid_smiles, self.motif_names)
+
+        diff = gen_cooccur - self._ref_cooccur
+        frobenius = np.linalg.norm(diff, "fro")
+        mean_abs = np.abs(diff).mean()
+
+        return {
+            "motif_cooccur_frobenius": float(frobenius),
+            "motif_cooccur_mean_abs": float(mean_abs),
+        }
+
+    def __call__(self, generated_smiles: list[str]) -> dict[str, float]:
+        """Compute metrics (callable interface)."""
+        return self.compute(generated_smiles)
+
+    def get_cooccurrence_summary(
+        self,
+        smiles_list: list[str],
+        top_k: int = 10,
+    ) -> dict[str, list[tuple[str, str, float]]]:
+        """Get top co-occurring motif pairs.
+
+        Args:
+            smiles_list: List of SMILES strings.
+            top_k: Number of top pairs to return.
+
+        Returns:
+            Dictionary with 'top_pairs': List of (motif_i, motif_j, P(j|i)) tuples.
+        """
+        valid_smiles = [
+            s
+            for s in smiles_list
+            if s and s not in ["INVALID", ""] and Chem.MolFromSmiles(s) is not None
+        ]
+        cooccur = compute_cooccurrence_matrix(valid_smiles, self.motif_names)
+
+        # Find top off-diagonal pairs
+        pairs = []
+        n = len(self.motif_names)
+        for i in range(n):
+            for j in range(n):
+                if i != j and cooccur[i, j] > 0:
+                    pairs.append(
+                        (
+                            self.motif_names[i],
+                            self.motif_names[j],
+                            cooccur[i, j],
+                        )
+                    )
+
+        pairs.sort(key=lambda x: x[2], reverse=True)
+        return {"top_pairs": pairs[:top_k]}

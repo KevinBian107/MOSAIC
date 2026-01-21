@@ -1,5 +1,6 @@
 """Tests for molecular evaluation metrics."""
 
+import numpy as np
 import pytest
 
 from src.evaluation.molecular_metrics import (
@@ -17,6 +18,11 @@ from src.evaluation.motif_distribution import (
     get_motif_counts,
     get_ring_system_info,
     MotifDistributionMetric,
+    MotifHistogramMetric,
+    MotifCooccurrenceMetric,
+    compute_motif_histogram,
+    compute_cooccurrence_matrix,
+    kl_divergence,
     MOLECULAR_MOTIFS,
 )
 
@@ -231,3 +237,196 @@ class TestMotifDistributionMetric:
         assert "smarts_motifs" in summary
         assert "ring_systems" in summary
         assert "brics_fragments" in summary
+
+
+class TestMotifHistogramHelpers:
+    """Tests for motif histogram helper functions."""
+
+    def test_compute_motif_histogram_benzene(self) -> None:
+        """Test histogram computation for benzene motif."""
+        # Molecules: benzene (1), naphthalene (2 fused rings count as 1 benzene match)
+        smiles = ["c1ccccc1", "CCO", "c1ccccc1O"]
+        hist = compute_motif_histogram(smiles, "benzene", max_count=5)
+
+        assert len(hist) == 6  # 0, 1, 2, 3, 4, 5
+        assert hist.sum() == pytest.approx(1.0)  # Normalized
+        # CCO has 0 benzenes, others have >= 1
+        assert hist[0] > 0
+
+    def test_compute_motif_histogram_empty(self) -> None:
+        """Test histogram for empty list."""
+        hist = compute_motif_histogram([], "benzene", max_count=5)
+        assert hist.sum() == 0
+
+    def test_kl_divergence_identical(self) -> None:
+        """Test KL divergence is 0 for identical distributions."""
+        p = np.array([0.25, 0.5, 0.25])
+        result = kl_divergence(p, p)
+        assert result == pytest.approx(0.0, abs=1e-6)
+
+    def test_kl_divergence_different(self) -> None:
+        """Test KL divergence is positive for different distributions."""
+        p = np.array([0.9, 0.1, 0.0])
+        q = np.array([0.1, 0.1, 0.8])
+        result = kl_divergence(p, q)
+        assert result > 0
+
+
+class TestMotifHistogramMetric:
+    """Tests for MotifHistogramMetric class."""
+
+    def test_init_precomputes_histograms(self) -> None:
+        """Test initialization precomputes reference histograms."""
+        metric = MotifHistogramMetric(VALID_SMILES)
+        assert len(metric._ref_histograms) == len(MOLECULAR_MOTIFS)
+
+    def test_compute_returns_distances(self) -> None:
+        """Test compute returns per-motif and aggregate distances."""
+        metric = MotifHistogramMetric(VALID_SMILES)
+        result = metric.compute(VALID_SMILES)
+
+        assert "motif_hist_mean" in result
+        assert "motif_hist_max" in result
+        # Should have per-motif distances
+        assert any(k.startswith("motif_hist_") and k not in ["motif_hist_mean", "motif_hist_max"]
+                   for k in result.keys())
+
+    def test_self_comparison_low_distance(self) -> None:
+        """Test distance is low when comparing to self."""
+        metric = MotifHistogramMetric(VALID_SMILES)
+        result = metric.compute(VALID_SMILES)
+
+        # KL divergence should be ~0 for identical distributions
+        assert result["motif_hist_mean"] < 0.1
+
+    def test_different_distributions_higher_distance(self) -> None:
+        """Test distance is higher for different distributions."""
+        # Reference with benzene rings
+        ref = ["c1ccccc1", "c1ccccc1O", "c1ccc2ccccc2c1"]
+        # Generated without benzene rings
+        gen = ["CCO", "CCCO", "CCCCO"]
+
+        metric = MotifHistogramMetric(ref)
+        result = metric.compute(gen)
+
+        # Benzene histogram should show significant difference
+        assert result["motif_hist_benzene"] > 0.1
+
+    def test_wasserstein_distance_option(self) -> None:
+        """Test Wasserstein distance function option."""
+        metric = MotifHistogramMetric(VALID_SMILES, distance_fn="wasserstein")
+        result = metric.compute(VALID_SMILES)
+
+        assert "motif_hist_mean" in result
+        assert result["motif_hist_mean"] >= 0
+
+    def test_callable_interface(self) -> None:
+        """Test __call__ works."""
+        metric = MotifHistogramMetric(VALID_SMILES)
+        result = metric(VALID_SMILES)
+        assert "motif_hist_mean" in result
+
+    def test_invalid_smiles_handling(self) -> None:
+        """Test handling of invalid SMILES."""
+        metric = MotifHistogramMetric(VALID_SMILES)
+        result = metric.compute(["INVALID", "", "not_valid"])
+
+        assert result["motif_hist_mean"] == float("inf")
+
+
+class TestMotifCooccurrenceHelpers:
+    """Tests for motif co-occurrence helper functions."""
+
+    def test_compute_cooccurrence_matrix_shape(self) -> None:
+        """Test co-occurrence matrix has correct shape."""
+        motif_names = ["benzene", "hydroxyl", "carbonyl"]
+        matrix = compute_cooccurrence_matrix(VALID_SMILES, motif_names)
+
+        assert matrix.shape == (3, 3)
+
+    def test_compute_cooccurrence_matrix_diagonal(self) -> None:
+        """Test diagonal is 1.0 for present motifs."""
+        # Phenol has benzene, so P(benzene|benzene) = 1.0
+        smiles = ["c1ccccc1O"] * 10
+        motif_names = ["benzene", "hydroxyl"]
+        matrix = compute_cooccurrence_matrix(smiles, motif_names)
+
+        # Diagonal should be 1.0 for motifs that are present
+        assert matrix[0, 0] == 1.0  # P(benzene|benzene)
+        assert matrix[1, 1] == 1.0  # P(hydroxyl|hydroxyl)
+
+    def test_compute_cooccurrence_phenol(self) -> None:
+        """Test co-occurrence for phenol (benzene + hydroxyl)."""
+        smiles = ["c1ccccc1O"] * 10  # All phenol
+        motif_names = ["benzene", "hydroxyl"]
+        matrix = compute_cooccurrence_matrix(smiles, motif_names)
+
+        # P(hydroxyl|benzene) should be 1.0
+        assert matrix[0, 1] == 1.0
+        # P(benzene|hydroxyl) should be 1.0
+        assert matrix[1, 0] == 1.0
+
+    def test_compute_cooccurrence_empty(self) -> None:
+        """Test co-occurrence for empty list."""
+        matrix = compute_cooccurrence_matrix([], ["benzene", "hydroxyl"])
+        assert matrix.shape == (2, 2)
+        assert matrix.sum() == 0
+
+
+class TestMotifCooccurrenceMetric:
+    """Tests for MotifCooccurrenceMetric class."""
+
+    def test_init_computes_reference(self) -> None:
+        """Test initialization computes reference matrix."""
+        metric = MotifCooccurrenceMetric(VALID_SMILES)
+        assert metric._ref_cooccur.shape[0] == len(metric.motif_names)
+
+    def test_compute_returns_distances(self) -> None:
+        """Test compute returns distance metrics."""
+        metric = MotifCooccurrenceMetric(VALID_SMILES)
+        result = metric.compute(VALID_SMILES)
+
+        assert "motif_cooccur_frobenius" in result
+        assert "motif_cooccur_mean_abs" in result
+
+    def test_self_comparison_low_distance(self) -> None:
+        """Test distance is low when comparing to self."""
+        metric = MotifCooccurrenceMetric(VALID_SMILES)
+        result = metric.compute(VALID_SMILES)
+
+        assert result["motif_cooccur_frobenius"] < 0.1
+        assert result["motif_cooccur_mean_abs"] < 0.1
+
+    def test_different_patterns_higher_distance(self) -> None:
+        """Test distance is higher for different co-occurrence patterns."""
+        # Reference: phenols (benzene + hydroxyl co-occur)
+        ref = ["c1ccccc1O", "c1ccc(O)cc1", "c1ccccc1O"]
+        # Generated: separate motifs (no co-occurrence)
+        gen = ["c1ccccc1", "CCO", "CCCO"]
+
+        metric = MotifCooccurrenceMetric(ref, motif_names=["benzene", "hydroxyl"])
+        result = metric.compute(gen)
+
+        # Should show difference in co-occurrence
+        assert result["motif_cooccur_frobenius"] > 0
+
+    def test_callable_interface(self) -> None:
+        """Test __call__ works."""
+        metric = MotifCooccurrenceMetric(VALID_SMILES)
+        result = metric(VALID_SMILES)
+        assert "motif_cooccur_frobenius" in result
+
+    def test_get_cooccurrence_summary(self) -> None:
+        """Test co-occurrence summary generation."""
+        metric = MotifCooccurrenceMetric(VALID_SMILES)
+        summary = metric.get_cooccurrence_summary(VALID_SMILES, top_k=5)
+
+        assert "top_pairs" in summary
+        assert isinstance(summary["top_pairs"], list)
+
+    def test_invalid_smiles_handling(self) -> None:
+        """Test handling of invalid SMILES."""
+        metric = MotifCooccurrenceMetric(VALID_SMILES)
+        result = metric.compute(["INVALID", "", "not_valid"])
+
+        assert result["motif_cooccur_frobenius"] == float("inf")
