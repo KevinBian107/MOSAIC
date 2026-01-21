@@ -197,7 +197,11 @@ class MotifDistributionMetric:
             use_ring_systems: Include ring system information.
             use_brics: Include BRICS fragment distribution.
         """
-        self.reference_smiles = reference_smiles
+        # Filter out invalid SMILES (None, empty, "INVALID" sentinel)
+        self.reference_smiles = [
+            s for s in reference_smiles
+            if s and s not in ["INVALID", ""] and Chem.MolFromSmiles(s) is not None
+        ]
         self.use_functional_groups = use_functional_groups
         self.use_smarts_motifs = use_smarts_motifs
         self.use_ring_systems = use_ring_systems
@@ -338,9 +342,12 @@ class MotifDistributionMetric:
         Returns:
             Dictionary of metric names to values.
         """
-        # Filter to valid SMILES
+        # Filter to valid SMILES (skip sentinel values before parsing)
         valid_smiles = []
         for smiles in generated_smiles:
+            # Skip invalid sentinel values before calling RDKit
+            if not smiles or smiles in ["INVALID", ""]:
+                continue
             mol = Chem.MolFromSmiles(smiles)
             if mol is not None:
                 valid_smiles.append(smiles)

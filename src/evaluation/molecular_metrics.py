@@ -61,6 +61,9 @@ def compute_validity(smiles_list: list[str]) -> float:
 
     valid_count = 0
     for smiles in smiles_list:
+        # Skip invalid sentinel values before calling RDKit
+        if not smiles or smiles in ["INVALID", ""]:
+            continue
         mol = Chem.MolFromSmiles(smiles)
         if mol is not None:
             try:
@@ -83,6 +86,9 @@ def compute_uniqueness(smiles_list: list[str]) -> float:
     """
     valid_smiles = []
     for smiles in smiles_list:
+        # Skip invalid sentinel values before calling RDKit
+        if not smiles or smiles in ["INVALID", ""]:
+            continue
         mol = Chem.MolFromSmiles(smiles)
         if mol is not None:
             try:
