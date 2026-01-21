@@ -29,6 +29,8 @@ data:
   num_test: 1000
   include_hydrogens: false
   data_root: data
+  use_cache: false  # Set to true to use preprocessed cached data
+  cache_dir: data/cache  # Directory for cached tokenized data
 
 # Training configuration
 trainer:
@@ -49,7 +51,9 @@ sampling:
 
 # Logging configuration
 logs:
-  path: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  base_dir: outputs/train
+  run_name: ${data.dataset_name}_${tokenizer.type}_n${data.num_train}
+  path: ${logs.base_dir}/${logs.run_name}_${now:%Y%m%d-%H%M%S}
 
 # Weights & Biases configuration
 wandb:
