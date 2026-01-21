@@ -69,6 +69,9 @@ class HDTTokenizer(Tokenizer):
         motif_alpha: Weight for motif affinity (if motif_aware=True).
     """
 
+    # Tokenizer type identifier
+    tokenizer_type: str = "hdt"
+
     # Special token IDs
     SOS: int = 0
     EOS: int = 1
@@ -110,6 +113,7 @@ class HDTTokenizer(Tokenizer):
         motif_alpha: float = 1.0,
         motif_patterns: Optional[dict[str, str]] = None,
         normalize_by_motif_size: bool = False,
+        labeled_graph: bool = False,
     ) -> None:
         """Initialize the HDT tokenizer.
 
@@ -130,6 +134,7 @@ class HDTTokenizer(Tokenizer):
             motif_patterns: Custom SMARTS patterns for motif detection.
             normalize_by_motif_size: Whether to normalize motif contributions
                 by 1/motif_size.
+            labeled_graph: Whether to encode node/edge features (atom/bond types).
         """
         self.node_order = node_order
         self.max_length = max_length
@@ -163,6 +168,13 @@ class HDTTokenizer(Tokenizer):
 
         self.max_num_nodes: Optional[int] = None
 
+        # Labeled graph support
+        self.labeled_graph = labeled_graph
+        self.num_node_types: int = 0
+        self.num_edge_types: int = 0
+        self.node_idx_offset: int = 0
+        self.edge_idx_offset: int = 0
+
     def set_num_nodes(self, max_num_nodes: int) -> None:
         """Set maximum number of nodes for vocabulary sizing.
 
@@ -172,12 +184,49 @@ class HDTTokenizer(Tokenizer):
         if self.max_num_nodes is None or self.max_num_nodes < max_num_nodes:
             self.max_num_nodes = max_num_nodes
 
+    def set_num_node_and_edge_types(
+        self, num_node_types: int, num_edge_types: int
+    ) -> None:
+        """Set the number of node and edge types for labeled graphs.
+
+        This method must be called when labeled_graph=True before tokenization.
+        Updates offsets for node and edge type tokens in the vocabulary.
+
+        Args:
+            num_node_types: Number of distinct node types (e.g., atom types).
+            num_edge_types: Number of distinct edge types (e.g., bond types).
+
+        Raises:
+            ValueError: If labeled_graph=False.
+        """
+        if not self.labeled_graph:
+            raise ValueError("Cannot set node/edge types when labeled_graph=False")
+
+        self.num_node_types = num_node_types
+        self.num_edge_types = num_edge_types
+
+        # Offsets in vocabulary:
+        # [SOS, EOS, PAD, ENTER, EXIT, LEDGE, REDGE] = 7 special tokens
+        # Then: [0, 1, 2, ..., max_num_nodes-1] = node IDs
+        # Then: [atom_type_0, ..., atom_type_{num_node_types-1}] = atom types
+        # Then: [bond_type_0, ..., bond_type_{num_edge_types-1}] = bond types
+        self.node_idx_offset = self.IDX_OFFSET + self.max_num_nodes
+        self.edge_idx_offset = self.node_idx_offset + self.num_node_types
+
     @property
     def vocab_size(self) -> int:
-        """Return vocabulary size."""
+        """Return vocabulary size.
+
+        Unlabeled: IDX_OFFSET (7) + max_num_nodes
+        Labeled: IDX_OFFSET (7) + max_num_nodes + num_node_types + num_edge_types
+        """
         if self.max_num_nodes is None:
             raise ValueError("Call set_num_nodes() first")
-        return self.IDX_OFFSET + self.max_num_nodes
+
+        base_size = self.IDX_OFFSET + self.max_num_nodes
+        if self.labeled_graph:
+            return base_size + self.num_node_types + self.num_edge_types
+        return base_size
 
     # =====================================================================
     # TOKENIZATION: Graph -> Tokens
@@ -221,6 +270,7 @@ class HDTTokenizer(Tokenizer):
             tokens=tokens,
             visited_atoms=visited_atoms,
             full_adj=full_adj,
+            root_hg=hg,  # Pass root hierarchy for edge feature lookup
         )
 
         tokens.append(self.EOS)
@@ -318,6 +368,7 @@ class HDTTokenizer(Tokenizer):
         tokens: list[int],
         visited_atoms: list[int],
         full_adj: dict[int, set[int]],
+        root_hg: HierarchicalGraph,
     ) -> None:
         """Recursive DFS serialization of hierarchical graph.
 
@@ -332,6 +383,7 @@ class HDTTokenizer(Tokenizer):
             tokens: Token list to append to.
             visited_atoms: List of already visited atom indices.
             full_adj: Full adjacency map including bipartite edges.
+            root_hg: Root HierarchicalGraph for edge feature lookup.
         """
         # Emit: [ENTER] <level> <local_id>
         tokens.append(self.ENTER)
@@ -354,10 +406,11 @@ class HDTTokenizer(Tokenizer):
                     tokens=tokens,
                     visited_atoms=visited_atoms,
                     full_adj=full_adj,
+                    root_hg=root_hg,
                 )
             else:
                 # Leaf partition: emit atoms with back-edges
-                self._serialize_atoms(part, tokens, visited_atoms, full_adj)
+                self._serialize_atoms(part, tokens, visited_atoms, full_adj, root_hg)
 
             # Emit EXIT for this partition (back to parent level)
             tokens.append(self.EXIT)
@@ -372,6 +425,7 @@ class HDTTokenizer(Tokenizer):
         tokens: list[int],
         visited_atoms: list[int],
         full_adj: dict[int, set[int]],
+        root_hg: HierarchicalGraph,
     ) -> None:
         """Serialize partitions within a nested hierarchy.
 
@@ -384,6 +438,7 @@ class HDTTokenizer(Tokenizer):
             tokens: Token list to append to.
             visited_atoms: List of already visited atom indices.
             full_adj: Full adjacency map including bipartite edges.
+            root_hg: Root HierarchicalGraph for edge feature lookup.
         """
         for part in hg.partitions:
             # Emit ENTER for this partition
@@ -399,10 +454,11 @@ class HDTTokenizer(Tokenizer):
                     tokens=tokens,
                     visited_atoms=visited_atoms,
                     full_adj=full_adj,
+                    root_hg=root_hg,
                 )
             else:
                 # Leaf partition: emit atoms
-                self._serialize_atoms(part, tokens, visited_atoms, full_adj)
+                self._serialize_atoms(part, tokens, visited_atoms, full_adj, root_hg)
 
             # Emit EXIT for this partition
             tokens.append(self.EXIT)
@@ -413,14 +469,20 @@ class HDTTokenizer(Tokenizer):
         tokens: list[int],
         visited_atoms: list[int],
         full_adj: dict[int, set[int]],
+        root_hg: HierarchicalGraph,
     ) -> None:
         """Serialize atoms with back-edges (including cross-community).
+
+        For labeled graphs, interleaves atom and bond type tokens:
+        - After each node ID: append atom type token
+        - After each back-edge target: append bond type token
 
         Args:
             part: Leaf partition to serialize.
             tokens: Token list to append to.
             visited_atoms: List of already visited atom indices.
             full_adj: Full adjacency map including bipartite edges.
+            root_hg: Root HierarchicalGraph for edge feature lookup.
         """
         # Get canonical node ordering
         node_order = order_partition_nodes(part, self.node_order, self.seed)
@@ -428,6 +490,12 @@ class HDTTokenizer(Tokenizer):
         for local_idx in node_order:
             global_idx = part.global_node_indices[local_idx]
             tokens.append(self.IDX_OFFSET + global_idx)
+
+            # Add atom type if labeled graph
+            if self.labeled_graph:
+                atom_type = self._get_node_feature(part, local_idx)
+                atom_token = self.node_idx_offset + atom_type
+                tokens.append(atom_token)
 
             # Find ALL edges to previously visited atoms
             # This includes both intra-partition AND cross-partition edges
@@ -437,6 +505,15 @@ class HDTTokenizer(Tokenizer):
                 tokens.append(self.LEDGE)
                 for target_global in back_edges:
                     tokens.append(self.IDX_OFFSET + target_global)
+
+                    # Add bond type if labeled graph
+                    if self.labeled_graph:
+                        bond_type = self._get_edge_feature(
+                            root_hg, global_idx, target_global
+                        )
+                        bond_token = self.edge_idx_offset + bond_type
+                        tokens.append(bond_token)
+
                 tokens.append(self.REDGE)
 
             visited_atoms.append(global_idx)
@@ -461,6 +538,49 @@ class HDTTokenizer(Tokenizer):
         visited_set = set(visited_atoms)
         back_targets = [n for n in neighbors if n in visited_set]
         return sorted(back_targets)
+
+    def _get_node_feature(self, part: Partition, local_idx: int) -> int:
+        """Get node feature (atom type) for a node in a partition.
+
+        Args:
+            part: The partition containing the node.
+            local_idx: Local index of the node within the partition.
+
+        Returns:
+            Node feature value (atom type), or 0 if not found.
+        """
+        if part.node_features is not None and local_idx < len(part.node_features):
+            return int(part.node_features[local_idx])
+        return 0  # Default atom type
+
+    def _get_edge_feature(
+        self, root_hg: HierarchicalGraph, src_global: int, dst_global: int
+    ) -> int:
+        """Get edge feature (bond type) for an edge.
+
+        This method looks up edge features from the root hierarchy's edge_features
+        dictionary using global indices.
+
+        Args:
+            root_hg: Root HierarchicalGraph containing edge_features.
+            src_global: Source node global index.
+            dst_global: Target node global index.
+
+        Returns:
+            Edge feature value (bond type), or 0 if not found.
+        """
+        if root_hg.edge_features is not None:
+            # Try both directions since graph may be undirected
+            bond_type = root_hg.edge_features.get((src_global, dst_global), None)
+            if bond_type is not None:
+                return bond_type
+
+            # Try reverse direction
+            bond_type = root_hg.edge_features.get((dst_global, src_global), None)
+            if bond_type is not None:
+                return bond_type
+
+        return 0  # Default bond type
 
     # =====================================================================
     # DECODING: Tokens -> Graph
@@ -498,8 +618,17 @@ class HDTTokenizer(Tokenizer):
         idx = 0
         atoms_visited: list[int] = []
         all_edges: list[tuple[int, int]] = []
+        node_features_dict: dict[int, int] = {}  # global_idx -> atom_type
+        edge_features_dict: dict[tuple[int, int], int] = {}  # (src, dst) -> bond_type
 
-        hg, idx = self._parse_hierarchy(tokens_list, idx, atoms_visited, all_edges)
+        hg, idx = self._parse_hierarchy(
+            tokens_list,
+            idx,
+            atoms_visited,
+            all_edges,
+            node_features_dict,
+            edge_features_dict,
+        )
 
         if hg is None:
             return HierarchicalGraph([], [], [])
@@ -512,6 +641,8 @@ class HDTTokenizer(Tokenizer):
         idx: int,
         atoms_visited: list[int],
         all_edges: list[tuple[int, int]],
+        node_features_dict: dict[int, int],
+        edge_features_dict: dict[tuple[int, int], int],
     ) -> tuple[Optional[HierarchicalGraph], int]:
         """Recursively parse hierarchy from DFS token stream.
 
@@ -520,6 +651,8 @@ class HDTTokenizer(Tokenizer):
             idx: Current index in token list.
             atoms_visited: Global list of visited atoms.
             all_edges: Accumulator for all edges found.
+            node_features_dict: Dictionary mapping node index to atom type.
+            edge_features_dict: Dictionary mapping edge to bond type.
 
         Returns:
             Tuple of (parsed HierarchicalGraph or None, next index).
@@ -557,7 +690,7 @@ class HDTTokenizer(Tokenizer):
                 # Save current atoms as partition if any
                 if current_atoms:
                     part = self._make_partition(
-                        part_counter, current_atoms, current_edges
+                        part_counter, current_atoms, current_edges, node_features_dict
                     )
                     partitions.append(part)
                     part_counter += 1
@@ -566,7 +699,12 @@ class HDTTokenizer(Tokenizer):
 
                 # Recurse into nested hierarchy
                 child_hg, idx = self._parse_hierarchy(
-                    tokens, idx, atoms_visited, all_edges
+                    tokens,
+                    idx,
+                    atoms_visited,
+                    all_edges,
+                    node_features_dict,
+                    edge_features_dict,
                 )
                 if child_hg is not None:
                     # Create a partition that contains this child hierarchy
@@ -581,26 +719,68 @@ class HDTTokenizer(Tokenizer):
                     part_counter += 1
 
             elif tok >= self.IDX_OFFSET:
-                # Atom token
-                global_idx = tok - self.IDX_OFFSET
-                current_atoms.append(global_idx)
-                atoms_visited.append(global_idx)
-                idx += 1
+                # Atom token - check if this is a node ID or atom type
+                # Node IDs are in range [IDX_OFFSET, IDX_OFFSET + max_num_nodes)
+                # Atom types are in range [node_idx_offset, edge_idx_offset)
+                if self.labeled_graph and tok >= self.node_idx_offset:
+                    # This is an atom type token - should not happen here
+                    # Skip it and continue
+                    idx += 1
+                else:
+                    # This is a node ID
+                    global_idx = tok - self.IDX_OFFSET
+                    current_atoms.append(global_idx)
+                    atoms_visited.append(global_idx)
+                    idx += 1
+
+                    # Read atom type if labeled graph
+                    if self.labeled_graph:
+                        if idx < len(tokens) and tokens[idx] >= self.node_idx_offset:
+                            atom_token = tokens[idx]
+                            atom_type = atom_token - self.node_idx_offset
+                            node_features_dict[global_idx] = atom_type
+                            idx += 1
 
             elif tok == self.LEDGE:
                 # Back-edge block
                 idx += 1
                 while idx < len(tokens) and tokens[idx] != self.REDGE:
                     if tokens[idx] >= self.IDX_OFFSET:
-                        target = tokens[idx] - self.IDX_OFFSET
-                        # Current atom is the last one added
-                        if current_atoms:
-                            src = current_atoms[-1]
-                            current_edges.append((src, target))
-                            current_edges.append((target, src))
-                            all_edges.append((src, target))
-                            all_edges.append((target, src))
-                    idx += 1
+                        # Check if this is a target node ID or bond type
+                        if (
+                            self.labeled_graph
+                            and tokens[idx] >= self.node_idx_offset
+                        ):
+                            # This is a bond type for the previous target
+                            # Skip it as we already processed it
+                            idx += 1
+                        else:
+                            # This is a target node ID
+                            target = tokens[idx] - self.IDX_OFFSET
+                            # Current atom is the last one added
+                            if current_atoms:
+                                src = current_atoms[-1]
+                                current_edges.append((src, target))
+                                current_edges.append((target, src))
+                                all_edges.append((src, target))
+                                all_edges.append((target, src))
+
+                                # Read bond type if labeled graph
+                                idx += 1
+                                if self.labeled_graph:
+                                    if (
+                                        idx < len(tokens)
+                                        and tokens[idx] >= self.edge_idx_offset
+                                    ):
+                                        bond_token = tokens[idx]
+                                        bond_type = bond_token - self.edge_idx_offset
+                                        edge_features_dict[(src, target)] = bond_type
+                                        edge_features_dict[(target, src)] = bond_type
+                                        idx += 1
+                            else:
+                                idx += 1
+                    else:
+                        idx += 1
                 idx += 1  # Skip REDGE
 
             else:
@@ -612,7 +792,9 @@ class HDTTokenizer(Tokenizer):
 
         # Finalize last partition
         if current_atoms:
-            part = self._make_partition(part_counter, current_atoms, current_edges)
+            part = self._make_partition(
+                part_counter, current_atoms, current_edges, node_features_dict
+            )
             partitions.append(part)
 
         # Build HierarchicalGraph
@@ -622,13 +804,31 @@ class HDTTokenizer(Tokenizer):
         # Build community assignment
         community_assignment = self._build_community_assignment(partitions)
 
-        return HierarchicalGraph(partitions, bipartites, community_assignment), idx
+        # Convert node features to tensor
+        node_features = None
+        if self.labeled_graph and node_features_dict:
+            max_node_idx = max(node_features_dict.keys())
+            node_features = torch.zeros(max_node_idx + 1, dtype=torch.long)
+            for node_idx, atom_type in node_features_dict.items():
+                node_features[node_idx] = atom_type
+
+        return (
+            HierarchicalGraph(
+                partitions,
+                bipartites,
+                community_assignment,
+                node_features=node_features,
+                edge_features=edge_features_dict if self.labeled_graph else None,
+            ),
+            idx,
+        )
 
     def _make_partition(
         self,
         part_id: int,
         global_atoms: list[int],
         edges: list[tuple[int, int]],
+        node_features_dict: dict[int, int],
     ) -> Partition:
         """Create a partition from atoms and edges.
 
@@ -636,9 +836,10 @@ class HDTTokenizer(Tokenizer):
             part_id: Partition ID.
             global_atoms: Global atom indices in this partition.
             edges: Edges as (global_src, global_dst) tuples.
+            node_features_dict: Dictionary mapping node index to atom type.
 
         Returns:
-            Partition object with local edge indices.
+            Partition object with local edge indices and node features.
         """
         global_to_local = {g: i for i, g in enumerate(global_atoms)}
         global_set = set(global_atoms)
@@ -655,11 +856,20 @@ class HDTTokenizer(Tokenizer):
         else:
             edge_index = torch.zeros((2, 0), dtype=torch.long)
 
+        # Extract node features for this partition (in LOCAL indices)
+        node_features = None
+        if self.labeled_graph and node_features_dict:
+            node_features = torch.zeros(len(global_atoms), dtype=torch.long)
+            for local_idx, global_idx in enumerate(global_atoms):
+                if global_idx in node_features_dict:
+                    node_features[local_idx] = node_features_dict[global_idx]
+
         return Partition(
             part_id=part_id,
             global_node_indices=global_atoms,
             edge_index=edge_index,
             child_hierarchy=None,
+            node_features=node_features,
         )
 
     def _collect_global_indices(self, hg: HierarchicalGraph) -> list[int]:
