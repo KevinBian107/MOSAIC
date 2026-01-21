@@ -26,3 +26,6 @@ min_community_size: 4       # Minimum nodes before stopping recursion
 
 # Motif-aware coarsening (disabled by default)
 motif_aware: false
+
+# Labeled graph support (encode atom/bond types for molecules)
+labeled_graph: true

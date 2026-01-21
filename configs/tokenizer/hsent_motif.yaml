@@ -34,3 +34,6 @@ motif_alpha: 1.0            # Weight for motif affinity (higher = stronger prese
 
 normalize_by_motif_size: false  # Normalize motif contribution by 1/motif_size
                                 # Prevents large motifs from dominating
+
+# Labeled graph support (encode atom/bond types for molecules)
+labeled_graph: true

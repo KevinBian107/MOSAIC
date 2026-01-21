@@ -37,6 +37,7 @@ class SENTTokenizer(Tokenizer):
         truncation_length: Length for truncating during batching.
     """
 
+    tokenizer_type: str = "sent"
     sos: int = 0
     reset: int = 1
     ladj: int = 2

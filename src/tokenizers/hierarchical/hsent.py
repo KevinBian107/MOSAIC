@@ -64,6 +64,9 @@ class HSENTTokenizer(Tokenizer):
         motif_alpha: Weight for motif affinity (if motif_aware=True).
     """
 
+    # Tokenizer type identifier
+    tokenizer_type: str = "hsent"
+
     # Special token IDs
     SOS: int = 0
     EOS: int = 1
@@ -113,6 +116,7 @@ class HSENTTokenizer(Tokenizer):
         motif_alpha: float = 1.0,
         motif_patterns: Optional[dict[str, str]] = None,
         normalize_by_motif_size: bool = False,
+        labeled_graph: bool = False,
     ) -> None:
         """Initialize the H-SENT tokenizer.
 
@@ -139,6 +143,7 @@ class HSENTTokenizer(Tokenizer):
                 patterns from CLUSTERING_MOTIFS.
             normalize_by_motif_size: Whether to normalize motif contributions
                 by 1/motif_size (only used if motif_aware=True).
+            labeled_graph: Whether to encode node/edge features (atom/bond types).
         """
         self.node_order = node_order
         self.max_length = max_length
@@ -172,6 +177,13 @@ class HSENTTokenizer(Tokenizer):
 
         self.max_num_nodes: Optional[int] = None
 
+        # Labeled graph support
+        self.labeled_graph = labeled_graph
+        self.num_node_types: int = 0
+        self.num_edge_types: int = 0
+        self.node_idx_offset: int = 0
+        self.edge_idx_offset: int = 0
+
     def set_num_nodes(self, max_num_nodes: int) -> None:
         """Set maximum number of nodes for vocabulary sizing.
 
@@ -181,12 +193,49 @@ class HSENTTokenizer(Tokenizer):
         if self.max_num_nodes is None or self.max_num_nodes < max_num_nodes:
             self.max_num_nodes = max_num_nodes
 
+    def set_num_node_and_edge_types(
+        self, num_node_types: int, num_edge_types: int
+    ) -> None:
+        """Set the number of node and edge types for labeled graphs.
+
+        This method must be called when labeled_graph=True before tokenization.
+        Updates offsets for node and edge type tokens in the vocabulary.
+
+        Args:
+            num_node_types: Number of distinct node types (e.g., atom types).
+            num_edge_types: Number of distinct edge types (e.g., bond types).
+
+        Raises:
+            ValueError: If labeled_graph=False.
+        """
+        if not self.labeled_graph:
+            raise ValueError("Cannot set node/edge types when labeled_graph=False")
+
+        self.num_node_types = num_node_types
+        self.num_edge_types = num_edge_types
+
+        # Offsets in vocabulary:
+        # [SOS, EOS, PAD, RESET, LADJ, RADJ, LCOM, RCOM, LBIP, RBIP, SEP] = 11 special tokens
+        # Then: [0, 1, 2, ..., max_num_nodes-1] = node IDs
+        # Then: [atom_type_0, ..., atom_type_{num_node_types-1}] = atom types
+        # Then: [bond_type_0, ..., bond_type_{num_edge_types-1}] = bond types
+        self.node_idx_offset = self.IDX_OFFSET + self.max_num_nodes
+        self.edge_idx_offset = self.node_idx_offset + self.num_node_types
+
     @property
     def vocab_size(self) -> int:
-        """Return vocabulary size."""
+        """Return vocabulary size.
+
+        Unlabeled: IDX_OFFSET (11) + max_num_nodes
+        Labeled: IDX_OFFSET (11) + max_num_nodes + num_node_types + num_edge_types
+        """
         if self.max_num_nodes is None:
             raise ValueError("Call set_num_nodes() first")
-        return self.IDX_OFFSET + self.max_num_nodes
+
+        base_size = self.IDX_OFFSET + self.max_num_nodes
+        if self.labeled_graph:
+            return base_size + self.num_node_types + self.num_edge_types
+        return base_size
 
     # =====================================================================
     # TOKENIZATION: Graph → Tokens
@@ -223,7 +272,7 @@ class HSENTTokenizer(Tokenizer):
 
         # Encode each partition (recursively if nested)
         for part in hg.partitions:
-            tokens.extend(self._tokenize_partition(part))
+            tokens.extend(self._tokenize_partition(part, root_hg=hg))
 
         # Encode each bipartite
         for bipart in hg.bipartites:
@@ -237,7 +286,7 @@ class HSENTTokenizer(Tokenizer):
 
         return torch.tensor(tokens, dtype=torch.long)
 
-    def _tokenize_partition(self, part: Partition) -> list[int]:
+    def _tokenize_partition(self, part: Partition, root_hg: Optional[HierarchicalGraph] = None) -> list[int]:
         """Encode a partition using SENT-style walk with back-edges.
 
         If the partition has a child hierarchy, recursively encode it.
@@ -247,6 +296,7 @@ class HSENTTokenizer(Tokenizer):
 
         Args:
             part: Partition to tokenize.
+            root_hg: Root HierarchicalGraph for edge feature lookup.
 
         Returns:
             List of token indices for this partition.
@@ -269,20 +319,21 @@ class HSENTTokenizer(Tokenizer):
         # If partition has child hierarchy, recursively encode it
         if part.child_hierarchy is not None:
             # Encode child's structure (without SOS/EOS)
-            child_tokens = self._tokenize_child_hierarchy(part.child_hierarchy)
+            child_tokens = self._tokenize_child_hierarchy(part.child_hierarchy, root_hg=root_hg)
             tokens.extend(child_tokens)
         else:
             # Leaf partition: encode with SENT-style back-edges
-            tokens.extend(self._tokenize_partition_sent(part))
+            tokens.extend(self._tokenize_partition_sent(part, root_hg=root_hg))
 
         tokens.append(self.RCOM)
         return tokens
 
-    def _tokenize_child_hierarchy(self, hg: HierarchicalGraph) -> list[int]:
+    def _tokenize_child_hierarchy(self, hg: HierarchicalGraph, root_hg: Optional[HierarchicalGraph] = None) -> list[int]:
         """Encode a nested hierarchy (without SOS/EOS).
 
         Args:
             hg: Child HierarchicalGraph.
+            root_hg: Root HierarchicalGraph for edge feature lookup.
 
         Returns:
             List of token indices.
@@ -294,7 +345,7 @@ class HSENTTokenizer(Tokenizer):
 
         # Encode each sub-partition
         for part in hg.partitions:
-            tokens.extend(self._tokenize_partition(part))
+            tokens.extend(self._tokenize_partition(part, root_hg=root_hg))
 
         # Encode each sub-bipartite
         for bipart in hg.bipartites:
@@ -302,14 +353,19 @@ class HSENTTokenizer(Tokenizer):
 
         return tokens
 
-    def _tokenize_partition_sent(self, part: Partition) -> list[int]:
+    def _tokenize_partition_sent(self, part: Partition, root_hg: Optional[HierarchicalGraph] = None) -> list[int]:
         """Encode partition edges using SENT-style back-edges.
+
+        For labeled graphs, interleaves atom and bond type tokens:
+        - After each node: append atom type token
+        - After each back-edge target: append bond type token
 
         Args:
             part: Leaf partition to tokenize.
+            root_hg: Root HierarchicalGraph for edge feature lookup.
 
         Returns:
-            List of token indices (node sequence with back-edges).
+            List of token indices (node sequence with back-edges and features).
         """
         tokens: list[int] = []
 
@@ -333,6 +389,13 @@ class HSENTTokenizer(Tokenizer):
 
         for node in node_order:
             tokens.append(self.IDX_OFFSET + node)
+
+            # Add atom type if labeled graph
+            if self.labeled_graph:
+                atom_type = self._get_node_feature(part, node)
+                atom_token = self.node_idx_offset + atom_type
+                tokens.append(atom_token)
+
             visited.add(node)
 
             # Find back-edges to previously visited neighbors
@@ -344,7 +407,20 @@ class HSENTTokenizer(Tokenizer):
 
             if back_edges:
                 tokens.append(self.LADJ)
-                tokens.extend(self.IDX_OFFSET + be for be in back_edges)
+                for be in back_edges:
+                    tokens.append(self.IDX_OFFSET + be)
+
+                    # Add bond type if labeled graph
+                    if self.labeled_graph:
+                        # Get the actual node index from order
+                        target_node = node_order[be]
+                        # Get global indices for edge lookup
+                        src_global = part.global_node_indices[node]
+                        dst_global = part.global_node_indices[target_node]
+                        bond_type = self._get_edge_feature_global(root_hg, src_global, dst_global)
+                        bond_token = self.edge_idx_offset + bond_type
+                        tokens.append(bond_token)
+
                 tokens.append(self.RADJ)
 
         return tokens
@@ -365,15 +441,63 @@ class HSENTTokenizer(Tokenizer):
             self.IDX_OFFSET + bipart.num_edges,
         ]
 
-        # Encode edge pairs
+        # Encode edge pairs with optional bond types
         if bipart.edge_index.numel() > 0:
             ei = bipart.edge_index.numpy()
             for e in range(ei.shape[1]):
                 tokens.append(self.IDX_OFFSET + int(ei[0, e]))
                 tokens.append(self.IDX_OFFSET + int(ei[1, e]))
 
+                # Add bond type if labeled graph and edge features available
+                if self.labeled_graph and bipart.edge_features is not None:
+                    bond_type = int(bipart.edge_features[e])
+                    bond_token = self.edge_idx_offset + bond_type
+                    tokens.append(bond_token)
+
         tokens.append(self.RBIP)
         return tokens
+
+    def _get_node_feature(self, part: Partition, local_idx: int) -> int:
+        """Get node feature (atom type) for a node in a partition.
+
+        Args:
+            part: The partition containing the node.
+            local_idx: Local index of the node within the partition.
+
+        Returns:
+            Node feature value (atom type), or 0 if not found.
+        """
+        if part.node_features is not None and local_idx < len(part.node_features):
+            return int(part.node_features[local_idx])
+        return 0  # Default atom type
+
+    def _get_edge_feature_global(
+        self, root_hg: Optional[HierarchicalGraph], src_global: int, dst_global: int
+    ) -> int:
+        """Get edge feature (bond type) for an edge using global indices.
+
+        Args:
+            root_hg: Root HierarchicalGraph containing edge_features.
+            src_global: Source node global index.
+            dst_global: Target node global index.
+
+        Returns:
+            Edge feature value (bond type), or 0 if not found.
+        """
+        if root_hg is None or root_hg.edge_features is None:
+            return 0
+
+        # Try both directions since graph may be undirected
+        bond_type = root_hg.edge_features.get((src_global, dst_global), None)
+        if bond_type is not None:
+            return bond_type
+
+        # Try reverse direction
+        bond_type = root_hg.edge_features.get((dst_global, src_global), None)
+        if bond_type is not None:
+            return bond_type
+
+        return 0  # Default bond type
 
     # =====================================================================
     # DECODING: Tokens → Graph
@@ -419,11 +543,17 @@ class HSENTTokenizer(Tokenizer):
         else:
             num_communities = 0
 
+        # Tracking dictionaries for labeled graphs
+        node_features_dict: dict[int, int] = {}  # global_idx -> atom_type
+        edge_features_dict: dict[tuple[int, int], int] = {}  # (src, dst) -> bond_type
+
         # Parse partitions - track global node offset
         partitions: list[Partition] = []
         global_node_offset = 0
         while idx < len(tokens_list) and tokens_list[idx] == self.LCOM:
-            part, idx = self._parse_partition(tokens_list, idx + 1, global_node_offset)
+            part, idx = self._parse_partition(
+                tokens_list, idx + 1, global_node_offset, node_features_dict, edge_features_dict
+            )
             if part is not None:
                 partitions.append(part)
                 global_node_offset += part.num_nodes
@@ -435,13 +565,51 @@ class HSENTTokenizer(Tokenizer):
             if bipart is not None:
                 bipartites.append(bipart)
 
+                # Add bipartite edge features to global edge_features_dict
+                if self.labeled_graph and bipart.edge_features is not None:
+                    # Get the partitions to convert local to global indices
+                    left_part = partitions[bipart.left_part_id]
+                    right_part = partitions[bipart.right_part_id]
+
+                    # Add each bipartite edge's bond type to the global dict
+                    ei = bipart.edge_index.numpy()
+                    for e in range(ei.shape[1]):
+                        left_local = int(ei[0, e])
+                        right_local = int(ei[1, e])
+                        left_global = left_part.local_to_global(left_local)
+                        right_global = right_part.local_to_global(right_local)
+                        bond_type = int(bipart.edge_features[e])
+
+                        # Add both directions (undirected graph)
+                        edge_features_dict[(left_global, right_global)] = bond_type
+                        edge_features_dict[(right_global, left_global)] = bond_type
+
         # Reconstruct community assignment
         community_assignment = self._build_community_assignment(partitions)
 
-        return HierarchicalGraph(partitions, bipartites, community_assignment)
+        # Convert node features to tensor
+        node_features = None
+        if self.labeled_graph and node_features_dict:
+            max_node_idx = max(node_features_dict.keys())
+            node_features = torch.zeros(max_node_idx + 1, dtype=torch.long)
+            for node_idx, atom_type in node_features_dict.items():
+                node_features[node_idx] = atom_type
+
+        return HierarchicalGraph(
+            partitions,
+            bipartites,
+            community_assignment,
+            node_features=node_features,
+            edge_features=edge_features_dict if self.labeled_graph else None,
+        )
 
     def _parse_partition(
-        self, tokens: list[int], start: int, global_node_offset: int = 0
+        self,
+        tokens: list[int],
+        start: int,
+        global_node_offset: int = 0,
+        node_features_dict: Optional[dict[int, int]] = None,
+        edge_features_dict: Optional[dict[tuple[int, int], int]] = None,
     ) -> tuple[Optional[Partition], int]:
         """Parse a [LCOM ... RCOM] block.
 
@@ -451,11 +619,19 @@ class HSENTTokenizer(Tokenizer):
             tokens: Token list.
             start: Starting index (after LCOM).
             global_node_offset: Offset to add to local indices for global indices (fallback).
+            node_features_dict: Dictionary to populate with node features (global idx -> atom type).
+            edge_features_dict: Dictionary to populate with edge features ((src, dst) -> bond type).
 
         Returns:
             Tuple of (parsed Partition or None, next index).
         """
         idx = start
+
+        # Initialize dicts if not provided
+        if node_features_dict is None:
+            node_features_dict = {}
+        if edge_features_dict is None:
+            edge_features_dict = {}
 
         # Parse part_id
         if idx >= len(tokens) or tokens[idx] < self.IDX_OFFSET:
@@ -494,7 +670,7 @@ class HSENTTokenizer(Tokenizer):
             if lookahead < len(tokens) and tokens[lookahead] == self.LCOM:
                 # Nested hierarchy
                 child_hierarchy, idx = self._parse_child_hierarchy(
-                    tokens, idx, global_node_offset
+                    tokens, idx, global_node_offset, node_features_dict, edge_features_dict
                 )
                 # Find RCOM
                 while idx < len(tokens) and tokens[idx] != self.RCOM:
@@ -537,23 +713,56 @@ class HSENTTokenizer(Tokenizer):
                 in_bracket = False
                 # Add back-edges: edges from current node to previously visited nodes
                 if node_sequence:
-                    current_node = node_sequence[-1]
+                    current_node_local = node_sequence[-1]
+                    current_node_global = global_indices[current_node_local]
                     for back_pos in bracket_nodes:
                         if back_pos < len(node_sequence):
-                            back_node = node_sequence[back_pos]
+                            back_node_local = node_sequence[back_pos]
+                            back_node_global = global_indices[back_node_local]
                             # Edge between current node and back node (in LOCAL indices)
-                            edges.append((current_node, back_node))
-                            edges.append((back_node, current_node))
+                            edges.append((current_node_local, back_node_local))
+                            edges.append((back_node_local, current_node_local))
+                            # Store edge features in GLOBAL indices
+                            if self.labeled_graph and edge_features_dict is not None:
+                                # The bond type was already read in the bracket, stored in bracket_bonds
+                                pass  # Will be filled when parsing bracket nodes
                 idx += 1
             elif tok >= self.IDX_OFFSET:
                 val = tok - self.IDX_OFFSET
 
                 if in_bracket:
+                    # This is a back-edge target position
                     bracket_nodes.append(val)
+                    idx += 1
+
+                    # Read bond type if labeled graph
+                    if self.labeled_graph:
+                        if idx < len(tokens) and tokens[idx] >= self.edge_idx_offset:
+                            bond_token = tokens[idx]
+                            bond_type = bond_token - self.edge_idx_offset
+                            # Store the bond type for this back-edge
+                            if node_sequence and val < len(node_sequence):
+                                current_node_local = node_sequence[-1]
+                                back_node_local = node_sequence[val]  # FIX: val is position, not node ID
+                                current_node_global = global_indices[current_node_local]
+                                back_node_global = global_indices[back_node_local]
+                                edge_features_dict[(current_node_global, back_node_global)] = bond_type
+                                edge_features_dict[(back_node_global, current_node_global)] = bond_type
+                            idx += 1
                 else:
+                    # This is a node in the sequence
                     node_sequence.append(val)
-                    # NO sequential edges - back-edges capture all adjacencies
-                idx += 1
+                    idx += 1
+
+                    # Read atom type if labeled graph
+                    if self.labeled_graph:
+                        if idx < len(tokens) and tokens[idx] >= self.node_idx_offset:
+                            atom_token = tokens[idx]
+                            atom_type = atom_token - self.node_idx_offset
+                            # Store atom type using GLOBAL index
+                            global_idx = global_indices[val]
+                            node_features_dict[global_idx] = atom_type
+                            idx += 1
             else:
                 idx += 1
 
@@ -565,17 +774,31 @@ class HSENTTokenizer(Tokenizer):
         else:
             edge_index = torch.zeros((2, 0), dtype=torch.long)
 
+        # Extract node features for this partition (in LOCAL indices)
+        node_features = None
+        if self.labeled_graph and node_features_dict:
+            node_features = torch.zeros(len(global_indices), dtype=torch.long)
+            for local_idx, global_idx in enumerate(global_indices):
+                if global_idx in node_features_dict:
+                    node_features[local_idx] = node_features_dict[global_idx]
+
         partition = Partition(
             part_id=part_id,
             global_node_indices=global_indices,
             edge_index=edge_index,
             child_hierarchy=None,
+            node_features=node_features,
         )
 
         return partition, idx
 
     def _parse_child_hierarchy(
-        self, tokens: list[int], start: int, global_node_offset: int = 0
+        self,
+        tokens: list[int],
+        start: int,
+        global_node_offset: int = 0,
+        node_features_dict: Optional[dict[int, int]] = None,
+        edge_features_dict: Optional[dict[tuple[int, int], int]] = None,
     ) -> tuple[Optional[HierarchicalGraph], int]:
         """Parse a nested hierarchy within a partition.
 
@@ -583,11 +806,19 @@ class HSENTTokenizer(Tokenizer):
             tokens: Token list.
             start: Starting index (at sub-community count).
             global_node_offset: Offset to add to local indices for global indices.
+            node_features_dict: Dictionary to populate with node features.
+            edge_features_dict: Dictionary to populate with edge features.
 
         Returns:
             Tuple of (parsed HierarchicalGraph or None, next index).
         """
         idx = start
+
+        # Initialize dicts if not provided
+        if node_features_dict is None:
+            node_features_dict = {}
+        if edge_features_dict is None:
+            edge_features_dict = {}
 
         # Parse number of sub-communities
         if idx >= len(tokens) or tokens[idx] < self.IDX_OFFSET:
@@ -599,7 +830,9 @@ class HSENTTokenizer(Tokenizer):
         partitions: list[Partition] = []
         child_offset = global_node_offset
         while idx < len(tokens) and tokens[idx] == self.LCOM:
-            part, idx = self._parse_partition(tokens, idx + 1, child_offset)
+            part, idx = self._parse_partition(
+                tokens, idx + 1, child_offset, node_features_dict, edge_features_dict
+            )
             if part is not None:
                 partitions.append(part)
                 child_offset += part.num_nodes
@@ -614,6 +847,8 @@ class HSENTTokenizer(Tokenizer):
         # Build community assignment for child
         community_assignment = self._build_community_assignment(partitions)
 
+        # Note: node_features and edge_features are already populated in the dictionaries
+        # The parent HierarchicalGraph will use these dictionaries
         return HierarchicalGraph(partitions, bipartites, community_assignment), idx
 
     def _parse_bipartite(
@@ -646,8 +881,10 @@ class HSENTTokenizer(Tokenizer):
         if idx < len(tokens) and tokens[idx] >= self.IDX_OFFSET:
             idx += 1
 
-        # Parse edge pairs
+        # Parse edge pairs with optional bond types
         edges: list[tuple[int, int]] = []
+        edge_features_list: list[int] = []
+
         while idx < len(tokens):
             tok = tokens[idx]
 
@@ -662,6 +899,16 @@ class HSENTTokenizer(Tokenizer):
                     right_local = tokens[idx] - self.IDX_OFFSET
                     edges.append((left_local, right_local))
                     idx += 1
+
+                    # Read bond type if labeled graph
+                    if self.labeled_graph:
+                        if idx < len(tokens) and tokens[idx] >= self.edge_idx_offset:
+                            bond_token = tokens[idx]
+                            bond_type = bond_token - self.edge_idx_offset
+                            edge_features_list.append(bond_type)
+                            idx += 1
+                        else:
+                            edge_features_list.append(0)  # Default bond type
             else:
                 idx += 1
 
@@ -670,7 +917,12 @@ class HSENTTokenizer(Tokenizer):
 
         edge_index = torch.tensor(edges, dtype=torch.long).t()
 
-        return Bipartite(left_id, right_id, edge_index), idx
+        # Create edge features tensor if labeled graph
+        edge_features = None
+        if self.labeled_graph and edge_features_list:
+            edge_features = torch.tensor(edge_features_list, dtype=torch.long)
+
+        return Bipartite(left_id, right_id, edge_index, edge_features), idx
 
     def _build_community_assignment(
         self, partitions: list[Partition]

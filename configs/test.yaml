@@ -38,4 +38,6 @@ metrics:
 
 # Logging configuration
 logs:
-  path: outputs/test/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  base_dir: outputs/test
+  run_name: ${data.dataset_name}_${tokenizer.type}_gen${sampling.num_samples}
+  path: ${logs.base_dir}/${logs.run_name}_${now:%Y%m%d-%H%M%S}

@@ -224,6 +224,18 @@ class SpectralCoarsening:
         """
         n = data.num_nodes
 
+        # Extract node and edge features if present
+        node_features_global = data.x if hasattr(data, 'x') and data.x is not None else None
+        edge_features_global = None
+        if hasattr(data, 'edge_attr') and data.edge_attr is not None:
+            # Build edge feature dictionary for efficient lookup
+            edge_features_global = {}
+            for i in range(data.edge_index.shape[1]):
+                src = int(data.edge_index[0, i])
+                dst = int(data.edge_index[1, i])
+                bond_type = int(data.edge_attr[i])
+                edge_features_global[(src, dst)] = bond_type
+
         # Don't coarsen if graph is too small
         if n < self.min_community_size:
             return self._build_single_partition(data)
@@ -248,7 +260,7 @@ class SpectralCoarsening:
 
             # Extract subgraph edges
             if len(node_list) > 0:
-                sub_edge_index, _ = subgraph(
+                sub_edge_index, sub_edge_mapping = subgraph(
                     subset=torch.tensor(node_list, dtype=torch.long),
                     edge_index=data.edge_index,
                     relabel_nodes=True,
@@ -256,15 +268,47 @@ class SpectralCoarsening:
                 )
             else:
                 sub_edge_index = torch.zeros((2, 0), dtype=torch.long)
+                sub_edge_mapping = None
+
+            # Extract partition node features (LOCAL indices)
+            part_node_features = None
+            if node_features_global is not None:
+                part_node_features = node_features_global[node_list]
+
+            # Extract partition edge features for subgraph edges
+            part_edge_features_dict = None
+            if edge_features_global is not None and sub_edge_index.numel() > 0:
+                part_edge_features_dict = {}
+                for i in range(sub_edge_index.shape[1]):
+                    local_src = int(sub_edge_index[0, i])
+                    local_dst = int(sub_edge_index[1, i])
+                    global_src = node_list[local_src]
+                    global_dst = node_list[local_dst]
+                    if (global_src, global_dst) in edge_features_global:
+                        # Store with LOCAL indices
+                        part_edge_features_dict[(local_src, local_dst)] = edge_features_global[(global_src, global_dst)]
 
             # Recursively coarsen if community is large enough
             child_hierarchy = None
             if recursive and len(node_list) >= self.min_community_size:
-                # Create a Data object for the subgraph
+                # Create a Data object for the subgraph with features
                 sub_data = Data(
                     edge_index=sub_edge_index,
                     num_nodes=len(node_list),
                 )
+                # Add features if present
+                if part_node_features is not None:
+                    sub_data.x = part_node_features
+                if part_edge_features_dict is not None and sub_edge_index.numel() > 0:
+                    # Convert dict to tensor for sub_data
+                    sub_edge_attr_list = []
+                    for i in range(sub_edge_index.shape[1]):
+                        local_src = int(sub_edge_index[0, i])
+                        local_dst = int(sub_edge_index[1, i])
+                        bond = part_edge_features_dict.get((local_src, local_dst), 0)
+                        sub_edge_attr_list.append(bond)
+                    sub_data.edge_attr = torch.tensor(sub_edge_attr_list, dtype=torch.long)
+
                 # Recursively build hierarchy for this partition
                 child_hg = self.build_hierarchy(sub_data, recursive=True)
 
@@ -281,18 +325,21 @@ class SpectralCoarsening:
                     global_node_indices=node_list,
                     edge_index=sub_edge_index,
                     child_hierarchy=child_hierarchy,
+                    node_features=part_node_features,
                 )
             )
 
-        # Extract bipartites (off-diagonal blocks)
+        # Extract bipartites (off-diagonal blocks) with edge features
         bipartites = self._extract_bipartites(
-            data, communities, partitions
+            data, communities, partitions, edge_features_global
         )
 
         return HierarchicalGraph(
             partitions=partitions,
             bipartites=bipartites,
             community_assignment=community_assignment,
+            node_features=node_features_global,
+            edge_features=edge_features_global,
         )
 
     def _build_single_partition(self, data: Data) -> HierarchicalGraph:
@@ -305,16 +352,31 @@ class SpectralCoarsening:
             HierarchicalGraph with one partition containing all nodes.
         """
         n = data.num_nodes
+
+        # Extract features if present
+        node_features_global = data.x if hasattr(data, 'x') and data.x is not None else None
+        edge_features_global = None
+        if hasattr(data, 'edge_attr') and data.edge_attr is not None:
+            edge_features_global = {}
+            for i in range(data.edge_index.shape[1]):
+                src = int(data.edge_index[0, i])
+                dst = int(data.edge_index[1, i])
+                bond_type = int(data.edge_attr[i])
+                edge_features_global[(src, dst)] = bond_type
+
         partition = Partition(
             part_id=0,
             global_node_indices=list(range(n)),
             edge_index=data.edge_index.clone(),
             child_hierarchy=None,
+            node_features=node_features_global,
         )
         return HierarchicalGraph(
             partitions=[partition],
             bipartites=[],
             community_assignment=[0] * n,
+            node_features=node_features_global,
+            edge_features=edge_features_global,
         )
 
     def _extract_bipartites(
@@ -322,6 +384,7 @@ class SpectralCoarsening:
         data: Data,
         communities: list[set[int]],
         partitions: list[Partition],
+        edge_features_global: Optional[dict[tuple[int, int], int]] = None,
     ) -> list[Bipartite]:
         """Extract bipartite edge sets between all pairs of communities.
 
@@ -329,6 +392,7 @@ class SpectralCoarsening:
             data: Original graph data.
             communities: List of node sets for each community.
             partitions: List of partition objects.
+            edge_features_global: Optional edge feature dictionary.
 
         Returns:
             List of Bipartite objects for non-empty community pairs.
@@ -345,6 +409,8 @@ class SpectralCoarsening:
 
                 # Find edges from left to right community
                 bipart_edges = []
+                bipart_edge_features = [] if edge_features_global is not None else None
+
                 for e in range(edge_index_np.shape[1]):
                     src, dst = int(edge_index_np[0, e]), int(edge_index_np[1, e])
 
@@ -354,15 +420,27 @@ class SpectralCoarsening:
                         local_dst = right_nodes.index(dst)
                         bipart_edges.append((local_src, local_dst))
 
+                        # Extract edge feature if present
+                        if edge_features_global is not None:
+                            bond_type = edge_features_global.get((src, dst), 0)
+                            bipart_edge_features.append(bond_type)
+
                 if bipart_edges:
                     bipart_edge_index = torch.tensor(
                         bipart_edges, dtype=torch.long
                     ).t()
+
+                    # Convert edge features to tensor if present
+                    bipart_edge_attr = None
+                    if bipart_edge_features is not None:
+                        bipart_edge_attr = torch.tensor(bipart_edge_features, dtype=torch.long)
+
                     bipartites.append(
                         Bipartite(
                             left_part_id=i,
                             right_part_id=j,
                             edge_index=bipart_edge_index,
+                            edge_features=bipart_edge_attr,
                         )
                     )
 

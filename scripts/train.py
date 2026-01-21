@@ -29,7 +29,7 @@ from src.data.molecular import graph_to_smiles
 from src.evaluation.molecular_metrics import MolecularMetrics
 from src.evaluation.motif_distribution import MotifDistributionMetric
 from src.models.transformer import GraphGeneratorModule
-from src.tokenizers import SENTTokenizer, HSENTTokenizer
+from src.tokenizers import HDTTokenizer, HSENTTokenizer, SENTTokenizer
 
 log = logging.getLogger(__name__)
 
@@ -183,6 +183,15 @@ def main(cfg: DictConfig) -> None:
 
     pl.seed_everything(cfg.seed, workers=True)
 
+    # Create output directory and save configuration
+    output_dir = Path(cfg.logs.path)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    config_path = output_dir / "config.yaml"
+    with open(config_path, "w") as f:
+        f.write(OmegaConf.to_yaml(cfg))
+    log.info(f"Configuration saved to {config_path}")
+
     # Check for checkpoint BEFORE loading data (saves time if resuming)
     ckpt_path = None
     if cfg.get("resume", True):
@@ -208,7 +217,28 @@ def main(cfg: DictConfig) -> None:
 
     # Select tokenizer based on config
     tokenizer_type = cfg.tokenizer.get("type", "sent").lower()
-    if tokenizer_type == "hsent":
+    if tokenizer_type == "hdt":
+        motif_aware = cfg.tokenizer.get("motif_aware", False)
+        if motif_aware:
+            log.info("Using hierarchical HDT tokenizer with motif-aware coarsening")
+            log.info(f"  motif_alpha: {cfg.tokenizer.get('motif_alpha', 1.0)}")
+        else:
+            log.info("Using hierarchical HDT tokenizer with spectral coarsening")
+        log.info(f"  node_order: {cfg.tokenizer.get('node_order', 'BFS')}")
+        log.info(f"  min_community_size: {cfg.tokenizer.get('min_community_size', 4)}")
+
+        tokenizer = HDTTokenizer(
+            max_length=cfg.tokenizer.max_length,
+            truncation_length=cfg.tokenizer.truncation_length,
+            node_order=cfg.tokenizer.get("node_order", "BFS"),
+            min_community_size=cfg.tokenizer.get("min_community_size", 4),
+            motif_aware=motif_aware,
+            motif_alpha=cfg.tokenizer.get("motif_alpha", 1.0),
+            normalize_by_motif_size=cfg.tokenizer.get("normalize_by_motif_size", False),
+            labeled_graph=cfg.tokenizer.get("labeled_graph", True),
+            seed=cfg.seed,
+        )
+    elif tokenizer_type == "hsent":
         motif_aware = cfg.tokenizer.get("motif_aware", False)
         if motif_aware:
             log.info("Using hierarchical H-SENT tokenizer with motif-aware coarsening")
@@ -226,6 +256,7 @@ def main(cfg: DictConfig) -> None:
             motif_aware=motif_aware,
             motif_alpha=cfg.tokenizer.get("motif_alpha", 1.0),
             normalize_by_motif_size=cfg.tokenizer.get("normalize_by_motif_size", False),
+            labeled_graph=cfg.tokenizer.get("labeled_graph", True),
             seed=cfg.seed,
         )
     else:
@@ -249,6 +280,8 @@ def main(cfg: DictConfig) -> None:
         include_hydrogens=cfg.data.get("include_hydrogens", False),
         seed=cfg.seed,
         data_root=cfg.data.get("data_root", "data"),
+        use_cache=cfg.data.get("use_cache", False),
+        cache_dir=cfg.data.get("cache_dir", "data/cache"),
     )
 
     datamodule.setup()
