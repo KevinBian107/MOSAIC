@@ -77,23 +77,12 @@ MOSAIC/
 └── docs/               # Documentation
 ```
 
-## Key Metrics
-
-### Standard Graph Metrics
-- Degree distribution (MMD)
-- Spectral properties (MMD)
-- Clustering coefficients (MMD)
-
-### Motif Metrics
-- **MSC** (Motif Signature Comparison): MMD between motif count vectors
-- **MFD** (Motif Frequency Distribution): Per-motif-type comparison
-- **MPR** (Motif Preservation Rate): For conditional generation
-
 ## Documentation
 
 See the [docs/](docs/) directory for:
 - [Codebase Guide](docs/codebase.md)
-- [Setup Guide](docs/setup.md)
+- [Server Setup Guide](docs/server_setup.md)
+- [Training Setup Guide](docs/setup_training.md)
 - [Contributing Guide](docs/contributing.md)
 - [H-graph Construction](docs/hgraph.md)
 - [Tokenization](docs/tokenization.md)
