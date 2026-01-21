@@ -28,6 +28,15 @@ class TransformerLM(nn.Module):
     """
 
     MODEL_SIZES = {
+        "xxs": {
+            "hidden_size": 256,
+            "num_hidden_layers": 4,
+            "num_attention_heads": 4,
+            "intermediate_size": 4 * 256,
+            "n_embd": 256,
+            "n_head": 4,
+            "n_layer": 4,
+        },
         "xs": {
             "hidden_size": 384,
             "num_hidden_layers": 6,
@@ -159,7 +168,11 @@ class TransformerLM(nn.Module):
             if return_tokens:
                 results.append(generated[i])
             else:
-                results.append(self.tokenizer.decode(generated[i]))
+                try:
+                    results.append(self.tokenizer.decode(generated[i]))
+                except Exception:
+                    # Skip invalid sequences (will be counted as invalid in metrics)
+                    pass
 
         return results
 
@@ -244,7 +257,11 @@ class GraphGeneratorModule(pl.LightningModule):
         logits = logits.view(-1, logits.shape[-1])
         y = y.reshape(-1)
         loss = self.loss_fn(logits, y)
-        self.log(f"{phase}/loss", loss, on_step=False, on_epoch=True, sync_dist=True)
+
+        # Log per-step for train, per-epoch for val/test
+        on_step = (phase == "train")
+        on_epoch = True
+        self.log(f"{phase}/loss", loss, on_step=on_step, on_epoch=on_epoch, sync_dist=True, prog_bar=True)
         return loss
 
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:

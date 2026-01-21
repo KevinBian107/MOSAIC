@@ -15,3 +15,4 @@ truncation_length: 2048     # Truncate sequences longer than this
 
 # SENT-specific settings
 undirected: true            # Treat graph as undirected
+labeled_graph: true         # Enable labeled SENT (encode atom/bond types for molecules)

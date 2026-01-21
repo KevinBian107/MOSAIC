@@ -35,8 +35,6 @@ from src.tokenizers import SENTTokenizer, HSENTTokenizer
 
 # Import AutoGraph conversion functions for handling AutoGraph checkpoints
 try:
-    import sys
-    from pathlib import Path
     autograph_path = Path(__file__).parent.parent / "tmp" / "AutoGraph"
     if str(autograph_path) not in sys.path:
         sys.path.insert(0, str(autograph_path))
@@ -154,6 +152,41 @@ def main(cfg: DictConfig) -> None:
     if not use_autograph:
         use_autograph = is_autograph_checkpoint(cfg.model.checkpoint_path)
 
+    # For MOSAIC checkpoints, extract vocab size and update tokenizer
+    if not use_autograph:
+        log.info(f"Extracting vocab size from checkpoint: {cfg.model.checkpoint_path}")
+        checkpoint = torch.load(cfg.model.checkpoint_path, map_location="cpu")
+        if "state_dict" in checkpoint:
+            # Extract vocab size from embedding weight shape
+            wte_key = "model.model.transformer.wte.weight"
+            if wte_key in checkpoint["state_dict"]:
+                checkpoint_vocab_size = checkpoint["state_dict"][wte_key].shape[0]
+                log.info(f"Checkpoint vocab size: {checkpoint_vocab_size}")
+
+                # Detect if this is a labeled graph model
+                # Unlabeled: vocab_size = idx_offset (6) + max_num_nodes
+                # Labeled: vocab_size = idx_offset (6) + max_num_nodes + num_node_types + num_edge_types
+                from src.data.molecular import NUM_ATOM_TYPES, NUM_BOND_TYPES
+
+                # Try labeled first
+                checkpoint_max_num_nodes_labeled = checkpoint_vocab_size - tokenizer.idx_offset - NUM_ATOM_TYPES - NUM_BOND_TYPES
+
+                if checkpoint_max_num_nodes_labeled > 0 and checkpoint_max_num_nodes_labeled <= 100:
+                    # This is likely a labeled graph model
+                    log.info("Detected labeled SENT checkpoint")
+                    tokenizer.labeled_graph = True
+                    tokenizer.set_num_nodes(checkpoint_max_num_nodes_labeled)
+                    tokenizer.set_num_node_and_edge_types(
+                        num_node_types=NUM_ATOM_TYPES,
+                        num_edge_types=NUM_BOND_TYPES,
+                    )
+                    log.info(f"Set tokenizer: max_num_nodes={checkpoint_max_num_nodes_labeled}, labeled_graph=True")
+                else:
+                    # Unlabeled model
+                    checkpoint_max_num_nodes = checkpoint_vocab_size - tokenizer.idx_offset
+                    log.info(f"Setting tokenizer max_num_nodes to {checkpoint_max_num_nodes}")
+                    tokenizer.set_num_nodes(checkpoint_max_num_nodes)
+
     if use_autograph:
         log.info(f"Detected AutoGraph checkpoint at {cfg.model.checkpoint_path}")
         log.info("Loading model using AutoGraph adapter...")
@@ -187,6 +220,9 @@ def main(cfg: DictConfig) -> None:
     log.info(f"Average generation time: {gen_time:.4f}s per sample")
 
     # Convert to SMILES using appropriate converter
+    # IMPORTANT: Include all attempts (even failures) for accurate validity metric
+    # Use a sentinel value for failed conversions that RDKit will reject
+    INVALID_SMILES_SENTINEL = "INVALID"
     generated_smiles = []
     if use_autograph:
         # AutoGraph models - use AutoGraph's conversion functions
@@ -195,16 +231,16 @@ def main(cfg: DictConfig) -> None:
         log.info("Converting AutoGraph graphs to SMILES...")
         for g in generated_graphs:
             smiles = autograph_graph_to_smiles(g, atom_decoder)
-            if smiles:
-                generated_smiles.append(smiles)
+            generated_smiles.append(smiles if smiles else INVALID_SMILES_SENTINEL)
     else:
         # MOSAIC models - use MOSAIC's conversion function
         log.info("Converting MOSAIC graphs to SMILES...")
         for g in generated_graphs:
             smiles = graph_to_smiles(g)
-            if smiles:
-                generated_smiles.append(smiles)
-    log.info(f"Successfully converted {len(generated_smiles)} graphs to SMILES")
+            generated_smiles.append(smiles if smiles else INVALID_SMILES_SENTINEL)
+
+    valid_count = sum(1 for s in generated_smiles if s != INVALID_SMILES_SENTINEL)
+    log.info(f"Successfully converted {valid_count}/{len(generated_smiles)} graphs to SMILES")
 
     log.info("\n" + "=" * 50)
     log.info("MOLECULAR METRICS")
@@ -235,11 +271,20 @@ def main(cfg: DictConfig) -> None:
     log.info("FCD METRIC")
     log.info("=" * 50)
 
-    fcd_score = compute_fcd(generated_smiles, datamodule.test_smiles)
-    if not (fcd_score != fcd_score):  # Check for NaN
-        log.info(f"  FCD: {fcd_score:.6f}")
-    else:
-        log.info("  FCD: Not available (install moses or fcd package)")
+    fcd_score = None
+    try:
+        fcd_score = compute_fcd(generated_smiles, datamodule.test_smiles)
+        if not (fcd_score != fcd_score):  # Check for NaN
+            log.info(f"  FCD: {fcd_score:.6f}")
+        else:
+            log.info("  FCD: Not available (install moses or fcd package)")
+            fcd_score = None
+    except KeyboardInterrupt:
+        raise
+    except Exception as e:
+        log.error(f"  FCD: Failed with error: {e}")
+        log.info("  FCD: Skipping due to error")
+        fcd_score = None
 
     # Get motif summary for reference
     log.info("\n" + "=" * 50)
@@ -259,10 +304,10 @@ def main(cfg: DictConfig) -> None:
     all_results = {
         **mol_results,
         **motif_results,
-        "fcd": fcd_score if not (fcd_score != fcd_score) else None,
+        "fcd": fcd_score,
         "generation_time": gen_time,
         "num_samples": num_samples,
-        "num_valid_smiles": len(generated_smiles),
+        "num_valid_smiles": valid_count,
         "motif_summary": summary,  # Add detailed motif counts
     }
 
@@ -275,11 +320,12 @@ def main(cfg: DictConfig) -> None:
         json.dump(all_results, f, indent=2)
     log.info(f"\nResults saved to {results_file}")
 
-    # Save generated SMILES
+    # Save generated SMILES (only valid ones, excluding sentinel values)
     smiles_file = output_path / "generated_smiles.txt"
     with open(smiles_file, "w") as f:
         for smi in generated_smiles:
-            f.write(smi + "\n")
+            if smi != INVALID_SMILES_SENTINEL:
+                f.write(smi + "\n")
     log.info(f"Generated SMILES saved to {smiles_file}")
 
     log.info("\nEvaluation complete!")

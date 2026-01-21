@@ -1,0 +1,54 @@
+# Environment file for remote servers with CUDA 12.2
+# Tested on: NVIDIA-SMI 535.161.08, CUDA 12.2, Python 3.11
+#
+# Setup: conda env create -f environment_server.yaml && conda activate mosaic
+
+name: mosaic
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - numpy<2.0  # Pin to 1.x for PyTorch 2.2.1 compatibility
+  - scipy
+  - rdkit=2024.03.6
+  - networkx
+  - pip:
+    # PyTorch for CUDA 12.1 (compatible with CUDA 12.2)
+    - torch==2.2.1
+    - torchvision==0.17.1
+    - torchaudio==2.2.1
+    - --extra-index-url https://download.pytorch.org/whl/cu121
+
+    # PyTorch Geometric and extensions for CUDA 12.1
+    - torch_geometric==2.5.0
+    - torch-scatter==2.1.2
+    - torch-sparse==0.6.18
+    - torch-cluster==1.6.3
+    - torch-spline-conv==1.2.2
+    - --find-links https://data.pyg.org/whl/torch-2.2.1+cu121.html
+
+    # Core dependencies
+    - hydra-core==1.3.2
+    - lightning==2.4.0
+    - transformers==4.44.0
+    - cython==3.0.11
+    - matplotlib
+    - pyprojroot
+    - pyemd==1.0.0
+    - PyGSP==0.5.1
+    - joblib
+    - wandb
+
+    # Evaluation metrics
+    - fcd
+    # Note: molsets excluded - requires pomegranate 0.12.0 which doesn't compile with Python 3.11+
+
+    # Other dependencies
+    - scikit-learn
+    - python-louvain
+
+    # Testing
+    - pytest
+    - pytest-cov

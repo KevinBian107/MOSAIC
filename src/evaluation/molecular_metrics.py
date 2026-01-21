@@ -7,11 +7,44 @@ fragment similarity, and scaffold similarity.
 
 from collections import Counter
 from typing import Optional
+import warnings
 
 import numpy as np
-from rdkit import Chem, DataStructs
+from rdkit import Chem, DataStructs, RDLogger
 from rdkit.Chem import AllChem, BRICS
 from rdkit.Chem.Scaffolds import MurckoScaffold
+
+# Suppress RDKit deprecation warnings globally
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+RDLogger.DisableLog('rdApp.warning')
+
+# Use new MorganGenerator API to avoid deprecation warnings
+try:
+    from rdkit.Chem import rdMolDescriptors
+    MORGAN_GENERATOR = rdMolDescriptors.GetMorganGenerator
+    USE_NEW_API = True
+except (ImportError, AttributeError):
+    # Fall back to old API if new one not available
+    USE_NEW_API = False
+
+
+def get_morgan_fingerprint(mol, radius: int = 2, n_bits: int = 2048):
+    """Get Morgan fingerprint using new or old RDKit API.
+
+    Args:
+        mol: RDKit molecule object.
+        radius: Fingerprint radius.
+        n_bits: Number of bits in fingerprint.
+
+    Returns:
+        Morgan fingerprint bit vector.
+    """
+    if USE_NEW_API:
+        gen = MORGAN_GENERATOR(radius=radius, fpSize=n_bits)
+        return gen.GetFingerprint(mol)
+    else:
+        # Use old API with warnings suppressed
+        return AllChem.GetMorganFingerprintAsBitVect(mol, radius, nBits=n_bits)
 
 
 def compute_validity(smiles_list: list[str]) -> float:
@@ -137,7 +170,7 @@ def compute_snn(
         mol = Chem.MolFromSmiles(smiles)
         if mol is not None:
             try:
-                fp = AllChem.GetMorganFingerprintAsBitVect(mol, fp_radius, nBits=fp_bits)
+                fp = get_morgan_fingerprint(mol, fp_radius, fp_bits)
                 ref_fps.append(fp)
             except Exception:
                 pass
@@ -151,7 +184,7 @@ def compute_snn(
         mol = Chem.MolFromSmiles(smiles)
         if mol is not None:
             try:
-                fp = AllChem.GetMorganFingerprintAsBitVect(mol, fp_radius, nBits=fp_bits)
+                fp = get_morgan_fingerprint(mol, fp_radius, fp_bits)
                 # Find nearest neighbor
                 sims = DataStructs.BulkTanimotoSimilarity(fp, ref_fps)
                 max_sim = max(sims) if sims else 0.0
@@ -316,7 +349,7 @@ def compute_internal_diversity(
         mol = Chem.MolFromSmiles(smiles)
         if mol is not None:
             try:
-                fp = AllChem.GetMorganFingerprintAsBitVect(mol, fp_radius, nBits=fp_bits)
+                fp = get_morgan_fingerprint(mol, fp_radius, fp_bits)
                 fps.append(fp)
             except Exception:
                 pass
@@ -375,9 +408,7 @@ class MolecularMetrics:
             mol = Chem.MolFromSmiles(smiles)
             if mol is not None:
                 try:
-                    fp = AllChem.GetMorganFingerprintAsBitVect(
-                        mol, fp_radius, nBits=fp_bits
-                    )
+                    fp = get_morgan_fingerprint(mol, fp_radius, fp_bits)
                     self._ref_fps.append(fp)
                     self._ref_canonical.add(Chem.MolToSmiles(mol))
                 except Exception:
@@ -433,28 +464,123 @@ def compute_fcd(
     Returns:
         FCD score (lower is better).
     """
-    try:
-        # Try using MOSES package
-        import moses
-        metrics = moses.get_all_metrics(generated_smiles, test=reference_smiles)
-        return metrics.get("FCD/Test", float("inf"))
-    except ImportError:
-        pass
+    # Validate inputs - ensure they are lists of strings
+    if not isinstance(generated_smiles, list) or not isinstance(reference_smiles, list):
+        print(f"ERROR: Invalid input types - gen: {type(generated_smiles)}, ref: {type(reference_smiles)}")
+        return float("nan")
+
+    if len(generated_smiles) == 0 or len(reference_smiles) == 0:
+        print(f"ERROR: Empty input lists - gen: {len(generated_smiles)}, ref: {len(reference_smiles)}")
+        return float("nan")
+
+    # Check that elements are strings, not something else
+    if not all(isinstance(s, str) for s in generated_smiles[:5]):
+        print(f"ERROR: Generated SMILES contains non-string elements: {[type(s) for s in generated_smiles[:5]]}")
+        return float("nan")
+
+    if not all(isinstance(s, str) for s in reference_smiles[:5]):
+        print(f"ERROR: Reference SMILES contains non-string elements: {[type(s) for s in reference_smiles[:5]]}")
+        return float("nan")
+
+    # Set environment variables to disable multiprocessing in PyTorch (used by FCD)
+    import os
+    old_num_threads = os.environ.get('OMP_NUM_THREADS')
+    old_mkl_threads = os.environ.get('MKL_NUM_THREADS')
+    os.environ['OMP_NUM_THREADS'] = '1'
+    os.environ['MKL_NUM_THREADS'] = '1'
 
     try:
-        # Try using fcd package directly
+        # Try using fcd package directly first (more reliable than MOSES)
         from fcd import get_fcd, load_ref_model, canonical_smiles
+        from rdkit import Chem
+        import torch
 
-        model = load_ref_model()
-        gen_canonical = [canonical_smiles(s) for s in generated_smiles if s]
-        ref_canonical = [canonical_smiles(s) for s in reference_smiles if s]
-        gen_canonical = [s for s in gen_canonical if s]
-        ref_canonical = [s for s in ref_canonical if s]
+        # Disable PyTorch multiprocessing
+        torch.set_num_threads(1)
+
+        # Use RDKit to canonicalize instead of fcd's function to avoid multiprocessing
+        gen_canonical = []
+        for s in generated_smiles:
+            if s and isinstance(s, str):
+                try:
+                    mol = Chem.MolFromSmiles(s)
+                    if mol is not None:
+                        can = Chem.MolToSmiles(mol)
+                        gen_canonical.append(can)
+                except Exception:
+                    pass
+
+        ref_canonical = []
+        for s in reference_smiles:
+            if s and isinstance(s, str):
+                try:
+                    mol = Chem.MolFromSmiles(s)
+                    if mol is not None:
+                        can = Chem.MolToSmiles(mol)
+                        ref_canonical.append(can)
+                except Exception:
+                    pass
 
         if not gen_canonical or not ref_canonical:
+            print(f"ERROR: No valid canonical SMILES - gen: {len(gen_canonical)}, ref: {len(ref_canonical)}")
             return float("inf")
 
-        return get_fcd(gen_canonical, ref_canonical, model)
+        model = load_ref_model()
+
+        # Wrap in try-except to catch multiprocessing errors
+        try:
+            fcd_score = get_fcd(gen_canonical, ref_canonical, model)
+            # Restore environment variables
+            if old_num_threads:
+                os.environ['OMP_NUM_THREADS'] = old_num_threads
+            else:
+                os.environ.pop('OMP_NUM_THREADS', None)
+            if old_mkl_threads:
+                os.environ['MKL_NUM_THREADS'] = old_mkl_threads
+            else:
+                os.environ.pop('MKL_NUM_THREADS', None)
+            return fcd_score
+        except Exception as e:
+            print(f"ERROR in get_fcd: {e}")
+            raise  # Re-raise to fall through to MOSES
+    except ImportError:
+        pass
+    except Exception as e:
+        print(f"ERROR in FCD package: {e}")
+        import traceback
+        traceback.print_exc()
+        pass
+    finally:
+        # Restore environment variables
+        if old_num_threads:
+            os.environ['OMP_NUM_THREADS'] = old_num_threads
+        else:
+            os.environ.pop('OMP_NUM_THREADS', None)
+        if old_mkl_threads:
+            os.environ['MKL_NUM_THREADS'] = old_mkl_threads
+        else:
+            os.environ.pop('MKL_NUM_THREADS', None)
+
+    try:
+        # Fall back to MOSES package (but it has multiprocessing bugs)
+        import moses
+
+        # MOSES expects lists of strings - double check
+        gen_list = list(generated_smiles)  # Ensure it's a list
+        ref_list = list(reference_smiles)  # Ensure it's a list
+
+        # Call MOSES with explicit parameters to avoid multiprocessing issues
+        metrics = moses.get_all_metrics(
+            gen=gen_list,
+            test=ref_list,
+            n_jobs=1,  # Force single-threaded to avoid multiprocessing bugs
+        )
+        return metrics.get("FCD/Test", float("inf"))
     except ImportError:
         # FCD not available, return NaN
+        return float("nan")
+    except Exception as e:
+        print(f"ERROR in FCD computation: {e}")
+        import traceback
+        traceback.print_exc()
         return float("nan")

@@ -13,6 +13,7 @@ Usage:
 """
 
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -24,6 +25,7 @@ from omegaconf import DictConfig, OmegaConf
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.data.datamodule import MolecularDataModule
+from src.data.molecular import graph_to_smiles
 from src.evaluation.molecular_metrics import MolecularMetrics
 from src.evaluation.motif_distribution import MotifDistributionMetric
 from src.models.transformer import GraphGeneratorModule
@@ -181,6 +183,29 @@ def main(cfg: DictConfig) -> None:
 
     pl.seed_everything(cfg.seed, workers=True)
 
+    # Check for checkpoint BEFORE loading data (saves time if resuming)
+    ckpt_path = None
+    if cfg.get("resume", True):
+        output_dir = cfg.logs.path
+        last_ckpt = os.path.join(output_dir, "last.ckpt")
+        best_ckpt = os.path.join(output_dir, "best.ckpt")
+
+        if os.path.exists(last_ckpt):
+            log.info(f"✓ Found checkpoint: {last_ckpt}")
+            log.info("Will resume training after setup...")
+            ckpt_path = last_ckpt
+        elif os.path.exists(best_ckpt):
+            log.info(f"✓ Found checkpoint: {best_ckpt}")
+            log.info("Will resume training after setup...")
+            ckpt_path = best_ckpt
+        else:
+            log.info("No checkpoint found. Starting fresh training.")
+    else:
+        log.info("Resume disabled (resume=false). Starting fresh training.")
+
+    # Now load data (expensive operation)
+    log.info("Setting up dataset and tokenizer...")
+
     # Select tokenizer based on config
     tokenizer_type = cfg.tokenizer.get("type", "sent").lower()
     if tokenizer_type == "hsent":
@@ -209,6 +234,7 @@ def main(cfg: DictConfig) -> None:
             max_length=cfg.tokenizer.max_length,
             truncation_length=cfg.tokenizer.truncation_length,
             undirected=cfg.tokenizer.get("undirected", True),
+            labeled_graph=cfg.tokenizer.get("labeled_graph", False),
             seed=cfg.seed,
         )
 
@@ -226,6 +252,23 @@ def main(cfg: DictConfig) -> None:
     )
 
     datamodule.setup()
+
+    # Calculate steps per epoch and adjust val_check_interval if needed
+    train_dataset_size = len(datamodule.train_dataset)
+    steps_per_epoch = train_dataset_size // cfg.data.batch_size
+    val_check_interval = cfg.trainer.val_check_interval
+
+    # If val_check_interval exceeds steps per epoch, use steps per epoch (1 eval per epoch)
+    if val_check_interval > steps_per_epoch:
+        log.warning(
+            f"val_check_interval ({val_check_interval}) exceeds steps per epoch ({steps_per_epoch}). "
+            f"Setting val_check_interval={steps_per_epoch} (1 validation per epoch)"
+        )
+        val_check_interval = steps_per_epoch
+
+    log.info(f"Training dataset size: {train_dataset_size:,} samples")
+    log.info(f"Steps per epoch: {steps_per_epoch:,}")
+    log.info(f"Validation check interval: {val_check_interval:,} steps")
 
     model = GraphGeneratorModule(
         tokenizer=tokenizer,
@@ -254,14 +297,15 @@ def main(cfg: DictConfig) -> None:
         pl.callbacks.ModelCheckpoint(
             monitor="val/loss",
             dirpath=cfg.logs.path,
-            filename=cfg.model.model_name,
+            filename="best",  # Simple name for best checkpoint
+            save_last=True,  # Saves last.ckpt automatically
             mode="min",
         ),
     ]
 
     trainer = pl.Trainer(
         max_steps=cfg.trainer.max_steps,
-        val_check_interval=cfg.trainer.val_check_interval,
+        val_check_interval=val_check_interval,  # Use calculated value
         precision=cfg.trainer.precision,
         gradient_clip_val=cfg.trainer.gradient_clip_val,
         accelerator=cfg.trainer.accelerator,
@@ -270,19 +314,14 @@ def main(cfg: DictConfig) -> None:
         callbacks=callbacks,
     )
 
+    # Checkpoint detection was already done earlier to save time
+    if ckpt_path:
+        log.info(f"Resuming training from: {ckpt_path}")
+    else:
+        log.info("Starting fresh training...")
+
     log.info("Starting training...")
-    trainer.fit(model, datamodule)
-
-    log.info("Saving final checkpoint...")
-    final_checkpoint_path = f"{cfg.logs.path}/{cfg.model.model_name}-last.ckpt"
-    trainer.save_checkpoint(final_checkpoint_path)
-
-    if wandb_logger is not None and cfg.wandb.log_model:
-        save_model_artifact(
-            wandb_logger,
-            final_checkpoint_path,
-            artifact_name=f"{cfg.model.model_name}-final",
-        )
+    trainer.fit(model, datamodule, ckpt_path=ckpt_path)
 
     log.info("Running evaluation on test set...")
     trainer.test(model, datamodule)
@@ -293,14 +332,15 @@ def main(cfg: DictConfig) -> None:
     log.info(f"Generated {len(generated_graphs)} graphs in {gen_time:.4f}s per sample")
 
     # Convert generated graphs to SMILES for molecular metrics
-    from src.data.molecular import graph_to_smiles
-
+    # Use sentinel value for failed conversions to compute accurate metrics
+    INVALID_SMILES_SENTINEL = "INVALID"
     generated_smiles = []
     for g in generated_graphs:
         smiles = graph_to_smiles(g)
-        if smiles:
-            generated_smiles.append(smiles)
-    log.info(f"Successfully converted {len(generated_smiles)} graphs to SMILES")
+        generated_smiles.append(smiles if smiles else INVALID_SMILES_SENTINEL)
+
+    valid_count = sum(1 for s in generated_smiles if s != INVALID_SMILES_SENTINEL)
+    log.info(f"Successfully converted {valid_count}/{len(generated_smiles)} graphs to SMILES")
 
     if wandb_logger is not None and cfg.wandb.log_graphs:
         log.info("Logging generated molecules to WandB...")
