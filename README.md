@@ -1,6 +1,6 @@
 # MOSAIC: MOtif-aware Structural Abstraction for graph tokenIzation and Composition
 
-This project explores a simple idea: instead of asking generative models to recover motif-level structure implicitly, we encode motifs directly into the representation used for graph generation, independent of the sequence transformer's processing.
+This project explores a simple idea: instead of asking generative models to recover motif-level structure implicitly, we encode motifs directly into the representation used for graph generation, independent of the sequence transformer's processing. We are interesting in constructing a representation in the form of flat tokens.
 
 ## Core Approach
 
@@ -97,6 +97,7 @@ See the [docs/](docs/) directory for:
 - [Contributing Guide](docs/contributing.md)
 - [H-graph Construction](docs/hgraph.md)
 - [Tokenization](docs/tokenization.md)
+- [Evaluation Metrics](docs/metric.md)
 - [Visualize Tokenization](docs/visualization.md)
 
 ## Acknowledgement
