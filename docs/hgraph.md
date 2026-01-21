@@ -1,345 +1,204 @@
-# Hierarchical Graph Representation (HGraph)
+# Hierarchical Graph (H-Graph)
 
-This document describes the hierarchical graph data structures and coarsening algorithms used to decompose graphs into community-based hierarchies.
+This document describes the hierarchical graph representation and the two core operations: **construction** (building the hierarchy) and **flattening** (reconstructing the original graph).
+
+---
 
 ## Overview
 
-Hierarchical graph decomposition enables explicit encoding of multi-level graph structure by partitioning nodes into communities. This representation is the foundation for hierarchical tokenization schemes.
+A hierarchical graph decomposes a flat graph into a multi-level structure where nodes are grouped into **communities** (partitions). This enables:
 
-### Motivation
+1. **Motif preservation**: Dense subgraphs (rings, functional groups) naturally cluster together
+2. **Structured generation**: Hierarchical organization enables shorter token sequences
+3. **Constraint-based generation**: Super-edge weights constrain inter-community connections
 
-Standard flat representations treat graphs as monolithic structures, missing the hierarchical organization present in many real-world graphs. Molecular graphs, for example, contain:
+---
 
-- **Functional groups** (hydroxyl, carboxyl, amino)
-- **Ring systems** (benzene, pyridine, cyclohexane)
-- **Scaffolds** (multi-ring fused structures)
+## 1. Construction
 
-These substructures naturally form **communities** where internal connectivity is denser than external connectivity. Hierarchical decomposition exploits this property to:
+### Data Structures
 
-1. **Preserve motifs by design**: Dense subgraphs cluster into the same community
-2. **Create structured representations**: Hierarchical organization enables shorter, more interpretable sequences
-3. **Enable constraint-based generation**: Super-edge weights constrain the number of inter-community connections
+**Partition**: Induced subgraph of a single community (diagonal block in adjacency matrix).
+- `part_id`: Unique identifier
+- `global_node_indices`: Mapping from local to global node indices
+- `edge_index`: Internal edges in local indices
+- `child_hierarchy`: Optional nested hierarchy
 
-## Data Structures
+**Bipartite**: Edges between two communities (off-diagonal block).
+- `left_part_id`, `right_part_id`: Connected partition IDs
+- `edge_index`: Cross-community edges in local indices
 
-### Partition
+**HierarchicalGraph**: Top-level container.
+- `partitions`: List of all communities
+- `bipartites`: List of inter-community edge sets
+- `community_assignment`: Maps each node to its partition ID
 
-A `Partition` represents the induced subgraph of a single community (diagonal block in the adjacency block matrix).
+### Block Structure
 
-```python
-@dataclass
-class Partition:
-    part_id: int                              # Unique partition identifier
-    global_node_indices: list[int]            # Local -> global index mapping
-    edge_index: Tensor                        # [2, num_edges] in LOCAL indices
-    child_hierarchy: Optional[HierarchicalGraph]  # For nested hierarchies
+Given a graph G = (V, E) and partition P = {C₁, C₂, ..., Cₖ}:
 
-    def local_to_global(self, local_idx: int) -> int
-    def global_to_local(self, global_idx: int) -> int
-    def get_all_edges_global(self) -> set[tuple[int, int]]
-```
+**Diagonal blocks (Partitions)**: For each community Cᵢ, the induced subgraph:
 
-**Key Properties:**
-- `num_nodes`: Number of nodes in this partition
-- `num_edges`: Number of internal edges
-- `is_leaf`: True if no child hierarchy exists
+$$G[C_i] = (C_i, E_i) \quad \text{where} \quad E_i = \{(u, v) \in E : u \in C_i \land v \in C_i\}$$
 
-**Index Coordination:**
-```
-Local indices: (0, 1, 2) within partition
-       ↓ local_to_global
-Global indices: (5, 7, 9) in original graph
-```
+**Off-diagonal blocks (Bipartites)**: For each pair (Cᵢ, Cⱼ) where i < j:
 
-### Bipartite
+$$E_{ij} = \{(u, v) \in E : u \in C_i \land v \in C_j\}$$
 
-A `Bipartite` represents edges between two communities (off-diagonal block in the adjacency block matrix).
+---
 
-```python
-@dataclass
-class Bipartite:
-    left_part_id: int                         # Source partition ID
-    right_part_id: int                        # Target partition ID
-    edge_index: Tensor                        # [2, num_edges] in LOCAL indices
-```
+### Coarsening Strategies
 
-Edges are stored as pairs of local indices: the first row contains indices local to `left_part_id`, the second row contains indices local to `right_part_id`.
+Three strategies are available for partitioning nodes into communities:
 
-### HierarchicalGraph
+#### 1. Spectral Clustering (SC)
 
-`HierarchicalGraph` is the top-level container for the complete hierarchical decomposition.
+Uses spectral clustering with modularity optimization:
 
-```python
-@dataclass
-class HierarchicalGraph:
-    partitions: list[Partition]               # All communities at this level
-    bipartites: list[Bipartite]               # All inter-community edges
-    community_assignment: list[int]           # Maps global node → partition ID
+1. Build adjacency matrix **A** from edges
+2. Symmetrize for undirected graphs: **A** ← (**A** + **A**ᵀ) / 2
+3. Search for optimal k in range [k_min, k_max]:
+   - k_min = max(2, ⌊√n × 0.7⌋)
+   - k_max = min(n-1, ⌊√n × 1.3⌋)
+4. Run SpectralClustering for each k, select partition with maximum modularity
 
-    def get_partition(self, part_id: int) -> Partition
-    def get_all_edges_global(self) -> set[tuple[int, int]]
-    def reconstruct(self) -> Data
-    def get_level_info(self) -> dict
-```
-
-**Key Properties:**
-- `num_nodes`: Total number of nodes
-- `num_communities`: Number of partitions
-- `depth`: Maximum depth of nested hierarchies
-
-## Coarsening Algorithms
-
-Coarsening algorithms partition nodes into communities based on graph structure.
-
-### Spectral Coarsening
-
-Spectral coarsening uses spectral clustering with modularity optimization to discover community structure.
-
-#### Algorithm
-
-1. **Build adjacency matrix** $A$ from edge_index
-2. **Symmetrize** for undirected graphs: $A \leftarrow (A + A^T) / 2$
-3. **Search for optimal $k$**:
-   $$k^* = \arg\max_{k \in [k_{\min}, k_{\max}]} Q_k$$
-   where:
-   - $k_{\min} = \max(2, \lfloor\sqrt{n} \times 0.7\rfloor)$
-   - $k_{\max} = \min(n-1, \lfloor\sqrt{n} \times 1.3\rfloor)$
-4. **Run SpectralClustering** for each $k$ with `affinity="precomputed"`
-5. **Select partition** with maximum modularity
-
-#### Modularity
-
-Partition quality is measured by **modularity**:
+**Modularity** measures partition quality:
 
 $$Q = \frac{1}{2m} \sum_{ij} \left[ A_{ij} - \frac{k_i k_j}{2m} \right] \delta(c_i, c_j)$$
 
-where:
-- $m = \frac{1}{2}\sum_{ij} A_{ij}$ is the total edge weight
-- $k_i = \sum_j A_{ij}$ is the degree of node $i$
-- $c_i$ is the community assignment of node $i$
-- $\delta(c_i, c_j) = 1$ if $c_i = c_j$, else $0$
+Where:
+- m = total edge weight (½ΣᵢⱼAᵢⱼ)
+- kᵢ = degree of node i (Σⱼ Aᵢⱼ)
+- cᵢ = community assignment of node i
+- δ(cᵢ, cⱼ) = 1 if cᵢ = cⱼ, else 0
 
-#### Configuration
+#### 2. Hierarchical Agglomerative Clustering (HAC)
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `min_community_size` | int | `4` | Minimum nodes before stopping recursion |
-| `k_min_factor` | float | `0.7` | Lower bound factor for $k$ search |
-| `k_max_factor` | float | `1.3` | Upper bound factor for $k$ search |
-| `n_init` | int | `100` | SpectralClustering initializations |
-| `seed` | int | `None` | Random seed for reproducibility |
+Bottom-up clustering that iteratively merges similar nodes/clusters:
 
-### Motif-Aware Coarsening
+1. Initialize each node as its own cluster
+2. Compute pairwise distances/similarities between clusters
+3. Merge the two most similar clusters
+4. Repeat until reaching desired number of communities or distance threshold
 
-Motif-aware coarsening extends spectral clustering to preserve chemically meaningful structures by augmenting the affinity matrix.
+**Linkage criteria**:
+- Single linkage: min distance between cluster members
+- Complete linkage: max distance between cluster members
+- Average linkage: mean distance between cluster members
+- Ward's method: minimize within-cluster variance
 
-#### Motivation
+#### 3. Motif-Based Clustering
 
-Standard spectral clustering optimizes modularity but is agnostic to chemically meaningful structures. This can lead to **ring systems being split** across communities, which destroys motif semantics during generation.
+Uses detected motifs directly as communities:
 
-#### Modified Affinity Matrix
+1. Detect motifs using SMARTS patterns (rings, functional groups)
+2. Each motif instance becomes a community
+3. Remaining atoms form singleton or small communities
+4. Merge overlapping motifs or assign shared atoms to one community
 
-The adjacency matrix is augmented with a **motif co-membership matrix**:
+**Motif detection** uses SMARTS patterns:
+
+| Motif | SMARTS | Description |
+|-------|--------|-------------|
+| Benzene | `c1ccccc1` | Aromatic 6-ring |
+| Pyridine | `c1ccncc1` | N-containing aromatic |
+| Naphthalene | `c1ccc2ccccc2c1` | Fused bicyclic |
+| Cyclohexane | `C1CCCCC1` | Saturated 6-ring |
+
+This approach guarantees motif preservation by design.
+
+---
+
+### Motif-Aware Coarsening (Hybrid)
+
+Extends SC or HAC to preserve chemically meaningful structures by augmenting the affinity matrix:
 
 $$A' = A + \alpha \cdot M$$
 
-where:
-- $A$ is the original adjacency matrix
-- $M$ is the motif co-membership matrix
-- $\alpha \geq 0$ controls motif influence
-
-#### Motif Co-Membership Matrix
-
-The matrix $M$ encodes which atom pairs share membership in detected motifs:
+Where **M** is the **motif co-membership matrix**:
 
 $$M_{ij} = \sum_{m \in \mathcal{M}} \mathbf{1}[i \in m \land j \in m]$$
 
-where $\mathcal{M}$ is the set of all detected motif instances.
+- M is symmetric: Mᵢⱼ = Mⱼᵢ
+- Mᵢⱼ counts how many motifs contain both atoms i and j
+- For overlapping motifs (e.g., fused rings), Mᵢⱼ can be > 1
 
-**Properties of $M$:**
-- Symmetric: $M_{ij} = M_{ji}$
-- Non-negative: $M_{ij} \geq 0$
-- Diagonal: $M_{ii} = $ number of motifs containing atom $i$
-- For overlapping motifs (e.g., fused rings), $M_{ij}$ can be $> 1$
+**α hyperparameter**:
 
-**Example**: For naphthalene (two fused benzene rings sharing atoms 3 and 8):
-- Atoms in benzene 1 only: $M_{ij} = 1$
-- Atoms in benzene 2 only: $M_{ij} = 1$
-- Atoms 3 and 8 (shared): $M_{3,8} = 2$ (both benzenes)
+| α Value | Effect |
+|---------|--------|
+| 0 | Standard clustering (no motif awareness) |
+| 1 | Motif co-membership weighted equally to edges |
+| 2-5 | Moderate motif preference |
+| 10+ | Strong motif preservation |
 
-#### Motif Detection
-
-Motifs are detected using **SMARTS patterns** via RDKit when a SMILES string is available:
-
-```python
-CLUSTERING_MOTIFS = {
-    # Aromatic 6-membered rings
-    "benzene": "c1ccccc1",
-    "pyridine": "c1ccncc1",
-    "pyrimidine": "c1cncnc1",
-    # Aromatic 5-membered rings
-    "pyrrole": "c1cc[nH]c1",
-    "furan": "c1ccoc1",
-    "thiophene": "c1ccsc1",
-    "imidazole": "c1cnc[nH]1",
-    # Fused ring systems
-    "naphthalene": "c1ccc2ccccc2c1",
-    "indole": "c1ccc2[nH]ccc2c1",
-    "quinoline": "c1ccc2ncccc2c1",
-    # Saturated rings
-    "cyclopentane": "C1CCCC1",
-    "cyclohexane": "C1CCCCC1",
-    "cyclohexene": "C1=CCCCC1",
-}
-```
-
-The focus is on **ring systems** because:
-1. Rings form the structural backbone of molecules
-2. Splitting a ring destroys its chemical identity
-3. Functional groups (OH, COOH) are typically small and naturally cluster
-
-#### The α Hyperparameter
-
-| $\alpha$ Value | Interpretation |
-|----------------|----------------|
-| $\alpha = 0$ | Standard spectral clustering (no motif awareness) |
-| $\alpha = 1$ | Motif co-membership weighted equally to actual edges |
-| $\alpha = 2$-$5$ | Moderate preference for motif preservation |
-| $\alpha = 10$+ | Strong motif preservation; may reduce modularity |
-
-**Tuning Guidelines:**
-- Start with $\alpha = 1.0$ (default)
-- Increase $\alpha$ if ring systems are being split
-- Decrease $\alpha$ if communities become too large (poor modularity)
-- For molecules with many overlapping motifs, use lower $\alpha$
-
-#### Motif Cohesion Metric
-
-Motif preservation is measured using the **cohesion rate**:
+**Motif cohesion metric**:
 
 $$\text{Cohesion} = \frac{|\{m \in \mathcal{M} : m \subseteq C_i \text{ for some } i\}|}{|\mathcal{M}|}$$
 
 A motif is "intact" if all its atoms belong to a single community. Cohesion of 1.0 means all motifs are preserved.
 
-#### Configuration
+---
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `alpha` | float | `1.0` | Weight for motif affinity |
-| `motif_patterns` | dict | `None` | Custom SMARTS patterns (uses defaults if None) |
-| `normalize_by_motif_size` | bool | `False` | Normalize M by motif size |
+## 2. Flattening
 
-### Future Coarsening Methods
+Flattening reconstructs the original graph from the token sequence. The approach differs based on the tokenization method.
 
-The coarsening framework is designed to be extensible. Planned additions include:
+### H-SENT Flattening (Bipartite Edge Union)
 
-- **Hierarchical Agglomerative Clustering (HAC)**: Bottom-up clustering that iteratively merges similar nodes/clusters
-- **Metis-based Partitioning**: Graph partitioning using the METIS library
-- **Learned Coarsening**: Neural network-based community detection
-
-## Hierarchical Decomposition
-
-### Block Structure
-
-Given a partition $\mathcal{P} = \{C_1, C_2, \ldots, C_k\}$, the graph decomposes into:
-
-**Diagonal Blocks (Partitions)**: For each community $C_i$, the induced subgraph $G[C_i] = (C_i, E_i)$ where:
-$$E_i = \{(u, v) \in E : u \in C_i \land v \in C_i\}$$
-
-**Off-Diagonal Blocks (Bipartites)**: For each pair of communities $(C_i, C_j)$ where $i < j$, the bipartite subgraph contains:
-$$E_{ij} = \{(u, v) \in E : u \in C_i \land v \in C_j\}$$
-
-### Recursive Structure
-
-The decomposition can be applied recursively for multi-level hierarchies:
-
-```
-build_hierarchy(G, recursive=True):
-    if |V(G)| < min_community_size:
-        return SinglePartition(G)
-
-    communities = spectral_partition(G)
-
-    if len(communities) <= 1:
-        return SinglePartition(G)
-
-    partitions = []
-    for each community C in communities:
-        partition = extract_induced_subgraph(C)
-        if recursive and |C| >= min_community_size:
-            partition.child_hierarchy = build_hierarchy(partition)
-        partitions.append(partition)
-
-    bipartites = extract_all_bipartites(communities)
-
-    return HierarchicalGraph(partitions, bipartites)
-```
-
-The `min_community_size` parameter controls recursion depth:
-- Small values produce deep hierarchies
-- Large values produce shallow hierarchies with larger leaf partitions
-
-## Graph Reconstruction
-
-### Flattening Algorithm
-
-The original graph is reconstructed by combining all edges from all levels:
+H-SENT uses explicit partition and bipartite blocks, so flattening combines both:
 
 $$E_{\text{reconstructed}} = \bigcup_{i} E_i \cup \bigcup_{i<j} E_{ij}$$
 
-For nested hierarchies, edges are collected recursively.
+Where:
+- Eᵢ = edges within partition i (from SENT back-edges in partition blocks)
+- Eᵢⱼ = edges between partitions i and j (from bipartite blocks)
 
-### Index Conversion
+**Index conversion**:
 
-**Partition edges** $(u_{\text{local}}, v_{\text{local}}) \in E_i$:
+For partition edges (u_local, v_local) ∈ Eᵢ:
 $$u_{\text{global}} = \text{global\_indices}_i[u_{\text{local}}]$$
 $$v_{\text{global}} = \text{global\_indices}_i[v_{\text{local}}]$$
 
-**Bipartite edges** $(u_{\text{local}}, v_{\text{local}}) \in E_{ij}$:
+For bipartite edges (u_local, v_local) ∈ Eᵢⱼ:
 $$u_{\text{global}} = \text{global\_indices}_i[u_{\text{local}}]$$
 $$v_{\text{global}} = \text{global\_indices}_j[v_{\text{local}}]$$
 
-### Implementation
+### HDT Flattening (Back-Edge Union)
 
-```python
-def reconstruct(hg: HierarchicalGraph) -> Data:
-    """Reconstruct PyG Data from hierarchical graph."""
-    all_edges = set()
+HDT encodes ALL edges (both intra and inter-partition) as back-edges to previously visited atoms:
 
-    # Collect edges from all partitions (recursively)
-    for partition in hg.partitions:
-        all_edges.update(partition.get_all_edges_global())
+$$E_{\text{reconstructed}} = \bigcup \text{back\_edges}$$
 
-    # Collect edges from all bipartites
-    for bipartite in hg.bipartites:
-        left_part = hg.get_partition(bipartite.left_part_id)
-        right_part = hg.get_partition(bipartite.right_part_id)
-        for i in range(bipartite.edge_index.size(1)):
-            left_local = bipartite.edge_index[0, i].item()
-            right_local = bipartite.edge_index[1, i].item()
-            u = left_part.local_to_global(left_local)
-            v = right_part.local_to_global(right_local)
-            all_edges.add((u, v))
-            all_edges.add((v, u))  # Undirected
+Since cross-partition edges are captured when visiting atoms that have neighbors in earlier partitions, no separate bipartite reconstruction is needed.
 
-    # Convert to PyG Data
-    edge_list = list(all_edges)
-    edge_index = torch.tensor(edge_list, dtype=torch.long).t()
-    return Data(edge_index=edge_index, num_nodes=hg.num_nodes)
-```
+**Process**:
+1. Track visited atoms in DFS order
+2. Parse ENTER/EXIT to identify partition boundaries
+3. Collect all back-edges (these include both intra and inter-partition edges)
+4. Convert global indices directly (HDT uses global indices throughout)
+
+### Comparison
+
+| Aspect | H-SENT | HDT |
+|--------|--------|-----|
+| Intra-partition edges | From SENT back-edges | From back-edges |
+| Inter-partition edges | From bipartite blocks | From back-edges (automatic) |
+| Index conversion | Local → Global | Already global |
 
 ### Lossless Guarantee
 
-The encoding is provably lossless:
+Both methods are provably lossless:
 
-$$\forall G: \quad \text{reconstruct}(\text{build\_hierarchy}(G)) \equiv G$$
+$$\forall G: \quad \text{flatten}(\text{tokenize}(G)) \equiv G$$
 
-This is verified by roundtrip tests on all graph types including:
-- Synthetic graphs (triangles, paths, stars, complete graphs)
-- Molecular graphs (aspirin, caffeine, cholesterol, morphine)
+This is verified by roundtrip tests on synthetic graphs (triangles, paths, stars, complete graphs) and molecular graphs (aspirin, caffeine, cholesterol, morphine).
+
+---
 
 ## References
 
-1. **HiGen**: Hierarchical Graph Generative Networks - [arXiv:2305.19843](https://arxiv.org/abs/2305.19337)
+1. **HiGen**: Hierarchical Graph Generative Networks - arXiv:2305.19337
 2. **Spectral Clustering**: Ng, Jordan, Weiss (2001) - On Spectral Clustering
 3. **Modularity**: Newman (2006) - Modularity and community structure in networks
+4. **HAC**: Müllner (2011) - Modern hierarchical, agglomerative clustering algorithms

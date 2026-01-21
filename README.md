@@ -1,5 +1,16 @@
 # MOSAIC: MOtif-aware Structural Abstraction for graph tokenIzation and Composition
-This project explores a simple idea: instead of asking generative models to recover motif-level structure implicitly, we encode motifs directly into the representation used for graph generation or treat it as a loss regularization upon training, both independent of the inner processing of sequence transformer.
+
+This project explores a simple idea: instead of asking generative models to recover motif-level structure implicitly, we encode motifs directly into the representation used for graph generation, independent of the sequence transformer's processing. We are interesting in constructing a representation in the form of flat tokens.
+
+## Core Approach
+
+For generating graphs using tokens with hierarchical insights, we need 3 things:
+
+1. **Create the input H-graph**: Build a hierarchical representation of the graph using coarsening strategies (HAC, Spectral Clustering, Motif Community).
+
+2. **Tokenize the input H-graph**: Convert the hierarchy to a token sequence using H-SENT (Vanilla HiGen) or HDT (DFS-based). Note that we need to preserve enough information (leaf edge connections) for the inverse problem to flatten the H-graph.
+
+3. **Flatten the generated H-graph**: Reconstruct the flat graph from tokens via bipartite edge union for H-SENT, or union of back edges for HDT.
 
 ## Quick Start
 
@@ -77,26 +88,16 @@ MOSAIC/
 └── docs/               # Documentation
 ```
 
-## Key Metrics
-
-### Standard Graph Metrics
-- Degree distribution (MMD)
-- Spectral properties (MMD)
-- Clustering coefficients (MMD)
-
-### Motif Metrics
-- **MSC** (Motif Signature Comparison): MMD between motif count vectors
-- **MFD** (Motif Frequency Distribution): Per-motif-type comparison
-- **MPR** (Motif Preservation Rate): For conditional generation
-
 ## Documentation
 
 See the [docs/](docs/) directory for:
 - [Codebase Guide](docs/codebase.md)
-- [Setup Guide](docs/setup.md)
+- [Server Setup Guide](docs/server_setup.md)
+- [Training Setup Guide](docs/setup_training.md)
 - [Contributing Guide](docs/contributing.md)
 - [H-graph Construction](docs/hgraph.md)
 - [Tokenization](docs/tokenization.md)
+- [Evaluation Metrics](docs/metric.md)
 - [Visualize Tokenization](docs/visualization.md)
 
 ## Acknowledgement
