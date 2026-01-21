@@ -33,12 +33,14 @@ class Partition:
         global_node_indices: Mapping from local index to global node index.
         edge_index: Internal edges in LOCAL indices [2, num_edges].
         child_hierarchy: Optional nested HierarchicalGraph for deeper levels.
+        node_features: Optional node features (e.g., atom types) in LOCAL indices [num_nodes].
     """
 
     part_id: int
     global_node_indices: list[int]
     edge_index: Tensor
     child_hierarchy: Optional[HierarchicalGraph] = None
+    node_features: Optional[Tensor] = None
 
     @property
     def num_nodes(self) -> int:
@@ -119,11 +121,13 @@ class Bipartite:
         right_part_id: ID of the right (target) partition.
         edge_index: Edges as [2, num_edges] where row 0 is left local
             indices and row 1 is right local indices.
+        edge_features: Optional edge features (e.g., bond types) [num_edges].
     """
 
     left_part_id: int
     right_part_id: int
     edge_index: Tensor
+    edge_features: Optional[Tensor] = None
 
     @property
     def num_edges(self) -> int:
@@ -150,11 +154,15 @@ class HierarchicalGraph:
         num_nodes: Total number of nodes in the original graph.
         num_communities: Number of partitions at this level.
         depth: Depth of this hierarchy (0 for single-level, >0 for nested).
+        node_features: Optional global node features (e.g., atom types) [num_nodes].
+        edge_features: Optional global edge features as dict {(src, dst): bond_type}.
     """
 
     partitions: list[Partition]
     bipartites: list[Bipartite]
     community_assignment: list[int]
+    node_features: Optional[Tensor] = None
+    edge_features: Optional[dict[tuple[int, int], int]] = None
     num_nodes: int = field(init=False)
     num_communities: int = field(init=False)
 
@@ -235,7 +243,8 @@ class HierarchicalGraph:
         raw_graph → HierarchicalGraph → reconstruct() → raw_graph
 
         Returns:
-            PyTorch Geometric Data object with edge_index and num_nodes.
+            PyTorch Geometric Data object with edge_index, num_nodes, and optionally
+            x (node features) and edge_attr (edge features) if present.
         """
         all_edges = self.get_all_edges_global()
 
@@ -246,7 +255,24 @@ class HierarchicalGraph:
         else:
             edge_index = torch.zeros((2, 0), dtype=torch.long)
 
-        return Data(edge_index=edge_index, num_nodes=self.num_nodes)
+        # Reconstruct edge attributes if edge_features exist
+        edge_attr = None
+        if self.edge_features is not None and edge_index.shape[1] > 0:
+            edge_attr_list = []
+            for i in range(edge_index.shape[1]):
+                src = int(edge_index[0, i])
+                dst = int(edge_index[1, i])
+                # Lookup bond type from edge_features dictionary
+                bond_type = self.edge_features.get((src, dst), 0)
+                edge_attr_list.append(bond_type)
+            edge_attr = torch.tensor(edge_attr_list, dtype=torch.long)
+
+        return Data(
+            edge_index=edge_index,
+            num_nodes=self.num_nodes,
+            x=self.node_features,  # Will be None if not present
+            edge_attr=edge_attr,   # Will be None if not present
+        )
 
     def get_level_info(self) -> dict:
         """Get information about each level of the hierarchy.
