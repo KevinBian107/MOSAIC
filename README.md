@@ -1,5 +1,16 @@
 # MOSAIC: MOtif-aware Structural Abstraction for graph tokenIzation and Composition
-This project explores a simple idea: instead of asking generative models to recover motif-level structure implicitly, we encode motifs directly into the representation used for graph generation or treat it as a loss regularization upon training, both independent of the inner processing of sequence transformer.
+
+This project explores a simple idea: instead of asking generative models to recover motif-level structure implicitly, we encode motifs directly into the representation used for graph generation, independent of the sequence transformer's processing.
+
+## Core Approach
+
+For generating graphs using tokens with hierarchical insights, we need 3 things:
+
+1. **Create the input H-graph**: Build a hierarchical representation of the graph using coarsening strategies (HAC, Spectral Clustering, Motif Community).
+
+2. **Tokenize the input H-graph**: Convert the hierarchy to a token sequence using H-SENT (Vanilla HiGen) or HDT (DFS-based). Note that we need to preserve enough information (leaf edge connections) for the inverse problem to flatten the H-graph.
+
+3. **Flatten the generated H-graph**: Reconstruct the flat graph from tokens via bipartite edge union for H-SENT, or union of back edges for HDT.
 
 ## Quick Start
 
