@@ -11,6 +11,7 @@ import pytorch_lightning as pl
 import torch
 import transformers
 from torch import nn
+from tqdm import tqdm
 
 from src.tokenizers.base import Tokenizer
 
@@ -280,12 +281,14 @@ class GraphGeneratorModule(pl.LightningModule):
         self,
         num_samples: Optional[int] = None,
         input_ids: Optional[torch.Tensor] = None,
+        show_progress: bool = False,
     ) -> tuple[list, float]:
         """Generate graphs.
 
         Args:
             num_samples: Number of graphs to generate.
             input_ids: Optional initial tokens.
+            show_progress: Whether to show a progress bar.
 
         Returns:
             Tuple of (list of Data objects, average time per sample).
@@ -297,7 +300,15 @@ class GraphGeneratorModule(pl.LightningModule):
         graphs = []
         total_time = 0
 
-        for i in range(0, num_samples, self.sampling_batch_size):
+        batch_indices = range(0, num_samples, self.sampling_batch_size)
+        if show_progress:
+            batch_indices = tqdm(
+                batch_indices,
+                desc="Generating molecules",
+                total=(num_samples + self.sampling_batch_size - 1) // self.sampling_batch_size,
+            )
+
+        for i in batch_indices:
             batch_size = min(self.sampling_batch_size, num_samples - i)
 
             if input_ids is not None:

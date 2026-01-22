@@ -23,13 +23,13 @@ model:
 data:
   dataset_name: moses  # 'moses' or 'qm9'
   batch_size: 32
-  num_workers: 0
-  num_train: 10000  # Use null for full dataset
-  num_val: 1000
-  num_test: 1000
+  num_workers: 4
+  num_train: 1000  # Use null for full dataset
+  num_val: 100
+  num_test: 100
   include_hydrogens: false
   data_root: data
-  use_cache: false  # Set to true to use preprocessed cached data
+  use_cache: true  # Set to true to use preprocessed cached data
   cache_dir: data/cache  # Directory for cached tokenized data
 
 # Training configuration
@@ -57,7 +57,7 @@ logs:
 
 # Weights & Biases configuration
 wandb:
-  enabled: false
+  enabled: true
   project: molecular-graph-gen
   entity: null  # Your WandB username or team name
   name: null  # Run name (auto-generated if null)
@@ -65,4 +65,11 @@ wandb:
   notes: null  # Notes about this run
   log_model: true  # Log model checkpoints as artifacts
   log_graphs: true  # Log generated molecule visualizations
-  log_freq: 1000  # How often to log (in steps)
+  log_freq: 1000  # How often to log (in steps) - deprecated, use eval_every_n_val
+
+  # Enhanced molecule visualization with color-coded motif highlighting
+  max_logged_molecules: 12  # Number of molecules to visualize in WandB
+
+  # Intermediate evaluation during training (set to 0 to disable)
+  eval_every_n_val: 1  # Run generation eval every N validation epochs
+  eval_num_samples: 50  # Number of molecules to generate per intermediate eval
