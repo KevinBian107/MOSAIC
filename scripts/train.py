@@ -21,6 +21,7 @@ from typing import Optional
 import hydra
 import pytorch_lightning as pl
 from omegaconf import DictConfig, OmegaConf
+from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -468,12 +469,14 @@ class IntermediateEvaluationCallback(Callback):
 
         # Generate samples
         pl_module.eval()
-        generated_graphs, gen_time = pl_module.generate(num_samples=self.num_samples)
+        generated_graphs, gen_time = pl_module.generate(
+            num_samples=self.num_samples, show_progress=True
+        )
 
         # Convert to SMILES
         INVALID = "INVALID"
         generated_smiles = []
-        for g in generated_graphs:
+        for g in tqdm(generated_graphs, desc="Converting to SMILES"):
             smiles = graph_to_smiles(g)
             generated_smiles.append(smiles if smiles else INVALID)
 
@@ -717,14 +720,16 @@ def main(cfg: DictConfig) -> None:
 
     log.info("Generating samples for evaluation...")
     model.eval()
-    generated_graphs, gen_time = model.generate(num_samples=cfg.sampling.num_samples)
+    generated_graphs, gen_time = model.generate(
+        num_samples=cfg.sampling.num_samples, show_progress=True
+    )
     log.info(f"Generated {len(generated_graphs)} graphs in {gen_time:.4f}s per sample")
 
     # Convert generated graphs to SMILES for molecular metrics
     # Use sentinel value for failed conversions to compute accurate metrics
     INVALID_SMILES_SENTINEL = "INVALID"
     generated_smiles = []
-    for g in generated_graphs:
+    for g in tqdm(generated_graphs, desc="Converting to SMILES"):
         smiles = graph_to_smiles(g)
         generated_smiles.append(smiles if smiles else INVALID_SMILES_SENTINEL)
 
