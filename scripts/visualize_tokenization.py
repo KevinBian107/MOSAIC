@@ -31,9 +31,7 @@ from rdkit import Chem
 from torch_geometric.data import Data
 from torch_geometric.utils import to_networkx
 
-from src.tokenizers.sent import SENTTokenizer
-from src.tokenizers.hierarchical import HSENTTokenizer
-from src.tokenizers.hierarchical.hdt import HDTTokenizer
+from src.tokenizers import HDTTokenizer, HSENTTokenizer, SENTTokenizer
 
 
 # Common molecules for demos

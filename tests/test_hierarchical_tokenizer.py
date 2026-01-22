@@ -12,7 +12,7 @@ import pytest
 import torch
 from torch_geometric.data import Data
 
-from src.tokenizers.hierarchical import (
+from src.tokenizers import (
     HSENTTokenizer,
     HierarchicalGraph,
     Partition,

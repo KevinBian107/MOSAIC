@@ -19,8 +19,7 @@ import pytest
 import torch
 from torch_geometric.data import Data
 
-from src.tokenizers.hierarchical.hdt import HDTTokenizer
-from src.tokenizers.hierarchical.hsent import HSENTTokenizer
+from src.tokenizers import HDTTokenizer, HSENTTokenizer
 
 # Test constants
 NUM_ATOM_TYPES = 10  # Example: C, N, O, F, etc.

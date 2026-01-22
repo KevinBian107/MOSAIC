@@ -16,14 +16,14 @@ import pytest
 import torch
 from torch_geometric.data import Data
 
-from src.tokenizers.hierarchical import (
+from src.tokenizers import (
     SpectralCoarsening,
     HierarchicalGraph,
     Partition,
     Bipartite,
     order_partition_nodes,
+    HDTTokenizer,
 )
-from src.tokenizers.hierarchical.hdt import HDTTokenizer
 
 # Optional imports for molecular tests
 try:
@@ -35,7 +35,7 @@ except ImportError:
 
 # Optional H-SENT import for comparison tests
 try:
-    from src.tokenizers.hierarchical import HSENTTokenizer
+    from src.tokenizers import HSENTTokenizer
 
     HAS_HSENT = True
 except ImportError:
