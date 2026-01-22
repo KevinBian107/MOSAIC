@@ -3,7 +3,7 @@
 defaults:
   - _self_
   - experiment: moses
-  - tokenizer: sent    # Options: sent, hsent, hsent_motif
+  - tokenizer: hsent    # Options: sent, hsent, hsent_motif
 
 # Random seed
 seed: 42
@@ -71,5 +71,5 @@ wandb:
   max_logged_molecules: 12  # Number of molecules to visualize in WandB
 
   # Intermediate evaluation during training (set to 0 to disable)
-  eval_every_n_val: 1  # Run generation eval every N validation epochs
-  eval_num_samples: 50  # Number of molecules to generate per intermediate eval
+  eval_every_n_val: 250  # Run generation eval every N validation epochs
+  eval_num_samples: 5  # Number of molecules to generate per intermediate eval

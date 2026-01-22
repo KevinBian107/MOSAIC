@@ -18,7 +18,7 @@ import numpy as np
 from matplotlib.colors import ListedColormap
 from torch_geometric.data import Data
 
-from src.tokenizers.hierarchical.structures import (
+from src.tokenizers.structures import (
     Bipartite,
     HierarchicalGraph,
     Partition,

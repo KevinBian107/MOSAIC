@@ -8,7 +8,7 @@
 #
 # Usage:
 #   python scripts/train.py tokenizer=hdt
-#   python scripts/train.py tokenizer=hdt tokenizer.node_order=DFS
+#   python scripts/train.py tokenizer=hdt tokenizer.coarsening_strategy=motif_aware_spectral
 
 # Tokenizer type identifier
 type: hdt
@@ -24,8 +24,22 @@ node_order: BFS
 # Coarsening settings
 min_community_size: 4       # Minimum nodes before stopping recursion
 
-# Motif-aware coarsening (disabled by default)
-motif_aware: false
+# Coarsening strategy
+# Options:
+#   - spectral: Standard spectral clustering (default)
+#   - motif_aware_spectral: Spectral clustering with motif preservation
+#   - motif_community: Direct motif-based community assignment (not yet implemented)
+coarsening_strategy: spectral
+
+# Motif-aware coarsening settings (only used with motif-aware strategies)
+motif_alpha: 1.0            # Weight for motif affinity (higher = stronger preservation)
+                            # alpha=0: standard spectral clustering
+                            # alpha=1: motif edges weighted equally to graph edges
+                            # alpha=2-5: moderate motif preference
+                            # alpha=10+: strong motif preservation
+
+normalize_by_motif_size: false  # Normalize motif contribution by 1/motif_size
+                                # Prevents large motifs from dominating
 
 # Labeled graph support (encode atom/bond types for molecules)
 labeled_graph: true

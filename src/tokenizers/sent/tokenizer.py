@@ -11,9 +11,9 @@ import torch
 from torch_geometric.data import Data
 
 from src.tokenizers.base import BatchConverter, Tokenizer
-from src.tokenizers.sent_utils import (
-    sample_labeled_sent_from_graph,
+from src.tokenizers.sent.utils import (
     get_graph_from_labeled_sent,
+    sample_labeled_sent_from_graph,
 )
 
 

@@ -13,7 +13,7 @@ import networkx as nx
 import numpy as np
 from torch import Tensor
 
-from src.tokenizers.hierarchical.structures import Partition
+from src.tokenizers.structures import Partition
 
 
 OrderingMethod = Literal["BFS", "DFS", "BFSAC", "BFSDC"]

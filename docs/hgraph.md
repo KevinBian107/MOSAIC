@@ -93,8 +93,9 @@ Uses detected motifs directly as communities:
 
 1. Detect motifs using SMARTS patterns (rings, functional groups)
 2. Each motif instance becomes a community
-3. Remaining atoms form singleton or small communities
-4. Merge overlapping motifs or assign shared atoms to one community
+3. Overlapping motifs (sharing atoms) are merged via union-find into a single community
+4. Non-motif atoms are handled by the singleton rule (see below)
+5. If two motif share atoms together, they will be grouped as one bigger motif, not layered motif
 
 **Motif detection** uses SMARTS patterns:
 
@@ -104,6 +105,27 @@ Uses detected motifs directly as communities:
 | Pyridine | `c1ccncc1` | N-containing aromatic |
 | Naphthalene | `c1ccc2ccccc2c1` | Fused bicyclic |
 | Cyclohexane | `C1CCCCC1` | Saturated 6-ring |
+
+**Singleton rule** for non-motif atoms:
+
+Atoms not belonging to any detected motif initially form singleton communities (one atom per community). These are then merged based on adjacency:
+
+1. For each singleton atom, find its neighbors in the molecular graph
+2. If a neighbor belongs to a non-singleton community (i.e., a motif), merge the singleton into that community
+3. If multiple neighbors belong to different communities, merge into the first found
+4. If no neighbor is in a motif, the singleton remains as its own community
+
+This ensures non-motif atoms (e.g., chain carbons, substituents) are absorbed into adjacent motif communities, reducing fragmentation while preserving motif boundaries.
+
+**Example**: In phenol (benzene + OH):
+- Benzene ring → 1 community (6 atoms)
+- Oxygen atom → initially singleton, merged into benzene community (adjacent)
+- Result: 1 community containing all 7 atoms
+
+**Example**: In biphenyl (two connected benzene rings):
+- First benzene → community 1 (6 atoms)
+- Second benzene → community 2 (6 atoms)
+- Result: 2 separate communities (rings don't share atoms)
 
 This approach guarantees motif preservation by design.
 

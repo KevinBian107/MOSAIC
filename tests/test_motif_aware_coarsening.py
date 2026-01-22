@@ -14,12 +14,14 @@ import pytest
 import torch
 from torch_geometric.data import Data
 
-from src.tokenizers.hierarchical import (
-    CLUSTERING_MOTIFS,
+from src.tokenizers import (
     HSENTTokenizer,
     MotifAwareCoarsening,
-    MotifInstance,
     SpectralCoarsening,
+)
+from src.tokenizers.motif import (
+    CLUSTERING_MOTIFS,
+    MotifInstance,
     compute_motif_affinity_matrix,
     compute_motif_cohesion,
     detect_motifs_from_data,

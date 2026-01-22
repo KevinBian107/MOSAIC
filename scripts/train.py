@@ -379,6 +379,518 @@ def save_model_artifact(
         log.warning(f"Could not save model artifact: {e}")
 
 
+class TokenizationVisualizationCallback(Callback):
+    """Callback to log tokenization visualization at the start of training.
+
+    Logs a single example from the training set with visualization of:
+    - Molecule structure with motif highlighting
+    - Tokenization structure (communities for hierarchical, walk for SENT)
+    - Token sequence
+
+    Attributes:
+        datamodule: Data module with training dataset.
+        tokenizer: Tokenizer instance.
+        seed: Random seed for layout.
+        _logged: Whether the visualization has been logged.
+    """
+
+    def __init__(self, datamodule, tokenizer, seed: int = 42, num_examples: int = 3) -> None:
+        """Initialize the callback.
+
+        Args:
+            datamodule: Data module with training dataset.
+            tokenizer: Tokenizer instance (SENT, H-SENT, or HDT).
+            seed: Random seed for consistent layout.
+            num_examples: Number of examples to log (default 3).
+        """
+        super().__init__()
+        self.datamodule = datamodule
+        self.tokenizer = tokenizer
+        self.seed = seed
+        self.num_examples = num_examples
+        self._logged = False
+
+    def on_train_start(self, trainer, pl_module) -> None:
+        """Log tokenization examples at the start of training."""
+        if self._logged:
+            return
+        self._logged = True
+
+        # Find WandB logger
+        wandb_logger = None
+        for logger in trainer.loggers:
+            if isinstance(logger, pl.loggers.WandbLogger):
+                wandb_logger = logger
+                break
+
+        if wandb_logger is None:
+            return
+
+        try:
+            import matplotlib
+
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            import networkx as nx
+            import torch
+            import wandb
+            from matplotlib.gridspec import GridSpec
+            from rdkit import Chem
+            from torch_geometric.data import Data
+            from torch_geometric.utils import to_networkx
+
+            if (
+                not hasattr(self.datamodule, "train_smiles")
+                or len(self.datamodule.train_smiles) == 0
+            ):
+                log.warning("No training SMILES available for tokenization visualization")
+                return
+
+            tokenizer_type = type(self.tokenizer).__name__
+            num_to_log = min(self.num_examples, len(self.datamodule.train_smiles))
+
+            for idx in range(num_to_log):
+                smiles = self.datamodule.train_smiles[idx]
+                log.info(f"Tokenization viz [{idx}]: SMILES={smiles[:50]}...")
+
+                mol = Chem.MolFromSmiles(smiles)
+                if mol is None:
+                    log.warning(f"Could not parse SMILES: {smiles}")
+                    continue
+
+                # Build graph from SMILES
+                edges = []
+                for bond in mol.GetBonds():
+                    i, j = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+                    edges.append([i, j])
+                    edges.append([j, i])
+
+                if edges:
+                    edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
+                else:
+                    edge_index = torch.zeros((2, 0), dtype=torch.long)
+
+                data = Data(edge_index=edge_index, num_nodes=mol.GetNumAtoms())
+                data.smiles = smiles
+
+                # Get graph layout
+                try:
+                    G = to_networkx(data, to_undirected=True)
+                except Exception:
+                    G = nx.Graph()
+                    G.add_nodes_from(range(data.num_nodes))
+                    if edge_index.numel() > 0:
+                        ei = edge_index.numpy()
+                        for i in range(ei.shape[1]):
+                            G.add_edge(int(ei[0, i]), int(ei[1, i]))
+                pos = nx.spring_layout(G, seed=self.seed + idx, k=1.5, iterations=100)
+
+                # Create figure
+                fig = plt.figure(figsize=(16, 8))
+                gs = GridSpec(2, 2, figure=fig, height_ratios=[2, 1], hspace=0.3, wspace=0.3)
+
+                # Panel 1: Molecule with motifs
+                ax1 = fig.add_subplot(gs[0, 0])
+                _plot_molecule_with_motifs(ax1, data, smiles, pos)
+
+                # Panel 2: Tokenization structure
+                ax2 = fig.add_subplot(gs[0, 1])
+                tokens = self.tokenizer.tokenize(data).tolist()
+
+                if tokenizer_type in ("HSENTTokenizer", "HDTTokenizer"):
+                    hg = self.tokenizer.coarsener.build_hierarchy(data)
+                    log.info(f"Tokenization viz [{idx}]: {hg.num_communities} communities, {len(tokens)} tokens")
+                    _plot_hierarchical_structure(ax2, data, hg, tokenizer_type, pos)
+                else:
+                    log.info(f"Tokenization viz [{idx}]: {len(tokens)} tokens")
+                    _plot_sent_walk(ax2, data, tokens, self.tokenizer, pos)
+
+                # Panel 3: Token sequence
+                ax3 = fig.add_subplot(gs[1, :])
+                _plot_token_sequence(ax3, tokens, self.tokenizer, tokenizer_type)
+
+                # Title
+                fig.suptitle(
+                    f"Tokenization Example {idx + 1}: {tokenizer_type}\n"
+                    f"SMILES: {smiles[:60]}{'...' if len(smiles) > 60 else ''} "
+                    f"({mol.GetNumAtoms()} atoms, {len(tokens)} tokens)",
+                    fontsize=12,
+                    fontweight="bold",
+                )
+
+                plt.tight_layout()
+                wandb_logger.experiment.log({f"tokenization/example_{idx}": wandb.Image(fig)})
+                plt.close(fig)
+
+            log.info(f"Logged {num_to_log} tokenization examples to WandB")
+
+        except ImportError as e:
+            log.warning(f"Could not log tokenization examples to WandB: {e}")
+        except Exception as e:
+            log.warning(f"Error logging tokenization examples to WandB: {e}")
+
+
+def _plot_molecule_with_motifs(
+    ax: "plt.Axes",
+    data,
+    smiles: str,
+    pos: dict,
+) -> None:
+    """Plot molecule structure with motif highlighting."""
+    import matplotlib.patches as mpatches
+    import matplotlib.pyplot as plt
+    from rdkit import Chem
+
+    from src.tokenizers.motif import CLUSTERING_MOTIFS
+
+    # Use same patterns as the coarsener for consistency
+    motif_patterns = CLUSTERING_MOTIFS
+
+    # Colors for each motif type
+    motif_colors = {
+        # Aromatic 6-membered rings - reds/oranges
+        "benzene": "#FF6B6B",
+        "pyridine": "#FF8C42",
+        "pyrimidine": "#FFB347",
+        "pyrazine": "#FFC87C",
+        # Aromatic 5-membered rings - blues/teals
+        "pyrrole": "#45B7D1",
+        "furan": "#4ECDC4",
+        "thiophene": "#2EC4B6",
+        "imidazole": "#3D9970",
+        "oxazole": "#20C997",
+        "thiazole": "#17A2B8",
+        # Fused ring systems - purples
+        "naphthalene": "#9B59B6",
+        "indole": "#8E44AD",
+        "quinoline": "#6C5CE7",
+        "benzofuran": "#A55EEA",
+        "benzothiophene": "#7C3AED",
+        # Saturated rings - greens
+        "cyclopropane": "#96CEB4",
+        "cyclobutane": "#88D8B0",
+        "cyclopentane": "#56AB91",
+        "cyclohexane": "#2D6A4F",
+        # Partially unsaturated - yellows
+        "cyclohexene": "#FFEAA7",
+        "cyclopentene": "#FDCB6E",
+    }
+
+    mol = Chem.MolFromSmiles(smiles)
+    motifs = {}
+    if mol:
+        for name, pattern in motif_patterns.items():
+            query = Chem.MolFromSmarts(pattern)
+            if query:
+                matches = mol.GetSubstructMatches(query)
+                if matches:
+                    motifs[name] = list(matches)
+
+    # Node colors
+    node_colors = ["#E8E8E8"] * data.num_nodes
+    for motif_name, matches in motifs.items():
+        color = motif_colors.get(motif_name, "#CCCCCC")
+        for match in matches:
+            for atom_idx in match:
+                if atom_idx < data.num_nodes:
+                    node_colors[atom_idx] = color
+
+    # Draw edges
+    edge_index = data.edge_index
+    if edge_index is not None and edge_index.numel() > 0:
+        edge_index = edge_index.numpy()
+        # Ensure edge_index is 2D with shape (2, num_edges)
+        if edge_index.ndim == 1:
+            edge_index = edge_index.reshape(2, -1)
+        drawn_edges = set()
+        for i in range(edge_index.shape[1]):
+            u, v = int(edge_index[0, i]), int(edge_index[1, i])
+            if u not in pos or v not in pos:
+                continue
+            edge_key = (min(u, v), max(u, v))
+            if edge_key not in drawn_edges:
+                drawn_edges.add(edge_key)
+                ax.plot(
+                    [pos[u][0], pos[v][0]],
+                    [pos[u][1], pos[v][1]],
+                    color="#555555",
+                    linewidth=2,
+                    zorder=1,
+                )
+
+    # Draw nodes
+    for node in range(data.num_nodes):
+        x, y = pos[node]
+        circle = plt.Circle(
+            (x, y),
+            0.08,
+            facecolor=node_colors[node],
+            edgecolor="black",
+            linewidth=1.5,
+            zorder=3,
+        )
+        ax.add_patch(circle)
+        ax.text(
+            x, y, str(node), ha="center", va="center", fontsize=8, fontweight="bold", zorder=4
+        )
+
+    # Legend
+    legend_patches = []
+    for motif_name in motifs.keys():
+        if motif_name in motif_colors:
+            patch = mpatches.Patch(color=motif_colors[motif_name], label=motif_name.capitalize())
+            legend_patches.append(patch)
+    if legend_patches:
+        ax.legend(handles=legend_patches, loc="upper left", fontsize=7, framealpha=0.9)
+
+    ax.set_title("Molecule Structure with Motifs", fontsize=11, fontweight="bold")
+    ax.set_aspect("equal")
+    ax.axis("off")
+
+    # Set limits
+    xs = [p[0] for p in pos.values()]
+    ys = [p[1] for p in pos.values()]
+    margin = 0.3
+    ax.set_xlim(min(xs) - margin, max(xs) + margin)
+    ax.set_ylim(min(ys) - margin, max(ys) + margin)
+
+
+def _plot_hierarchical_structure(
+    ax: "plt.Axes",
+    data,
+    hg,
+    tokenizer_type: str,
+    pos: dict,
+) -> None:
+    """Plot hierarchical structure (communities) for H-SENT/HDT."""
+    import matplotlib.pyplot as plt
+
+    comm_colors = [
+        "#FF6B6B",
+        "#4ECDC4",
+        "#45B7D1",
+        "#96CEB4",
+        "#FFEAA7",
+        "#DDA0DD",
+        "#FF8C00",
+        "#9B59B6",
+    ]
+
+    # Draw edges
+    edge_index = data.edge_index
+    if edge_index is not None and edge_index.numel() > 0:
+        edge_index = edge_index.numpy()
+        if edge_index.ndim == 1:
+            edge_index = edge_index.reshape(2, -1)
+        drawn_edges = set()
+        for i in range(edge_index.shape[1]):
+            u, v = int(edge_index[0, i]), int(edge_index[1, i])
+            if u not in pos or v not in pos:
+                continue
+            edge_key = (min(u, v), max(u, v))
+            if edge_key not in drawn_edges:
+                drawn_edges.add(edge_key)
+                ax.plot(
+                    [pos[u][0], pos[v][0]],
+                    [pos[u][1], pos[v][1]],
+                    color="#AAAAAA",
+                    linewidth=1.5,
+                    zorder=1,
+                )
+
+    # Draw nodes colored by community
+    for part_idx, part in enumerate(hg.partitions):
+        comm_color = comm_colors[part_idx % len(comm_colors)]
+        for global_idx in part.global_node_indices:
+            if global_idx in pos:
+                x, y = pos[global_idx]
+                circle = plt.Circle(
+                    (x, y),
+                    0.1,
+                    facecolor=comm_color,
+                    edgecolor="black",
+                    linewidth=1.5,
+                    zorder=3,
+                )
+                ax.add_patch(circle)
+                ax.text(
+                    x,
+                    y,
+                    str(global_idx),
+                    ha="center",
+                    va="center",
+                    fontsize=7,
+                    fontweight="bold",
+                    zorder=4,
+                )
+
+    title = f"{tokenizer_type}: {hg.num_communities} communities"
+    ax.set_title(title, fontsize=11, fontweight="bold")
+    ax.set_aspect("equal")
+    ax.axis("off")
+
+    xs = [p[0] for p in pos.values()]
+    ys = [p[1] for p in pos.values()]
+    margin = 0.3
+    ax.set_xlim(min(xs) - margin, max(xs) + margin)
+    ax.set_ylim(min(ys) - margin, max(ys) + margin)
+
+
+def _plot_sent_walk(
+    ax: "plt.Axes",
+    data,
+    tokens: list[int],
+    tokenizer,
+    pos: dict,
+) -> None:
+    """Plot SENT walk visualization."""
+    import matplotlib.pyplot as plt
+
+    # Draw edges
+    edge_index = data.edge_index
+    if edge_index is not None and edge_index.numel() > 0:
+        edge_index = edge_index.numpy()
+        if edge_index.ndim == 1:
+            edge_index = edge_index.reshape(2, -1)
+        drawn_edges = set()
+        for i in range(edge_index.shape[1]):
+            u, v = int(edge_index[0, i]), int(edge_index[1, i])
+            if u not in pos or v not in pos:
+                continue
+            edge_key = (min(u, v), max(u, v))
+            if edge_key not in drawn_edges:
+                drawn_edges.add(edge_key)
+                ax.plot(
+                    [pos[u][0], pos[v][0]],
+                    [pos[u][1], pos[v][1]],
+                    color="#AAAAAA",
+                    linewidth=1.5,
+                    zorder=1,
+                )
+
+    # Extract visit order from tokens
+    idx_offset = getattr(tokenizer, "idx_offset", getattr(tokenizer, "IDX_OFFSET", 10))
+    visit_order = {}
+    order = 0
+    for tok in tokens:
+        if tok >= idx_offset:
+            node_id = tok - idx_offset
+            if node_id not in visit_order:
+                visit_order[node_id] = order
+                order += 1
+
+    # Draw nodes with visit order
+    colors = plt.cm.viridis([i / max(1, len(visit_order)) for i in range(len(visit_order))])
+    for node in range(data.num_nodes):
+        x, y = pos[node]
+        if node in visit_order:
+            color = colors[visit_order[node]]
+        else:
+            color = "#E8E8E8"
+        circle = plt.Circle(
+            (x, y), 0.1, facecolor=color, edgecolor="black", linewidth=1.5, zorder=3
+        )
+        ax.add_patch(circle)
+        label = str(visit_order.get(node, "?"))
+        ax.text(
+            x, y, label, ha="center", va="center", fontsize=7, fontweight="bold", zorder=4
+        )
+
+    ax.set_title("SENT: Walk Order", fontsize=11, fontweight="bold")
+    ax.set_aspect("equal")
+    ax.axis("off")
+
+    xs = [p[0] for p in pos.values()]
+    ys = [p[1] for p in pos.values()]
+    margin = 0.3
+    ax.set_xlim(min(xs) - margin, max(xs) + margin)
+    ax.set_ylim(min(ys) - margin, max(ys) + margin)
+
+
+def _plot_token_sequence(
+    ax: "plt.Axes",
+    tokens: list[int],
+    tokenizer,
+    tokenizer_type: str,
+    max_tokens: int = 100,
+) -> None:
+    """Plot token sequence as text."""
+    # Build token name mappings based on tokenizer type
+    if tokenizer_type == "HDTTokenizer":
+        token_names = {
+            tokenizer.SOS: "[SOS]",
+            tokenizer.EOS: "[EOS]",
+            tokenizer.PAD: "[PAD]",
+            tokenizer.ENTER: "↓",
+            tokenizer.EXIT: "↑",
+            tokenizer.LEDGE: "[",
+            tokenizer.REDGE: "]",
+        }
+        idx_offset = tokenizer.IDX_OFFSET
+    elif tokenizer_type == "HSENTTokenizer":
+        token_names = {
+            tokenizer.SOS: "[SOS]",
+            tokenizer.EOS: "[EOS]",
+            tokenizer.PAD: "[PAD]",
+            tokenizer.RESET: "[R]",
+            tokenizer.LADJ: "[",
+            tokenizer.RADJ: "]",
+            tokenizer.LCOM: "{",
+            tokenizer.RCOM: "}",
+            tokenizer.LBIP: "<",
+            tokenizer.RBIP: ">",
+            tokenizer.SEP: "|",
+        }
+        idx_offset = tokenizer.IDX_OFFSET
+    else:  # SENTTokenizer
+        token_names = {
+            tokenizer.sos: "[SOS]",
+            tokenizer.eos: "[EOS]",
+            tokenizer.pad: "[PAD]",
+            tokenizer.reset: "[R]",
+            tokenizer.ladj: "[",
+            tokenizer.radj: "]",
+        }
+        idx_offset = tokenizer.idx_offset
+
+    # Convert tokens to string symbols
+    display_tokens = tokens[:max_tokens]
+    truncated = len(tokens) > max_tokens
+
+    token_strs = []
+    for tok in display_tokens:
+        if tok in token_names:
+            token_strs.append(token_names[tok])
+        elif tok >= idx_offset:
+            token_strs.append(str(tok - idx_offset))
+        else:
+            token_strs.append(f"?{tok}")
+
+    # Join tokens with line breaks
+    tokens_per_line = 25
+    lines = []
+    for i in range(0, len(token_strs), tokens_per_line):
+        lines.append(" ".join(token_strs[i : i + tokens_per_line]))
+    token_text = "\n".join(lines)
+    if truncated:
+        token_text += f" ... ({len(tokens)} total)"
+
+    ax.text(
+        0.5,
+        0.5,
+        token_text,
+        ha="center",
+        va="center",
+        fontsize=8,
+        fontfamily="monospace",
+        transform=ax.transAxes,
+        bbox=dict(boxstyle="round,pad=0.3", facecolor="#f8f9fa", edgecolor="#dee2e6"),
+    )
+
+    ax.set_title(f"Token Sequence ({len(tokens)} tokens)", fontsize=10, fontweight="bold")
+    ax.axis("off")
+
+
 class IntermediateEvaluationCallback(Callback):
     """Callback to run generation and log metrics during training.
 
@@ -561,12 +1073,10 @@ def main(cfg: DictConfig) -> None:
     # Select tokenizer based on config
     tokenizer_type = cfg.tokenizer.get("type", "sent").lower()
     if tokenizer_type == "hdt":
-        motif_aware = cfg.tokenizer.get("motif_aware", False)
-        if motif_aware:
-            log.info("Using hierarchical HDT tokenizer with motif-aware coarsening")
+        coarsening_strategy = cfg.tokenizer.get("coarsening_strategy", "spectral")
+        log.info(f"Using hierarchical HDT tokenizer with {coarsening_strategy} coarsening")
+        if coarsening_strategy in ("motif_aware_spectral", "motif_community"):
             log.info(f"  motif_alpha: {cfg.tokenizer.get('motif_alpha', 1.0)}")
-        else:
-            log.info("Using hierarchical HDT tokenizer with spectral coarsening")
         log.info(f"  node_order: {cfg.tokenizer.get('node_order', 'BFS')}")
         log.info(f"  min_community_size: {cfg.tokenizer.get('min_community_size', 4)}")
 
@@ -575,19 +1085,17 @@ def main(cfg: DictConfig) -> None:
             truncation_length=cfg.tokenizer.truncation_length,
             node_order=cfg.tokenizer.get("node_order", "BFS"),
             min_community_size=cfg.tokenizer.get("min_community_size", 4),
-            motif_aware=motif_aware,
+            coarsening_strategy=coarsening_strategy,
             motif_alpha=cfg.tokenizer.get("motif_alpha", 1.0),
             normalize_by_motif_size=cfg.tokenizer.get("normalize_by_motif_size", False),
             labeled_graph=cfg.tokenizer.get("labeled_graph", True),
             seed=cfg.seed,
         )
     elif tokenizer_type == "hsent":
-        motif_aware = cfg.tokenizer.get("motif_aware", False)
-        if motif_aware:
-            log.info("Using hierarchical H-SENT tokenizer with motif-aware coarsening")
+        coarsening_strategy = cfg.tokenizer.get("coarsening_strategy", "spectral")
+        log.info(f"Using hierarchical H-SENT tokenizer with {coarsening_strategy} coarsening")
+        if coarsening_strategy in ("motif_aware_spectral", "motif_community"):
             log.info(f"  motif_alpha: {cfg.tokenizer.get('motif_alpha', 1.0)}")
-        else:
-            log.info("Using hierarchical H-SENT tokenizer with spectral coarsening")
         log.info(f"  node_order: {cfg.tokenizer.get('node_order', 'BFS')}")
         log.info(f"  min_community_size: {cfg.tokenizer.get('min_community_size', 4)}")
 
@@ -596,7 +1104,7 @@ def main(cfg: DictConfig) -> None:
             truncation_length=cfg.tokenizer.truncation_length,
             node_order=cfg.tokenizer.get("node_order", "BFS"),
             min_community_size=cfg.tokenizer.get("min_community_size", 4),
-            motif_aware=motif_aware,
+            coarsening_strategy=coarsening_strategy,
             motif_alpha=cfg.tokenizer.get("motif_alpha", 1.0),
             normalize_by_motif_size=cfg.tokenizer.get("normalize_by_motif_size", False),
             labeled_graph=cfg.tokenizer.get("labeled_graph", True),
@@ -678,6 +1186,17 @@ def main(cfg: DictConfig) -> None:
             mode="min",
         ),
     ]
+
+    # Add tokenization visualization callback if WandB enabled
+    if wandb_logger is not None:
+        callbacks.append(
+            TokenizationVisualizationCallback(
+                datamodule=datamodule,
+                tokenizer=tokenizer,
+                seed=cfg.seed,
+            )
+        )
+        log.info("Tokenization visualization will be logged at training start")
 
     # Add intermediate evaluation callback if WandB enabled and configured
     eval_every_n_val = cfg.wandb.get("eval_every_n_val", 0)

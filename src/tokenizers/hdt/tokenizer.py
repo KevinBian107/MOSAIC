@@ -11,20 +11,22 @@ but uses DFS traversal to implicitly encode the hierarchy rather than explicit
 partition and bipartite blocks.
 """
 
+import warnings
 from collections import defaultdict
-from typing import Callable, Optional, Sequence
+from typing import Callable, Literal, Optional, Sequence
 
 import torch
 from torch import Tensor
 from torch_geometric.data import Data
 
 from src.tokenizers.base import BatchConverter, Tokenizer
-from src.tokenizers.hierarchical.coarsening import (
+from src.tokenizers.coarsening import (
     MotifAwareCoarsening,
+    MotifCommunityCoarsening,
     SpectralCoarsening,
 )
-from src.tokenizers.hierarchical.ordering import OrderingMethod, order_partition_nodes
-from src.tokenizers.hierarchical.structures import (
+from src.tokenizers.ordering import OrderingMethod, order_partition_nodes
+from src.tokenizers.structures import (
     Bipartite,
     HierarchicalGraph,
     Partition,
@@ -98,6 +100,9 @@ class HDTTokenizer(Tokenizer):
     eos: int = 1
     pad: int = 2
 
+    # Type alias for coarsening strategy
+    CoarseningStrategyType = Literal["spectral", "motif_aware_spectral", "motif_community"]
+
     def __init__(
         self,
         node_order: OrderingMethod = "BFS",
@@ -109,6 +114,7 @@ class HDTTokenizer(Tokenizer):
         k_min_factor: float = 0.7,
         k_max_factor: float = 1.3,
         n_init: int = 100,
+        coarsening_strategy: Optional[CoarseningStrategyType] = None,
         motif_aware: bool = False,
         motif_alpha: float = 1.0,
         motif_patterns: Optional[dict[str, str]] = None,
@@ -128,12 +134,15 @@ class HDTTokenizer(Tokenizer):
             k_min_factor: Factor for minimum cluster count in spectral clustering.
             k_max_factor: Factor for maximum cluster count in spectral clustering.
             n_init: Number of spectral clustering initializations.
-            motif_aware: Whether to use motif-aware coarsening.
-            motif_alpha: Weight for motif affinity matrix (only used if
-                motif_aware=True).
+            coarsening_strategy: Strategy for graph coarsening. Options:
+                - "spectral": Standard spectral clustering (default)
+                - "motif_aware_spectral": Spectral clustering with motif preservation
+                - "motif_community": Direct motif-based community assignment
+            motif_aware: DEPRECATED. Use coarsening_strategy="motif_aware_spectral".
+            motif_alpha: Weight for motif affinity matrix (only used with
+                motif-aware strategies). Higher values = stronger motif preservation.
             motif_patterns: Custom SMARTS patterns for motif detection.
-            normalize_by_motif_size: Whether to normalize motif contributions
-                by 1/motif_size.
+            normalize_by_motif_size: Normalize motif contributions by 1/motif_size.
             labeled_graph: Whether to encode node/edge features (atom/bond types).
         """
         self.node_order = node_order
@@ -142,11 +151,29 @@ class HDTTokenizer(Tokenizer):
         self.undirected = undirected
         self.seed = seed
         self.min_community_size = min_community_size
-        self.motif_aware = motif_aware
         self.motif_alpha = motif_alpha
 
+        # Handle backwards compatibility for motif_aware parameter
+        if coarsening_strategy is None:
+            if motif_aware:
+                warnings.warn(
+                    "motif_aware parameter is deprecated. "
+                    "Use coarsening_strategy='motif_aware_spectral' instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                coarsening_strategy = "motif_aware_spectral"
+            else:
+                coarsening_strategy = "spectral"
+
+        self.coarsening_strategy = coarsening_strategy
+        self.motif_aware = coarsening_strategy in (
+            "motif_aware_spectral",
+            "motif_community",
+        )
+
         # Select coarsening strategy
-        if motif_aware:
+        if coarsening_strategy == "motif_aware_spectral":
             self.coarsener = MotifAwareCoarsening(
                 alpha=motif_alpha,
                 motif_patterns=motif_patterns,
@@ -157,7 +184,13 @@ class HDTTokenizer(Tokenizer):
                 min_community_size=min_community_size,
                 seed=seed,
             )
-        else:
+        elif coarsening_strategy == "motif_community":
+            self.coarsener = MotifCommunityCoarsening(
+                motif_patterns=motif_patterns,
+                min_community_size=min_community_size,
+                seed=seed,
+            )
+        else:  # Default: spectral
             self.coarsener = SpectralCoarsening(
                 k_min_factor=k_min_factor,
                 k_max_factor=k_max_factor,
@@ -241,7 +274,7 @@ class HDTTokenizer(Tokenizer):
         Returns:
             1D tensor of token indices.
         """
-        hg = self.coarsener.build_hierarchy(data, recursive=False)
+        hg = self.coarsener.build_hierarchy(data)
         return self.tokenize_hierarchy(hg)
 
     def tokenize_hierarchy(self, hg: HierarchicalGraph) -> Tensor:
