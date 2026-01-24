@@ -3,7 +3,7 @@
 defaults:
   - _self_
   - experiment: moses
-  - tokenizer: hsent    # Options: sent, hsent, hsent_motif
+  - tokenizer: sent    # Options: sent, hsent, hdt
 
 # Random seed
 seed: 42
@@ -23,7 +23,7 @@ model:
 data:
   dataset_name: moses  # 'moses' or 'qm9'
   batch_size: 32
-  num_workers: 4
+  num_workers: 0  # Must be 0 for SENT tokenizer (Cython multiprocessing issue)
   num_train: 1000  # Use null for full dataset
   num_val: 100
   num_test: 100
