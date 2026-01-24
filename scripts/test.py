@@ -36,6 +36,7 @@ from src.evaluation.molecular_metrics import MolecularMetrics, compute_fcd
 from src.evaluation.motif_distribution import MotifDistributionMetric
 from src.models.transformer import GraphGeneratorModule
 from src.tokenizers import HDTTokenizer, HSENTTokenizer, SENTTokenizer
+from src.visualization import visualize_generated_molecules
 
 # Import AutoGraph conversion functions for handling AutoGraph checkpoints
 try:
@@ -281,6 +282,21 @@ def main(cfg: DictConfig) -> None:
 
     valid_count = sum(1 for s in generated_smiles if s != INVALID_SMILES_SENTINEL)
     log.info(f"Successfully converted {valid_count}/{len(generated_smiles)} graphs to SMILES")
+
+    # Visualization (if enabled)
+    if cfg.get("visualization", {}).get("enabled", False):
+        log.info("Generating molecule visualizations...")
+        viz_dir = output_dir / "visualizations"
+        viz_dir.mkdir(exist_ok=True)
+        visualize_generated_molecules(
+            generated_graphs=generated_graphs,
+            generated_smiles=generated_smiles,
+            tokenizer=tokenizer,
+            output_dir=viz_dir,
+            max_molecules=cfg.visualization.get("max_molecules", 12),
+            dpi=cfg.visualization.get("dpi", 150),
+        )
+        log.info(f"Visualizations saved to {viz_dir}")
 
     log.info("\n" + "=" * 50)
     log.info("MOLECULAR METRICS")
