@@ -12,6 +12,9 @@ For generating graphs using tokens with hierarchical insights, we need 3 things:
 
 3. **Flatten the generated H-graph**: Reconstruct the flat graph from tokens via bipartite edge union for H-SENT, or union of back edges for HDT.
 
+![HDT](/docs/figure/hdt_sample.gif)
+> HDT generation of novel molecules
+
 ## Quick Start
 
 ### Installation
@@ -64,6 +67,9 @@ python scripts/visualize_htoken.py --list
 
 # Visualize molecular motifs
 python scripts/visualize_motifs.py --smiles "c1ccccc1O"
+
+# Generation Demo
+python scripts/generation_demo.py
 ```
 
 ### Running Tests
