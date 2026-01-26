@@ -1,0 +1,403 @@
+#!/usr/bin/env python
+"""Realistic generation script.
+
+This script generates molecules unconditionally and analyzes how well
+they match the structural patterns of training data.
+
+Usage:
+    # Generate and analyze with HDT
+    python scripts/realistic_gen.py \
+        model.checkpoint_path=outputs/train/moses_hdt_*/best.ckpt
+
+    # Generate and analyze with SENT
+    python scripts/realistic_gen.py \
+        model.checkpoint_path=outputs/train/moses_sent_*/best.ckpt \
+        tokenizer=sent
+
+    # Custom number of samples
+    python scripts/realistic_gen.py \
+        model.checkpoint_path=outputs/train/moses_hdt_*/best.ckpt \
+        generation.num_samples=500
+"""
+
+import json
+import logging
+import sys
+from pathlib import Path
+
+import hydra
+import matplotlib.pyplot as plt
+import pytorch_lightning as pl
+import torch
+from omegaconf import DictConfig, OmegaConf
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Suppress RDKit error messages
+from rdkit import Chem, RDLogger
+
+RDLogger.DisableLog("rdApp.*")
+
+from src.data.datamodule import MolecularDataModule  # noqa: E402
+from src.data.molecular import NUM_ATOM_TYPES, NUM_BOND_TYPES, graph_to_smiles  # noqa: E402
+from src.models.transformer import GraphGeneratorModule  # noqa: E402
+from src.realistic_gen import (  # noqa: E402
+    analyze_benzene_substitution,
+    analyze_functional_groups,
+    compare_distributions,
+    draw_molecule_comparison,
+    generate_molecules,
+    plot_combined_analysis,
+)
+from src.tokenizers import HDTTokenizer, SENTTokenizer  # noqa: E402
+
+log = logging.getLogger(__name__)
+
+
+def get_tokenizer(cfg: DictConfig):
+    """Create tokenizer based on configuration.
+
+    Args:
+        cfg: Hydra configuration.
+
+    Returns:
+        Configured tokenizer instance.
+    """
+    tokenizer_type = cfg.tokenizer.get("type", "sent").lower()
+
+    if tokenizer_type == "hdt":
+        log.info("Using HDT tokenizer")
+        tokenizer = HDTTokenizer(
+            max_length=cfg.tokenizer.max_length,
+            truncation_length=cfg.tokenizer.truncation_length,
+            node_order=cfg.tokenizer.get("node_order", "BFS"),
+            min_community_size=cfg.tokenizer.get("min_community_size", 4),
+            labeled_graph=cfg.tokenizer.get("labeled_graph", True),
+            seed=cfg.seed,
+        )
+    elif tokenizer_type == "sent":
+        log.info("Using SENT tokenizer")
+        tokenizer = SENTTokenizer(
+            max_length=cfg.tokenizer.max_length,
+            truncation_length=cfg.tokenizer.truncation_length,
+            undirected=cfg.tokenizer.get("undirected", True),
+            labeled_graph=cfg.tokenizer.get("labeled_graph", True),
+            seed=cfg.seed,
+        )
+    else:
+        raise ValueError(f"Unsupported tokenizer type: {tokenizer_type}")
+
+    return tokenizer
+
+
+def configure_tokenizer_from_checkpoint(
+    tokenizer,
+    checkpoint_path: str,
+) -> None:
+    """Configure tokenizer vocab size from checkpoint.
+
+    Args:
+        tokenizer: Tokenizer instance to configure.
+        checkpoint_path: Path to model checkpoint.
+    """
+    log.info(f"Extracting vocab size from checkpoint: {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+
+    if "state_dict" in checkpoint:
+        wte_key = "model.model.transformer.wte.weight"
+        if wte_key in checkpoint["state_dict"]:
+            checkpoint_vocab_size = checkpoint["state_dict"][wte_key].shape[0]
+            log.info(f"Checkpoint vocab size: {checkpoint_vocab_size}")
+
+            idx_offset = getattr(tokenizer, "idx_offset", None) or getattr(
+                tokenizer, "IDX_OFFSET", 6
+            )
+
+            # Try labeled first
+            checkpoint_max_num_nodes_labeled = (
+                checkpoint_vocab_size - idx_offset - NUM_ATOM_TYPES - NUM_BOND_TYPES
+            )
+
+            if (
+                checkpoint_max_num_nodes_labeled > 0
+                and checkpoint_max_num_nodes_labeled <= 100
+            ):
+                log.info("Detected labeled checkpoint")
+                tokenizer.labeled_graph = True
+                tokenizer.set_num_nodes(checkpoint_max_num_nodes_labeled)
+                tokenizer.set_num_node_and_edge_types(NUM_ATOM_TYPES, NUM_BOND_TYPES)
+                log.info(
+                    f"Set tokenizer: max_num_nodes={checkpoint_max_num_nodes_labeled}, "
+                    f"labeled_graph=True"
+                )
+            else:
+                checkpoint_max_num_nodes = checkpoint_vocab_size - idx_offset
+                log.info(
+                    f"Setting tokenizer max_num_nodes to {checkpoint_max_num_nodes}"
+                )
+                tokenizer.set_num_nodes(checkpoint_max_num_nodes)
+
+
+def filter_by_motif(smiles_list: list[str], motif_smiles: str) -> list[str]:
+    """Filter SMILES to only those containing the motif.
+
+    Args:
+        smiles_list: List of SMILES strings.
+        motif_smiles: SMILES of the motif to filter by.
+
+    Returns:
+        Filtered list of SMILES.
+    """
+    motif = Chem.MolFromSmiles(motif_smiles)
+    if motif is None:
+        return smiles_list
+
+    filtered = []
+    for smi in smiles_list:
+        mol = Chem.MolFromSmiles(smi)
+        if mol is not None and mol.HasSubstructMatch(motif):
+            filtered.append(smi)
+
+    return filtered
+
+
+@hydra.main(
+    version_base="1.3",
+    config_path="../configs",
+    config_name="realistic_gen",
+)
+def main(cfg: DictConfig) -> None:
+    """Main realistic generation function.
+
+    Args:
+        cfg: Hydra configuration.
+    """
+    log.info(f"Configuration:\n{OmegaConf.to_yaml(cfg)}")
+
+    if cfg.model.checkpoint_path is None:
+        raise ValueError("model.checkpoint_path must be specified")
+
+    # Create output directory
+    output_dir = Path(cfg.logs.path)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save configuration
+    config_path = output_dir / "config.yaml"
+    with open(config_path, "w") as f:
+        f.write(OmegaConf.to_yaml(cfg))
+    log.info(f"Configuration saved to {config_path}")
+
+    pl.seed_everything(cfg.seed, workers=True)
+
+    # Create tokenizer
+    tokenizer = get_tokenizer(cfg)
+    tokenizer_type = cfg.tokenizer.get("type", "sent").lower()
+
+    # Configure tokenizer from checkpoint
+    configure_tokenizer_from_checkpoint(tokenizer, cfg.model.checkpoint_path)
+
+    # Load model
+    log.info(f"Loading model from {cfg.model.checkpoint_path}...")
+    model = GraphGeneratorModule.load_from_checkpoint(
+        cfg.model.checkpoint_path,
+        tokenizer=tokenizer,
+        sampling_batch_size=cfg.generation.batch_size,
+        sampling_top_k=cfg.sampling.top_k,
+        sampling_temperature=cfg.sampling.temperature,
+        sampling_max_length=cfg.sampling.max_length,
+    )
+    model.eval()
+
+    # Load training data for comparison
+    log.info("Loading training data for comparison...")
+    datamodule = MolecularDataModule(
+        dataset_name=cfg.data.dataset_name,
+        tokenizer=tokenizer,
+        batch_size=cfg.data.batch_size,
+        num_workers=cfg.data.num_workers,
+        num_train=cfg.data.num_train,
+        num_val=cfg.data.num_val,
+        num_test=cfg.data.num_test,
+        include_hydrogens=cfg.data.get("include_hydrogens", False),
+        seed=cfg.seed,
+        data_root=cfg.data.get("data_root", "data"),
+    )
+    datamodule.setup(stage="fit")
+    train_smiles = datamodule.train_smiles
+    log.info(f"Loaded {len(train_smiles)} training SMILES")
+
+    # Generate molecules
+    num_samples = cfg.generation.num_samples
+    log.info("\n" + "=" * 60)
+    log.info("GENERATION")
+    log.info("=" * 60)
+    log.info(f"Generating {num_samples} molecules...")
+
+    generated_graphs, gen_time = generate_molecules(
+        model=model,
+        num_samples=num_samples,
+        show_progress=True,
+    )
+    log.info(f"Generated {len(generated_graphs)} graphs")
+    log.info(f"Average time: {gen_time:.4f}s per sample")
+
+    # Convert to SMILES
+    generated_smiles = []
+    for g in generated_graphs:
+        smiles = graph_to_smiles(g)
+        if smiles:
+            generated_smiles.append(smiles)
+
+    log.info(f"Valid SMILES: {len(generated_smiles)}/{len(generated_graphs)}")
+
+    # Save generated SMILES
+    smiles_file = output_dir / "generated_smiles.txt"
+    with open(smiles_file, "w") as f:
+        for smi in generated_smiles:
+            f.write(smi + "\n")
+    log.info(f"Generated SMILES saved to {smiles_file}")
+
+    # Filter by motif for analysis
+    motif_smiles = cfg.analysis.motif_smiles
+    log.info(f"\nFiltering for motif: {motif_smiles}")
+
+    train_filtered = filter_by_motif(train_smiles, motif_smiles)
+    gen_filtered = filter_by_motif(generated_smiles, motif_smiles)
+
+    log.info(f"  Training: {len(train_filtered)}/{len(train_smiles)} contain motif")
+    log.info(f"  Generated: {len(gen_filtered)}/{len(generated_smiles)} contain motif")
+
+    if len(train_filtered) == 0 or len(gen_filtered) == 0:
+        log.warning("Not enough molecules with motif for analysis")
+        return
+
+    # Analyze substitution patterns
+    log.info("\n" + "=" * 60)
+    log.info("SUBSTITUTION PATTERN ANALYSIS")
+    log.info("=" * 60)
+
+    train_sub = analyze_benzene_substitution(train_filtered)
+    gen_sub = analyze_benzene_substitution(gen_filtered)
+
+    log.info("\nSubstitution Count Distribution:")
+    log.info(f"  {'Pattern':<15} {'Training':>12} {'Generated':>12}")
+    log.info(f"  {'-' * 15} {'-' * 12} {'-' * 12}")
+
+    train_total = sum(train_sub["substitution_count"].values()) or 1
+    gen_total = sum(gen_sub["substitution_count"].values()) or 1
+
+    for pattern in ["unsubstituted", "mono", "di", "tri", "poly"]:
+        train_pct = 100 * train_sub["substitution_count"].get(pattern, 0) / train_total
+        gen_pct = 100 * gen_sub["substitution_count"].get(pattern, 0) / gen_total
+        log.info(f"  {pattern:<15} {train_pct:>11.1f}% {gen_pct:>11.1f}%")
+
+    log.info("\nDi-substitution Patterns (ortho/meta/para):")
+    train_di_total = sum(train_sub["disubstitution_pattern"].values()) or 1
+    gen_di_total = sum(gen_sub["disubstitution_pattern"].values()) or 1
+
+    for pattern in ["ortho", "meta", "para"]:
+        train_pct = (
+            100 * train_sub["disubstitution_pattern"].get(pattern, 0) / train_di_total
+        )
+        gen_pct = (
+            100 * gen_sub["disubstitution_pattern"].get(pattern, 0) / gen_di_total
+        )
+        log.info(f"  {pattern:<15} {train_pct:>11.1f}% {gen_pct:>11.1f}%")
+
+    # Analyze functional groups
+    log.info("\n" + "=" * 60)
+    log.info("FUNCTIONAL GROUP ANALYSIS")
+    log.info("=" * 60)
+
+    train_fg = analyze_functional_groups(train_filtered)
+    gen_fg = analyze_functional_groups(gen_filtered)
+
+    log.info("\nFunctional Groups Attached to Benzene:")
+    log.info(f"  {'Group':<20} {'Training':>12} {'Generated':>12}")
+    log.info(f"  {'-' * 20} {'-' * 12} {'-' * 12}")
+
+    train_fg_total = sum(train_fg.values()) or 1
+    gen_fg_total = sum(gen_fg.values()) or 1
+
+    combined = train_fg + gen_fg
+    for group, _ in combined.most_common(12):
+        train_pct = 100 * train_fg.get(group, 0) / train_fg_total
+        gen_pct = 100 * gen_fg.get(group, 0) / gen_fg_total
+        log.info(f"  {group:<20} {train_pct:>11.1f}% {gen_pct:>11.1f}%")
+
+    # Compute similarity metrics
+    log.info("\n" + "=" * 60)
+    log.info("DISTRIBUTION SIMILARITY METRICS")
+    log.info("=" * 60)
+
+    sub_metrics = compare_distributions(
+        train_sub["substitution_count"],
+        gen_sub["substitution_count"],
+    )
+    fg_metrics = compare_distributions(train_fg, gen_fg)
+
+    log.info("\nSubstitution Pattern Similarity:")
+    log.info(f"  Total Variation Distance: {sub_metrics['total_variation']:.4f}")
+    log.info(f"  KL Divergence: {sub_metrics['kl_divergence']:.4f}")
+
+    log.info("\nFunctional Group Similarity:")
+    log.info(f"  Total Variation Distance: {fg_metrics['total_variation']:.4f}")
+    log.info(f"  KL Divergence: {fg_metrics['kl_divergence']:.4f}")
+
+    log.info("\n(Lower values = more similar to training distribution)")
+
+    # Generate visualizations
+    log.info("\n" + "=" * 60)
+    log.info("GENERATING VISUALIZATIONS")
+    log.info("=" * 60)
+
+    # Bar chart analysis
+    chart_path = output_dir / f"analysis_{tokenizer_type}.png"
+    fig = plot_combined_analysis(
+        train_filtered,
+        gen_filtered,
+        output_path=str(chart_path),
+        title_prefix=f"{tokenizer_type.upper()} Generation",
+    )
+    log.info(f"Bar chart saved to: {chart_path}")
+    plt.close(fig)
+
+    # Molecule structure visualizations
+    log.info("Generating molecule structure visualizations...")
+    mol_files = draw_molecule_comparison(
+        train_filtered,
+        gen_filtered,
+        output_dir=str(output_dir),
+        tokenizer_name=tokenizer_type,
+        motif_smiles=motif_smiles,
+        seed=cfg.seed,
+    )
+
+    for viz_type, filepath in mol_files.items():
+        log.info(f"  {viz_type}: {filepath}")
+
+    # Save results
+    results = {
+        "tokenizer_type": tokenizer_type,
+        "num_generated": len(generated_graphs),
+        "num_valid": len(generated_smiles),
+        "validity_rate": len(generated_smiles) / len(generated_graphs),
+        "num_with_motif": len(gen_filtered),
+        "motif_rate": len(gen_filtered) / len(generated_smiles) if generated_smiles else 0,
+        "generation_time": gen_time,
+        "substitution_tv": sub_metrics["total_variation"],
+        "substitution_kl": sub_metrics["kl_divergence"],
+        "functional_group_tv": fg_metrics["total_variation"],
+        "functional_group_kl": fg_metrics["kl_divergence"],
+    }
+
+    results_file = output_dir / "results.json"
+    with open(results_file, "w") as f:
+        json.dump(results, f, indent=2)
+    log.info(f"\nResults saved to {results_file}")
+
+    log.info("\nRealistic generation complete!")
+
+
+if __name__ == "__main__":
+    main()
