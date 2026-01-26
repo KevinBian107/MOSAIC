@@ -56,17 +56,15 @@ Generate molecules and analyze how well they match the structural patterns of tr
 
 ```bash
 # Generate and analyze with HDT
-python scripts/realistic_gen.py \
-    model.checkpoint_path=outputs/train/moses_hdt_n50000_20260122-185129/best.ckpt
+python scripts/realistic_gen.py
 
 # Generate and analyze with SENT
 python scripts/realistic_gen.py \
-    model.checkpoint_path=outputs/train/moses_sent_n50000_20260123-140906/best.ckpt \
+    model.checkpoint_path=outputs/train/moses_sent_n1000000_20260123-140906/best.ckpt \
     tokenizer=sent
 
 # Custom number of samples
 python scripts/realistic_gen.py \
-    model.checkpoint_path=outputs/train/moses_hdt_n50000_20260122-185129/best.ckpt \
     generation.num_samples=500
 ```
 
