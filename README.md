@@ -50,6 +50,32 @@ python scripts/train.py \
 python scripts/test.py model.checkpoint_path=outputs/model.ckpt
 ```
 
+### Realistic Generation
+
+Generate molecules and analyze how well they match the structural patterns of training data. This evaluates whether the model learns realistic chemical preferences.
+
+```bash
+# Generate and analyze with HDT
+python scripts/realistic_gen.py \
+    model.checkpoint_path=outputs/train/moses_hdt_n50000_20260122-185129/best.ckpt
+
+# Generate and analyze with SENT
+python scripts/realistic_gen.py \
+    model.checkpoint_path=outputs/train/moses_sent_n50000_20260123-140906/best.ckpt \
+    tokenizer=sent
+
+# Custom number of samples
+python scripts/realistic_gen.py \
+    model.checkpoint_path=outputs/train/moses_hdt_n50000_20260122-185129/best.ckpt \
+    generation.num_samples=500
+```
+
+This produces:
+- **Generated SMILES**: Saved to `generated_smiles.txt`
+- **Statistical analysis**: Substitution patterns (mono/di/tri), ortho/meta/para ratios, functional group frequencies
+- **Distribution metrics**: Total Variation distance and KL divergence vs training data
+- **Molecule visualizations**: Side-by-side comparison of training vs generated molecular structures
+
 ### Visualization
 
 ```bash
@@ -84,10 +110,11 @@ pytest tests/ -v
 MOSAIC/
 ├── src/
 │   ├── data/           # Data loading, generation, and motif detection
-│   ├── tokenizers/     # Graph tokenization (SENT, H-SENT)
+│   ├── tokenizers/     # Graph tokenization (SENT, H-SENT, HDT)
 │   │   └── hierarchical/   # Hierarchical tokenization module
 │   ├── models/         # Transformer models
-│   └── evaluation/     # Standard and motif metrics
+│   ├── evaluation/     # Standard and motif metrics
+│   └── realistic_gen/  # Generation quality analysis
 ├── configs/            # Hydra configuration
 ├── scripts/            # Training, evaluation, and visualization scripts
 ├── tests/              # Test suite
@@ -104,6 +131,7 @@ See the [docs/](docs/) directory for:
 - [H-graph Construction](docs/hgraph.md)
 - [Tokenization](docs/tokenization.md)
 - [Evaluation Metrics](docs/metric.md)
+- [Realistic Generation](docs/realistic.md)
 - [Visualize Tokenization](docs/visualization.md)
 
 ## Acknowledgement

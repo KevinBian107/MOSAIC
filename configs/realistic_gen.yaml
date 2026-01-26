@@ -1,0 +1,45 @@
+# @package _global_
+
+defaults:
+  - /experiment: moses
+  - /tokenizer: hdt
+  - _self_
+
+# Random seed
+seed: 42
+
+# Model configuration
+model:
+  checkpoint_path: outputs/train/moses_hdt_n50000_20260122-185129/best.ckpt
+
+# Data configuration (for training SMILES reference)
+data:
+  dataset_name: moses
+  batch_size: 32
+  num_workers: 0
+  num_train: 10000  # Max training samples for analysis
+  num_val: 100
+  num_test: 100
+  include_hydrogens: false
+  data_root: data
+
+# Generation configuration
+generation:
+  num_samples: 100
+  batch_size: 32
+
+# Sampling configuration
+sampling:
+  top_k: 10
+  temperature: 1.0
+  max_length: 2048
+
+# Analysis configuration
+analysis:
+  motif_smiles: "c1ccccc1"  # Motif to analyze (default: benzene)
+
+# Logging configuration
+logs:
+  base_dir: outputs/realistic_gen
+  run_name: ${data.dataset_name}_${tokenizer.type}
+  path: ${logs.base_dir}/${logs.run_name}_${now:%Y%m%d-%H%M%S}

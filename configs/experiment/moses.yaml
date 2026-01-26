@@ -5,15 +5,15 @@
 
 data:
   dataset_name: moses
-  num_train: 50000  # Use null for full 1.6M training set
-  num_val: 5000
-  num_test: 5000
+  num_train: 1,000,000  # Use null for full 1.6M training set
+  num_val: 1000
+  num_test: 1000
   include_hydrogens: false
 
 trainer:
-  max_steps: 100000
+  max_steps: 5,00,000
   val_check_interval: 2000
 
 sampling:
-  num_samples: 1000
-  top_k: 50
+  num_samples: 100
+  top_k: 10

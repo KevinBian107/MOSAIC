@@ -55,6 +55,7 @@ outputs/
 logs/
 *.log
 wandb/
+.ruff_cache
 
 # Data
 /data/

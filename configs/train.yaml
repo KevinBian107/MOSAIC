@@ -3,7 +3,7 @@
 defaults:
   - _self_
   - experiment: moses
-  - tokenizer: sent    # Options: sent, hsent, hdt
+  - tokenizer: hdt    # Options: sent, hsent, hdt
 
 # Random seed
 seed: 42
@@ -23,10 +23,10 @@ model:
 data:
   dataset_name: moses  # 'moses' or 'qm9'
   batch_size: 32
-  num_workers: 0  # Must be 0 for SENT tokenizer (Cython multiprocessing issue)
-  num_train: 1000  # Use null for full dataset
-  num_val: 100
-  num_test: 100
+  num_workers: 8  # Must be 0 for SENT tokenizer (Cython multiprocessing issue)
+  num_train: 1,000,000  # Use null for full dataset
+  num_val: 1000
+  num_test: 1000
   include_hydrogens: false
   data_root: data
   use_cache: true  # Set to true to use preprocessed cached data
@@ -34,7 +34,7 @@ data:
 
 # Training configuration
 trainer:
-  max_steps: 100000
+  max_steps: 5,00,000
   val_check_interval: 1000
   precision: 32
   gradient_clip_val: 1.0
