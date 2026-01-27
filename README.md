@@ -32,7 +32,7 @@ conda activate mosaic
 python scripts/train.py
 
 # Train with hierarchical H-SENT tokenization
-python scripts/train.py tokenizer.type=hsent
+python scripts/train.py tokenizer.type=hdtc
 
 # Train on QM9 dataset
 python scripts/train.py data.dataset_name=qm9
@@ -47,7 +47,8 @@ python scripts/train.py \
 ### Evaluation
 
 ```bash
-python scripts/test.py model.checkpoint_path=outputs/model.ckpt
+python scripts/test.py
+python scripts/compare_results.py
 ```
 
 ### Realistic Generation

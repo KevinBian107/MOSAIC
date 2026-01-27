@@ -38,7 +38,7 @@ from src.evaluation.motif_distribution import (
     get_motif_counts,
 )
 from src.models.transformer import GraphGeneratorModule
-from src.tokenizers import HDTTokenizer, HSENTTokenizer, SENTTokenizer
+from src.tokenizers import HDTCTokenizer, HDTTokenizer, HSENTTokenizer, SENTTokenizer
 
 log = logging.getLogger(__name__)
 
@@ -1088,6 +1088,19 @@ def main(cfg: DictConfig) -> None:
             coarsening_strategy=coarsening_strategy,
             motif_alpha=cfg.tokenizer.get("motif_alpha", 1.0),
             normalize_by_motif_size=cfg.tokenizer.get("normalize_by_motif_size", False),
+            labeled_graph=cfg.tokenizer.get("labeled_graph", True),
+            seed=cfg.seed,
+        )
+    elif tokenizer_type == "hdtc":
+        log.info("Using HDTC (compositional) tokenizer with functional hierarchy")
+        log.info(f"  node_order: {cfg.tokenizer.get('node_order', 'BFS')}")
+        log.info(f"  include_rings: {cfg.tokenizer.get('include_rings', True)}")
+
+        tokenizer = HDTCTokenizer(
+            max_length=cfg.tokenizer.max_length,
+            truncation_length=cfg.tokenizer.truncation_length,
+            node_order=cfg.tokenizer.get("node_order", "BFS"),
+            include_rings=cfg.tokenizer.get("include_rings", True),
             labeled_graph=cfg.tokenizer.get("labeled_graph", True),
             seed=cfg.seed,
         )

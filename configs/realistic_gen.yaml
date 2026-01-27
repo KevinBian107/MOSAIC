@@ -2,7 +2,7 @@
 
 defaults:
   - /experiment: moses
-  - /tokenizer: hdt
+  - /tokenizer: hdtc
   - _self_
 
 # Random seed
@@ -10,7 +10,10 @@ seed: 42
 
 # Model configuration
 model:
-  checkpoint_path: outputs/train/moses_hdt_n1000000_20260125-233951/best.ckpt
+  checkpoint_path: outputs/train/moses_hsent_n50000_20260122-093526/best.ckpt 
+  # moses_hdtc_n100000_20260126-204311 
+  # moses_hdt_n1000000_20260125-233951 
+  # moses_hdt_n50000_20260122-185129
 
 # Data configuration (for training SMILES reference)
 data:
