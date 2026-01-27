@@ -238,6 +238,110 @@ Reconstruct by:
 
 ---
 
+## 4. HDTC (Hierarchical DFS Tokenization - Compositional)
+
+HDTC uses **functional group detection** instead of spectral clustering to build a two-level flat hierarchy that **guarantees** chemical motif preservation.
+
+### Key Differences from HDT
+
+| Aspect | HDT | HDTC |
+|--------|-----|------|
+| Hierarchy Structure | Recursive multi-level | Two-level flat |
+| Coarsening Method | Spectral clustering | Functional group detection (SMARTS) |
+| Community Definition | Spectral partitions | Ring + functional group + singleton |
+| Motif Guarantee | No (may split motifs) | **Yes (preserves by design)** |
+| Super-structure | Implicit via DFS | **Explicit super-graph** |
+
+### Token Vocabulary
+
+| ID | Token | Description |
+|----|-------|-------------|
+| 0 | SOS | Start of sequence |
+| 1 | EOS | End of sequence |
+| 2 | PAD | Padding |
+| 3 | COMM_START | Start community block |
+| 4 | COMM_END | End community block |
+| 5 | LEDGE | Left edge bracket |
+| 6 | REDGE | Right edge bracket |
+| 7 | SUPER_START | Start super-graph block |
+| 8 | SUPER_END | End super-graph block |
+| 9 | TYPE_RING | Community type: ring |
+| 10 | TYPE_FUNC | Community type: functional group |
+| 11 | TYPE_SINGLETON | Community type: singleton |
+| 12+ | Indices | Value + 12 |
+
+### Sequence Grammar
+
+```
+sequence := [SOS] community* super_graph? [EOS]
+community := [COMM_START] <type> <comm_id> atoms [COMM_END]
+atoms := (atom back_edges?)+
+atom := <global_idx>
+back_edges := [LEDGE] <targets>* [REDGE]
+super_graph := [SUPER_START] super_edge* [SUPER_END]
+super_edge := <src_comm> <dst_comm> <src_atom> <dst_atom>
+```
+
+### Community Types
+
+HDTC classifies atoms into three community types based on functional group detection:
+
+| Type | Token | Description | Examples |
+|------|-------|-------------|----------|
+| **Ring** | TYPE_RING (9) | Cyclic structures detected via SMARTS | benzene, pyridine, cyclohexane |
+| **Functional** | TYPE_FUNC (10) | Multi-atom functional groups | carboxyl, ester, amide, nitro |
+| **Singleton** | TYPE_SINGLETON (11) | Remaining atoms not in detected groups | chain carbons, undetected substituents |
+
+### Example: Phenol (benzene + OH)
+
+Phenol has a benzene ring with a hydroxyl group attached:
+
+```
+[SOS] [COMM_START] TYPE_RING 12 12 13 [LEDGE] 12 [REDGE] 14 [LEDGE] 12 13 [REDGE] 15 [LEDGE] 14 [REDGE] 16 [LEDGE] 13 15 [REDGE] 17 [LEDGE] 12 16 [REDGE] [COMM_END] [COMM_START] TYPE_FUNC 13 18 [COMM_END] [SUPER_START] 12 13 17 18 [SUPER_END] [EOS]
+```
+
+**Token breakdown**:
+
+**Community 0 (Ring)**: `[COMM_START] TYPE_RING 12 ... [COMM_END]`
+- `TYPE_RING` = ring community (benzene)
+- `12` = community ID 0
+- `12 13 14 15 16 17` = global atoms 0-5 (benzene carbons) with back-edges for ring closure
+
+**Community 1 (Functional)**: `[COMM_START] TYPE_FUNC 13 18 [COMM_END]`
+- `TYPE_FUNC` = functional group community (hydroxyl)
+- `13` = community ID 1
+- `18` = global atom 6 (oxygen)
+
+**Super-graph**: `[SUPER_START] 12 13 17 18 [SUPER_END]`
+- `12 13` = edge between community 0 and 1
+- `17 18` = connecting atoms (carbon 5 → oxygen 6)
+
+### Functional Group Detection
+
+HDTC uses SMARTS patterns organized by priority:
+
+| Priority | Type | Examples |
+|----------|------|----------|
+| 30 (highest) | Ring | benzene, pyridine, naphthalene, cyclohexane |
+| 20 | Multi-atom | carboxyl, ester, amide, nitro, nitrile |
+| 10 (lowest) | Single-atom | hydroxyl, halides, amines |
+
+When patterns overlap, higher-priority patterns take precedence to ensure rings are preserved intact.
+
+### Complexity
+
+- **Token count**: O(n + m + c) where n = nodes, m = edges, c = community count
+- **Vocabulary size**: 12 + n_max
+
+### Flattening
+
+Reconstruct by:
+1. Parsing community blocks to get atoms and internal edges from back-edges
+2. Parsing super-graph block to get inter-community edges
+3. Union of all edges
+
+---
+
 ## Comparison Summary
 
 ### Token Count (Two Triangles Example)
@@ -247,6 +351,7 @@ Reconstruct by:
 | SENT | ~18 | 2 (SOS/EOS) + 6 (nodes) + 10 (back-edges + reset) |
 | H-SENT | ~35 | 2 (SOS/EOS) + 2 (num_comm) + 22 (partitions) + 9 (bipartite) |
 | HDT | ~25 | 2 (SOS/EOS) + 8 (hierarchy markers) + 6 (nodes) + 9 (back-edges) |
+| HDTC | ~28 | 2 (SOS/EOS) + 8 (community markers) + 6 (nodes) + 12 (back-edges + super-graph) |
 
 ### When to Use Which
 
@@ -255,7 +360,8 @@ Reconstruct by:
 | Simple graphs, baseline | **SENT** | No hierarchy overhead |
 | Debugging, interpretability | **H-SENT** | Explicit structure |
 | Production, large graphs | **HDT** | ~45% fewer tokens than H-SENT |
-| Motif preservation | **H-SENT** or **HDT** | Hierarchical structure |
+| Motif preservation (spectral) | **H-SENT** or **HDT** | Hierarchical structure |
+| **Chemical motif guarantee** | **HDTC** | Functional groups preserved by design |
 
 ---
 
@@ -276,3 +382,4 @@ All tokenizers support configurable node ordering within partitions:
 
 1. **AutoGraph**: SENT tokenization - arXiv:2306.10310
 2. **HiGen**: Hierarchical Graph Generative Networks - arXiv:2305.19337
+3. **HDTC**: Compositional tokenization with functional group preservation (this work)

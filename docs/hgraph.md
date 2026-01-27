@@ -49,7 +49,7 @@ $$E_{ij} = \{(u, v) \in E : u \in C_i \land v \in C_j\}$$
 
 ### Coarsening Strategies
 
-Three strategies are available for partitioning nodes into communities:
+Four strategies are available for partitioning nodes into communities:
 
 #### 1. Spectral Clustering (SC)
 
@@ -160,6 +160,68 @@ $$\text{Cohesion} = \frac{|\{m \in \mathcal{M} : m \subseteq C_i \text{ for some
 
 A motif is "intact" if all its atoms belong to a single community. Cohesion of 1.0 means all motifs are preserved.
 
+#### 4. Functional Group Coarsening (HDTC)
+
+The most direct approach to motif preservation: use functional group detection as the partitioning criterion itself.
+
+**Process**:
+1. **Detect functional groups** via SMARTS patterns with priority-based overlap resolution
+2. **Assign atoms to communities**:
+   - Each detected group → one community
+   - Remaining atoms → singleton communities
+3. **Build super-graph** representing inter-community connectivity
+
+**Key advantage**: Guarantees 100% motif cohesion by construction, since functional groups define the communities directly.
+
+**Two-Level Hierarchy**:
+
+Unlike SC/HAC which produce multi-level recursive hierarchies, functional coarsening produces a flat two-level structure:
+
+| Level | Content |
+|-------|---------|
+| **Level 1** | Communities (rings, functional groups, singletons) |
+| **Level 2** | Super-graph (community-to-community edges) |
+
+**Functional Group Priority**:
+
+When SMARTS patterns overlap, higher-priority patterns take precedence:
+
+| Priority | Type | Rationale |
+|----------|------|-----------|
+| 30 (highest) | Ring systems | Preserve cyclic structures intact |
+| 20 | Multi-atom groups | Carboxyl, ester, amide, etc. |
+| 10 (lowest) | Single-atom groups | Hydroxyl, halides, amines |
+
+**Detected Pattern Types**:
+
+*Ring patterns* (priority 30):
+- Aromatic 6-membered: benzene, pyridine, pyrimidine, pyrazine
+- Aromatic 5-membered: pyrrole, furan, thiophene, imidazole
+- Fused rings: naphthalene, indole, quinoline
+- Saturated: cyclopropane, cyclobutane, cyclopentane, cyclohexane
+
+*Functional group patterns* (priority 20):
+- Carboxylic acid derivatives: carboxyl, ester, amide, anhydride
+- Carbonyl derivatives: aldehyde, ketone
+- Nitrogen-containing: nitro, nitrile, imine, azo
+- Sulfur-containing: sulfonyl, sulfoxide, thioether
+- Phosphorus-containing: phosphate, phosphonate
+
+*Single-atom patterns* (priority 10):
+- Halogens: fluoride, chloride, bromide, iodide
+- Oxygen: hydroxyl, ether oxygen, epoxide
+- Nitrogen: primary/secondary/tertiary amine
+- Carbon: methyl, tert-butyl, isopropyl
+
+**Example: Aspirin (acetylsalicylic acid)**
+
+Detected communities:
+1. Benzene ring (6 atoms) - TYPE_RING
+2. Ester group (C=O-O-) - TYPE_FUNC
+3. Carboxyl group (C=O-OH) - TYPE_FUNC
+
+Super-edges connect these communities.
+
 ---
 
 ## 2. Flattening
@@ -224,3 +286,4 @@ This is verified by roundtrip tests on synthetic graphs (triangles, paths, stars
 2. **Spectral Clustering**: Ng, Jordan, Weiss (2001) - On Spectral Clustering
 3. **Modularity**: Newman (2006) - Modularity and community structure in networks
 4. **HAC**: Müllner (2011) - Modern hierarchical, agglomerative clustering algorithms
+5. **HDTC**: Compositional tokenization with functional group preservation (this work)
