@@ -7,6 +7,7 @@ Available strategies:
 - SpectralCoarsening: Modularity-optimized spectral clustering
 - MotifAwareSpectralCoarsening: Spectral clustering with motif preservation
 - MotifCommunityCoarsening: Direct motif-based community assignment
+- FunctionalHierarchyBuilder: Two-level functional hierarchy for HDTC
 
 Usage:
     from src.tokenizers.coarsening import SpectralCoarsening
@@ -16,6 +17,7 @@ Usage:
 """
 
 from src.tokenizers.coarsening.base import CoarseningStrategy
+from src.tokenizers.coarsening.functional_hierarchy import FunctionalHierarchyBuilder
 from src.tokenizers.coarsening.motif_aware_spectral import (
     MotifAwareCoarsening,  # Backwards compatibility alias
     MotifAwareSpectralCoarsening,
@@ -31,4 +33,6 @@ __all__ = [
     "MotifAwareSpectralCoarsening",
     "MotifAwareCoarsening",  # Backwards compatibility
     "MotifCommunityCoarsening",
+    # Functional hierarchy (for HDTC)
+    "FunctionalHierarchyBuilder",
 ]

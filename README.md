@@ -56,17 +56,15 @@ Generate molecules and analyze how well they match the structural patterns of tr
 
 ```bash
 # Generate and analyze with HDT
-python scripts/realistic_gen.py \
-    model.checkpoint_path=outputs/train/moses_hdt_n50000_20260122-185129/best.ckpt
+python scripts/realistic_gen.py
 
 # Generate and analyze with SENT
 python scripts/realistic_gen.py \
-    model.checkpoint_path=outputs/train/moses_sent_n50000_20260123-140906/best.ckpt \
+    model.checkpoint_path=outputs/train/moses_sent_n1000000_20260123-140906/best.ckpt \
     tokenizer=sent
 
 # Custom number of samples
 python scripts/realistic_gen.py \
-    model.checkpoint_path=outputs/train/moses_hdt_n50000_20260122-185129/best.ckpt \
     generation.num_samples=500
 ```
 
@@ -76,24 +74,9 @@ This produces:
 - **Distribution metrics**: Total Variation distance and KL divergence vs training data
 - **Molecule visualizations**: Side-by-side comparison of training vs generated molecular structures
 
-### Visualization
+### Demo
 
 ```bash
-# Visualize hierarchical tokenization of molecules
-python scripts/visualize_htoken.py --name cholesterol
-
-# Visualize by SMILES string
-python scripts/visualize_htoken.py --smiles "CC(=O)OC1=CC=CC=C1C(=O)O"
-
-# Run demo with multiple complex molecules and save
-python scripts/visualize_htoken.py --demo --output-dir ./figures --no-show
-
-# List available molecules
-python scripts/visualize_htoken.py --list
-
-# Visualize molecular motifs
-python scripts/visualize_motifs.py --smiles "c1ccccc1O"
-
 # Generation Demo
 python scripts/generation_demo.py
 ```

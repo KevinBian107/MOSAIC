@@ -10,7 +10,7 @@ seed: 42
 
 # Model configuration
 model:
-  checkpoint_path: outputs/train/moses_hdt_n50000_20260122-185129/best.ckpt
+  checkpoint_path: outputs/train/moses_hdt_n1000000_20260125-233951/best.ckpt
 
 # Data configuration (for training SMILES reference)
 data:
@@ -25,7 +25,7 @@ data:
 
 # Generation configuration
 generation:
-  num_samples: 100
+  num_samples: 500
   batch_size: 32
 
 # Sampling configuration

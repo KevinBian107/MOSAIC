@@ -1,11 +1,12 @@
 #!/usr/bin/env python
-"""Visualization script comparing SENT, H-SENT, and HDT tokenization.
+"""Visualization script comparing SENT, H-SENT, HDT, and HDTC tokenization.
 
 This script provides side-by-side comparison of:
 - Molecule structure with motif highlighting
 - SENT: Flat random walk tokenization (different colors per walk segment)
 - H-SENT: Hierarchical tokenization with community structure
-- HDT: Hierarchical DFS tokenization with tree structure
+- HDT: Hierarchical DFS tokenization with tree structure (motif-community)
+- HDTC: Compositional tokenization with functional hierarchy
 
 Usage:
     python scripts/visualize_tokenization.py --smiles "CC(=O)OC1=CC=CC=C1C(=O)O"
@@ -31,7 +32,7 @@ from rdkit import Chem
 from torch_geometric.data import Data
 from torch_geometric.utils import to_networkx
 
-from src.tokenizers import HDTTokenizer, HSENTTokenizer, SENTTokenizer
+from src.tokenizers import HDTCTokenizer, HDTTokenizer, HSENTTokenizer, SENTTokenizer
 
 
 # Common molecules for demos
@@ -593,9 +594,32 @@ def plot_hdt_tree(
     # Calculate hierarchy depth
     depth = hg.depth + 1
     num_partitions = len(hg.partitions)
+    num_atoms = data.num_nodes
 
-    # Layout parameters
-    level_height = 1.4  # Increased for better visibility
+    # Fixed level height - reasonable spacing between levels
+    level_height = 2.5
+
+    # Adaptive sizing based on complexity - use larger nodes
+    if num_atoms > 20 or num_partitions > 6:
+        node_spacing = 0.5
+        part_gap = 0.7
+        root_radius = 0.30
+        part_radius = 0.24
+        atom_radius = 0.18
+        font_size_root = 10
+        font_size_part = 8
+        font_size_atom = 7
+        font_size_level = 8
+    else:
+        node_spacing = 0.6
+        part_gap = 0.8
+        root_radius = 0.35
+        part_radius = 0.28
+        atom_radius = 0.20
+        font_size_root = 11
+        font_size_part = 9
+        font_size_atom = 8
+        font_size_level = 9
 
     positions = {}
     node_to_partition = {}
@@ -604,23 +628,20 @@ def plot_hdt_tree(
     root_pos = (0, depth * level_height)
     positions["root"] = root_pos
 
-    # Calculate total width based on nodes
-    node_spacing = 0.45  # Increased spacing
-
     # Partition positions (level 1)
     partition_positions = {}
     partition_widths = []
     for part in hg.partitions:
         partition_widths.append(len(part.global_node_indices) * node_spacing)
 
-    total_width = sum(partition_widths) + (num_partitions - 1) * 0.6
+    total_width = sum(partition_widths) + (num_partitions - 1) * part_gap
     current_x = -total_width / 2
 
     for part_idx, part in enumerate(hg.partitions):
         part_width = partition_widths[part_idx]
         part_center_x = current_x + part_width / 2
         partition_positions[part_idx] = (part_center_x, (depth - 1) * level_height)
-        current_x += part_width + 0.6
+        current_x += part_width + part_gap
 
         # Node positions within partition (level 2)
         nodes = part.global_node_indices
@@ -637,8 +658,8 @@ def plot_hdt_tree(
     for level in range(depth):
         y = (depth - 1 - level) * level_height
         ax.text(
-            -total_width / 2 - 0.8, y,
-            f"l = {level}", fontsize=9, ha="right", va="center",
+            -total_width / 2 - 0.6, y,
+            f"l={level}", fontsize=font_size_level, ha="right", va="center",
             style="italic", color="#666666"
         )
 
@@ -649,7 +670,7 @@ def plot_hdt_tree(
     for part_idx, part_pos in partition_positions.items():
         draw_bidirectional_arrow(
             ax, root_pos, part_pos,
-            color="#333333", linewidth=1.2,
+            color="#333333", linewidth=1.5,
             curve_amount=0.12, zorder=2
         )
 
@@ -660,7 +681,7 @@ def plot_hdt_tree(
             node_pos = positions[global_idx]
             draw_bidirectional_arrow(
                 ax, part_pos, node_pos,
-                color="#333333", linewidth=1.0,
+                color="#333333", linewidth=1.2,
                 curve_amount=0.15, zorder=2
             )
 
@@ -679,7 +700,7 @@ def plot_hdt_tree(
                     v = nodes[dst_local]
                     draw_curved_edge(
                         ax, positions[u], positions[v],
-                        color="#FF8C00", linewidth=3,
+                        color="#FF8C00", linewidth=3.5,
                         curve_amount=0.2, zorder=3
                     )
 
@@ -695,60 +716,284 @@ def plot_hdt_tree(
                 v = right_part.global_node_indices[right_local]
                 draw_curved_edge(
                     ax, positions[u], positions[v],
-                    color="#FF8C00", linewidth=2.5, linestyle="--",
+                    color="#FF8C00", linewidth=3, linestyle="--",
                     curve_amount=0.3, zorder=3
                 )
 
-    # Draw partition nodes
+    # Draw partition nodes (adaptive size)
     for part_idx, part in enumerate(hg.partitions):
         part_pos = partition_positions[part_idx]
         comm_color = comm_colors[part_idx % len(comm_colors)]
 
         circle = plt.Circle(
-            part_pos, 0.2, facecolor=comm_color,
+            part_pos, part_radius, facecolor=comm_color,
             edgecolor="black", linewidth=2, zorder=5
         )
         ax.add_patch(circle)
         ax.text(part_pos[0], part_pos[1], f"P{part_idx}", ha="center", va="center",
-                fontsize=8, fontweight="bold", zorder=6)
+                fontsize=font_size_part, fontweight="bold", zorder=6)
 
-    # Draw root node
+    # Draw root node (adaptive size)
     circle = plt.Circle(
-        root_pos, 0.25, facecolor="white",
+        root_pos, root_radius, facecolor="white",
         edgecolor="black", linewidth=2, zorder=5
     )
     ax.add_patch(circle)
     ax.text(root_pos[0], root_pos[1], "R", ha="center", va="center",
-            fontsize=10, fontweight="bold", zorder=6)
+            fontsize=font_size_root, fontweight="bold", zorder=6)
 
-    # Draw atom nodes (level 2)
+    # Draw atom nodes (level 2) - adaptive size
     for part_idx, part in enumerate(hg.partitions):
         comm_color = comm_colors[part_idx % len(comm_colors)]
         for global_idx in part.global_node_indices:
             node_pos = positions[global_idx]
             circle = plt.Circle(
-                node_pos, 0.14, facecolor=comm_color,
+                node_pos, atom_radius, facecolor=comm_color,
                 edgecolor="black", linewidth=1.5, zorder=5
             )
             ax.add_patch(circle)
             ax.text(node_pos[0], node_pos[1], str(global_idx), ha="center", va="center",
-                    fontsize=7, fontweight="bold", zorder=6)
+                    fontsize=font_size_atom, fontweight="bold", zorder=6)
 
-    # Set axis limits
+    # Set axis limits with padding
     all_x = [p[0] for p in positions.values()]
     all_y = [p[1] for p in positions.values()]
-    ax.set_xlim(min(all_x) - 1.0, max(all_x) + 1.0)
-    ax.set_ylim(min(all_y) - 0.5, max(all_y) + 0.5)
+    x_margin = max(0.5, (max(all_x) - min(all_x)) * 0.05)
+    y_margin = max(0.5, (max(all_y) - min(all_y)) * 0.1)
+    ax.set_xlim(min(all_x) - x_margin, max(all_x) + x_margin)
+    ax.set_ylim(min(all_y) - y_margin, max(all_y) + y_margin)
 
     # Legend
     legend_elements = [
         plt.Line2D([0], [0], color="#FF8C00", linewidth=3, label="Graph edges"),
+        plt.Line2D([0], [0], color="#FF8C00", linewidth=2.5, linestyle="--", label="Cross-partition"),
         plt.Line2D([0], [0], color="#333333", linewidth=1.5, marker=">",
-                   markersize=6, label="DFS traversal\n(↓down ↑up)"),
+                   markersize=5, label="DFS traversal"),
     ]
-    ax.legend(handles=legend_elements, loc="upper right", fontsize=7)
+    ax.legend(handles=legend_elements, loc="upper right", fontsize=6)
 
-    ax.set_title("HDT: Hierarchical Tree", fontsize=11, fontweight="bold")
+    ax.set_title("HDT: Hierarchical DFS Tree", fontsize=12, fontweight="bold")
+    ax.set_aspect("equal")
+    ax.axis("off")
+
+
+def plot_hdtc_structure(
+    ax: plt.Axes,
+    data: Data,
+    hierarchy,  # TwoLevelHierarchy
+    tokens: list[int],
+    tokenizer,
+) -> None:
+    """Plot HDTC as a full tree structure like HDT.
+
+    Shows:
+    - Root node at top (level 0)
+    - Community nodes in middle (level 1)
+    - Atom nodes at bottom (level 2)
+    - Bidirectional arrows for hierarchy traversal
+    - Graph edges (internal and cross-community)
+    """
+    ax.set_title("HDTC: Functional Hierarchy", fontsize=12, fontweight="bold")
+
+    if hierarchy.num_communities == 0:
+        ax.text(0.5, 0.5, "Empty hierarchy", ha="center", va="center")
+        ax.axis("off")
+        return
+
+    num_communities = len(hierarchy.communities)
+    num_atoms = data.num_nodes
+
+    # Adaptive sizing based on complexity
+    if num_atoms > 20 or num_communities > 6:
+        node_spacing = 0.5
+        comm_gap = 0.7
+        root_radius = 0.30
+        comm_radius = 0.24
+        atom_radius = 0.18
+        font_size_root = 10
+        font_size_comm = 8
+        font_size_atom = 7
+    else:
+        node_spacing = 0.6
+        comm_gap = 0.8
+        root_radius = 0.35
+        comm_radius = 0.28
+        atom_radius = 0.20
+        font_size_root = 11
+        font_size_comm = 9
+        font_size_atom = 8
+
+    # Fixed level height
+    level_height = 2.5
+
+    # Community type colors
+    type_colors = {
+        "ring": "#FF6B6B",       # Red for rings
+        "functional": "#4ECDC4", # Teal for functional groups
+        "singleton": "#95A5A6",  # Gray for singletons
+    }
+
+    positions = {}  # atom positions
+    comm_positions = {}  # community positions
+
+    # Calculate community widths
+    comm_widths = [
+        max(1, len(comm.atom_indices)) * node_spacing for comm in hierarchy.communities
+    ]
+    total_width = sum(comm_widths) + (num_communities - 1) * comm_gap
+
+    # Root position (level 0)
+    root_pos = (0, 2 * level_height)
+
+    # Community positions (level 1)
+    current_x = -total_width / 2
+    for comm_idx, comm in enumerate(hierarchy.communities):
+        comm_width = comm_widths[comm_idx]
+        comm_center_x = current_x + comm_width / 2
+        comm_positions[comm.community_id] = (comm_center_x, level_height)
+        current_x += comm_width + comm_gap
+
+        # Atom positions within community (level 2)
+        num_atoms_in_comm = len(comm.atom_indices)
+        start_x = comm_center_x - (num_atoms_in_comm - 1) * node_spacing / 2
+        for local_idx, global_idx in enumerate(comm.atom_indices):
+            node_x = start_x + local_idx * node_spacing
+            positions[global_idx] = (node_x, 0)
+
+    # Draw level labels
+    ax.text(-total_width / 2 - 0.6, 2 * level_height, "l=0",
+            fontsize=8, ha="right", va="center", style="italic", color="#666666")
+    ax.text(-total_width / 2 - 0.6, level_height, "l=1",
+            fontsize=8, ha="right", va="center", style="italic", color="#666666")
+    ax.text(-total_width / 2 - 0.6, 0, "l=2",
+            fontsize=8, ha="right", va="center", style="italic", color="#666666")
+
+    # Draw bidirectional arrows from root to communities
+    for comm in hierarchy.communities:
+        comm_pos = comm_positions[comm.community_id]
+        draw_bidirectional_arrow(
+            ax, root_pos, comm_pos,
+            color="#333333", linewidth=1.5,
+            curve_amount=0.12, zorder=2
+        )
+
+    # Draw bidirectional arrows from communities to atoms
+    for comm in hierarchy.communities:
+        comm_pos = comm_positions[comm.community_id]
+        for global_idx in comm.atom_indices:
+            node_pos = positions[global_idx]
+            draw_bidirectional_arrow(
+                ax, comm_pos, node_pos,
+                color="#333333", linewidth=1.2,
+                curve_amount=0.15, zorder=2
+            )
+
+    # Draw community-to-community connections (super-edges at community level)
+    comm_pairs_drawn = set()
+    for se in hierarchy.super_edges:
+        src_comm = se.source_community
+        dst_comm = se.target_community
+        pair_key = (min(src_comm, dst_comm), max(src_comm, dst_comm))
+
+        if pair_key not in comm_pairs_drawn:
+            comm_pairs_drawn.add(pair_key)
+            if src_comm in comm_positions and dst_comm in comm_positions:
+                src_pos = comm_positions[src_comm]
+                dst_pos = comm_positions[dst_comm]
+                draw_curved_edge(
+                    ax, src_pos, dst_pos,
+                    color="#2E86AB", linewidth=3.5, linestyle="-",
+                    curve_amount=0.3, zorder=4
+                )
+
+    # Draw internal edges within communities - solid orange
+    for comm in hierarchy.communities:
+        drawn = set()
+        for src, dst in comm.internal_edges:
+            edge_key = (min(src, dst), max(src, dst))
+            if edge_key not in drawn and src in positions and dst in positions:
+                drawn.add(edge_key)
+                draw_curved_edge(
+                    ax, positions[src], positions[dst],
+                    color="#FF8C00", linewidth=3,
+                    curve_amount=0.2, zorder=3
+                )
+
+    # Draw cross-community edges (from super_edges) - dashed orange
+    for se in hierarchy.super_edges:
+        if se.source_atom in positions and se.target_atom in positions:
+            src_pos = positions[se.source_atom]
+            dst_pos = positions[se.target_atom]
+            draw_curved_edge(
+                ax, src_pos, dst_pos,
+                color="#FF8C00", linewidth=2.5, linestyle="--",
+                curve_amount=0.3, zorder=3
+            )
+
+    # Draw root node
+    circle = plt.Circle(
+        root_pos, root_radius, facecolor="white",
+        edgecolor="black", linewidth=2, zorder=5
+    )
+    ax.add_patch(circle)
+    ax.text(root_pos[0], root_pos[1], "R", ha="center", va="center",
+            fontsize=font_size_root, fontweight="bold", zorder=6)
+
+    # Draw community nodes
+    for comm in hierarchy.communities:
+        comm_pos = comm_positions[comm.community_id]
+        comm_color = type_colors.get(comm.community_type, "#95A5A6")
+
+        circle = plt.Circle(
+            comm_pos, comm_radius, facecolor=comm_color,
+            edgecolor="black", linewidth=2, zorder=5
+        )
+        ax.add_patch(circle)
+
+        # Label: type initial + id
+        type_initial = comm.community_type[0].upper()
+        ax.text(
+            comm_pos[0], comm_pos[1], f"{type_initial}{comm.community_id}",
+            ha="center", va="center", fontsize=font_size_comm, fontweight="bold", zorder=6
+        )
+
+    # Draw atom nodes
+    for comm in hierarchy.communities:
+        comm_color = type_colors.get(comm.community_type, "#95A5A6")
+        for global_idx in comm.atom_indices:
+            if global_idx in positions:
+                node_pos = positions[global_idx]
+                circle = plt.Circle(
+                    node_pos, atom_radius, facecolor=comm_color,
+                    edgecolor="black", linewidth=1.5, zorder=5
+                )
+                ax.add_patch(circle)
+                ax.text(
+                    node_pos[0], node_pos[1], str(global_idx),
+                    ha="center", va="center", fontsize=font_size_atom, fontweight="bold", zorder=6
+                )
+
+    # Set axis limits
+    all_x = [p[0] for p in positions.values()] + [p[0] for p in comm_positions.values()] + [root_pos[0]]
+    all_y = [p[1] for p in positions.values()] + [p[1] for p in comm_positions.values()] + [root_pos[1]]
+    x_margin = max(0.5, (max(all_x) - min(all_x)) * 0.05)
+    y_margin = max(0.5, (max(all_y) - min(all_y)) * 0.1)
+    ax.set_xlim(min(all_x) - x_margin, max(all_x) + x_margin)
+    ax.set_ylim(min(all_y) - y_margin, max(all_y) + y_margin)
+
+    # Legend
+    legend_elements = [
+        mpatches.Patch(facecolor="#FF6B6B", edgecolor="black", label="Ring"),
+        mpatches.Patch(facecolor="#4ECDC4", edgecolor="black", label="Functional"),
+        mpatches.Patch(facecolor="#95A5A6", edgecolor="black", label="Singleton"),
+        plt.Line2D([0], [0], color="#2E86AB", linewidth=3.5, label="Super-edges"),
+        plt.Line2D([0], [0], color="#FF8C00", linewidth=3, label="Graph edges"),
+        plt.Line2D([0], [0], color="#FF8C00", linewidth=2.5, linestyle="--", label="Cross-comm"),
+        plt.Line2D([0], [0], color="#333333", linewidth=1.5, marker=">",
+                   markersize=5, label="DFS traversal"),
+    ]
+    ax.legend(handles=legend_elements, loc="upper right", fontsize=5)
+
     ax.set_aspect("equal")
     ax.axis("off")
 
@@ -767,7 +1012,17 @@ def plot_tokens(
 ) -> None:
     """Plot token sequence as flattened text with actual token symbols."""
     # Build token name mappings
-    if hasattr(tokenizer, "ENTER"):
+    if hasattr(tokenizer, "COMM_START"):
+        # HDTC tokenizer
+        token_names = {
+            tokenizer.SOS: "[SOS]", tokenizer.EOS: "[EOS]", tokenizer.PAD: "[PAD]",
+            tokenizer.COMM_START: "{", tokenizer.COMM_END: "}",
+            tokenizer.LEDGE: "[", tokenizer.REDGE: "]",
+            tokenizer.SUPER_START: "<S", tokenizer.SUPER_END: "S>",
+            tokenizer.TYPE_RING: "R", tokenizer.TYPE_FUNC: "F", tokenizer.TYPE_SINGLETON: "·",
+        }
+        idx_offset = tokenizer.IDX_OFFSET
+    elif hasattr(tokenizer, "ENTER"):
         # HDT tokenizer
         token_names = {
             tokenizer.SOS: "[SOS]", tokenizer.EOS: "[EOS]", tokenizer.PAD: "[PAD]",
@@ -841,7 +1096,12 @@ def compare_all_tokenizations(
     show: bool = True,
     seed: int = 42,
 ) -> plt.Figure | None:
-    """Create comparison of molecule, SENT, H-SENT, and HDT tokenization."""
+    """Create comparison of molecule, SENT, H-SENT, HDT, and HDTC tokenization.
+
+    Layout:
+    - Row 1: Molecule structure, SENT walks, H-SENT communities (3 columns)
+    - Row 2: HDT tree (large), HDTC functional hierarchy (large) (2 columns)
+    """
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         print(f"Invalid SMILES: {smiles}")
@@ -861,20 +1121,39 @@ def compare_all_tokenizations(
     hsent_tokenizer = HSENTTokenizer(seed=seed)
     hsent_tokenizer.set_num_nodes(max(100, data.num_nodes + 20))
 
-    hdt_tokenizer = HDTTokenizer(seed=seed, min_community_size=2)
+    # Use motif_community coarsening for HDT to avoid spectral coarsening bugs
+    hdt_tokenizer = HDTTokenizer(
+        seed=seed, min_community_size=2, coarsening_strategy="motif_community"
+    )
     hdt_tokenizer.set_num_nodes(max(100, data.num_nodes + 20))
+
+    # HDTC tokenizer with functional hierarchy
+    hdtc_tokenizer = HDTCTokenizer(seed=seed)
+    hdtc_tokenizer.set_num_nodes(max(100, data.num_nodes + 20))
 
     # Tokenize
     sent_tokens = sent_tokenizer.tokenize(data).tolist()
-    hsent_tokens = hsent_tokenizer.tokenize(data).tolist()
+
+    # H-SENT may fail on some molecules due to spectral coarsening issues
+    hsent_tokens = None
+    hsent_hg = None
+    try:
+        hsent_tokens = hsent_tokenizer.tokenize(data).tolist()
+        hsent_hg = hsent_tokenizer.coarsener.build_hierarchy(data)
+    except (IndexError, ValueError) as e:
+        print(f"  Warning: H-SENT failed ({e}), skipping H-SENT visualization")
+
     hdt_tokens = hdt_tokenizer.tokenize(data).tolist()
+    hdtc_tokens = hdtc_tokenizer.tokenize(data).tolist()
 
     # Get hierarchies
-    hsent_hg = hsent_tokenizer.coarsener.build_hierarchy(data)
     hdt_hg = hdt_tokenizer.coarsener.build_hierarchy(data)
+    hdtc_hierarchy = hdtc_tokenizer.hierarchy_builder.build(data)
 
-    # Create figure: 4 columns x 2 rows
-    fig = plt.figure(figsize=(22, 12))
+    # Create figure: 3 columns x 2 rows
+    # Row 1: Molecule, SENT, H-SENT (smaller, graph-based views)
+    # Row 2: HDT tree, HDTC hierarchy (larger, tree/hierarchy views)
+    fig = plt.figure(figsize=(24, 16))
 
     # Title
     title = name or smiles[:35]
@@ -885,50 +1164,55 @@ def compare_all_tokenizations(
         fontsize=14, fontweight="bold"
     )
 
-    # Use GridSpec for better control - HDT gets more width, tokens row is taller
+    # Use GridSpec for better control
     from matplotlib.gridspec import GridSpec
     gs = GridSpec(
-        2, 5, figure=fig,
-        height_ratios=[2, 1],
-        width_ratios=[1, 1, 1, 1.5, 0.5],  # HDT column wider
-        hspace=0.4, wspace=0.3
+        2, 6, figure=fig,
+        height_ratios=[1, 2],  # Second row much taller for wide tree structures
+        width_ratios=[1, 1, 1, 1, 1, 1],
+        hspace=0.25, wspace=0.15
     )
 
-    # Row 1: Graph visualizations
-    ax1 = fig.add_subplot(gs[0, 0])
+    # Row 1: Graph visualizations (3 panels, each spanning 2 columns)
+    ax1 = fig.add_subplot(gs[0, 0:2])
     plot_molecule_with_motifs(ax1, data, smiles, pos)
 
-    ax2 = fig.add_subplot(gs[0, 1])
+    ax2 = fig.add_subplot(gs[0, 2:4])
     plot_sent_walks(ax2, data, sent_tokens, sent_tokenizer, pos)
 
-    ax3 = fig.add_subplot(gs[0, 2])
-    plot_hsent_structure(ax3, data, hsent_hg, hsent_tokens, hsent_tokenizer, pos)
+    ax3 = fig.add_subplot(gs[0, 4:6])
+    if hsent_hg is not None and hsent_tokens is not None:
+        plot_hsent_structure(ax3, data, hsent_hg, hsent_tokens, hsent_tokenizer, pos)
+    else:
+        ax3.text(
+            0.5, 0.5, "H-SENT failed\n(spectral coarsening error)",
+            ha="center", va="center", fontsize=10, color="gray", style="italic",
+            transform=ax3.transAxes
+        )
+        ax3.set_title("H-SENT: Error", fontsize=11, fontweight="bold")
+        ax3.axis("off")
 
-    ax4 = fig.add_subplot(gs[0, 3:])  # HDT spans last 2 columns for more space
+    # Row 2: Tree/hierarchy structures (2 panels, each spanning 3 columns)
+    ax4 = fig.add_subplot(gs[1, 0:3])
     plot_hdt_tree(ax4, data, hdt_hg, hdt_tokens, hdt_tokenizer)
 
-    # Row 2: Token sequences (show all tokens for H-SENT and HDT)
-    ax5 = fig.add_subplot(gs[1, 0])
-    ax5.axis("off")
-    ax5.text(0.5, 0.5, "Motif patterns detected\nin the molecule above",
-             ha="center", va="center", fontsize=9, style="italic", color="gray")
+    ax5 = fig.add_subplot(gs[1, 3:6])
+    plot_hdtc_structure(ax5, data, hdtc_hierarchy, hdtc_tokens, hdtc_tokenizer)
 
-    ax6 = fig.add_subplot(gs[1, 1])
-    plot_tokens(ax6, sent_tokens, sent_tokenizer, f"SENT ({len(sent_tokens)} tok)")
-
-    ax7 = fig.add_subplot(gs[1, 2])
-    plot_tokens(ax7, hsent_tokens, hsent_tokenizer, f"H-SENT ({len(hsent_tokens)} tok)", max_tokens=500)
-
-    ax8 = fig.add_subplot(gs[1, 3:])
-    plot_tokens(ax8, hdt_tokens, hdt_tokenizer, f"HDT ({len(hdt_tokens)} tok)", max_tokens=500)
-
-    # Stats
-    stats = (
-        f"SENT: {len(sent_tokens)} | "
-        f"H-SENT: {len(hsent_tokens)} ({hsent_hg.num_communities} comm) | "
-        f"HDT: {len(hdt_tokens)} ({hdt_hg.num_communities} comm)"
+    # Stats at bottom
+    hdtc_info = hdtc_hierarchy.get_level_info()
+    hsent_stats = (
+        f"H-SENT: {len(hsent_tokens)} tokens ({hsent_hg.num_communities} comm)"
+        if hsent_tokens is not None and hsent_hg is not None
+        else "H-SENT: failed"
     )
-    fig.text(0.5, 0.01, stats, ha="center", fontsize=10, style="italic", color="gray")
+    stats = (
+        f"SENT: {len(sent_tokens)} tokens | "
+        f"{hsent_stats} | "
+        f"HDT: {len(hdt_tokens)} tokens ({hdt_hg.num_communities} comm) | "
+        f"HDTC: {len(hdtc_tokens)} tokens ({hdtc_info['num_communities']} comm)"
+    )
+    fig.text(0.5, 0.01, stats, ha="center", fontsize=11, style="italic", color="gray")
 
     if output:
         fig.savefig(output, dpi=150, bbox_inches="tight")
@@ -970,7 +1254,7 @@ def run_demo(output_dir: str | None = None, show: bool = True):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Compare SENT, H-SENT, and HDT tokenization of molecules",
+        description="Compare SENT, H-SENT, HDT, and HDTC tokenization of molecules",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
 Examples:

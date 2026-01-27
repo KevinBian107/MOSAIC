@@ -7,13 +7,15 @@ Tokenizers:
 - SENTTokenizer: Flat SENT tokenization (AutoGraph)
 - HSENTTokenizer: Hierarchical SENT with explicit structure
 - HDTTokenizer: Hierarchical DFS-based tokenization (most efficient)
+- HDTCTokenizer: Compositional tokenization with functional hierarchy
 
 Coarsening strategies:
 - SpectralCoarsening: Modularity-optimized spectral clustering
 - MotifAwareSpectralCoarsening: Spectral clustering with motif preservation
+- FunctionalHierarchyBuilder: Two-level functional hierarchy for HDTC
 
 Shared utilities:
-- structures: Partition, Bipartite, HierarchicalGraph data classes
+- structures: Partition, Bipartite, HierarchicalGraph, TwoLevelHierarchy data classes
 - ordering: Node ordering strategies (BFS, DFS, etc.)
 - visualization: Hierarchy visualization utilities
 - motif: Motif detection and affinity computation
@@ -22,19 +24,24 @@ Shared utilities:
 from src.tokenizers.base import BatchConverter, Tokenizer
 from src.tokenizers.coarsening import (
     CoarseningStrategy,
+    FunctionalHierarchyBuilder,
     MotifAwareCoarsening,
     MotifAwareSpectralCoarsening,
     MotifCommunityCoarsening,
     SpectralCoarsening,
 )
 from src.tokenizers.hdt import HDTTokenizer
+from src.tokenizers.hdtc import HDTCTokenizer
 from src.tokenizers.hsent import HSENTTokenizer
 from src.tokenizers.ordering import OrderingMethod, order_partition_nodes
 from src.tokenizers.sent import SENTTokenizer
 from src.tokenizers.structures import (
     Bipartite,
+    CommunityCommunityEdge,
+    FunctionalCommunity,
     HierarchicalGraph,
     Partition,
+    TwoLevelHierarchy,
 )
 
 __all__ = [
@@ -45,16 +52,21 @@ __all__ = [
     "SENTTokenizer",
     "HSENTTokenizer",
     "HDTTokenizer",
+    "HDTCTokenizer",
     # Coarsening
     "CoarseningStrategy",
     "SpectralCoarsening",
     "MotifAwareSpectralCoarsening",
     "MotifAwareCoarsening",  # Backwards compatibility
     "MotifCommunityCoarsening",
+    "FunctionalHierarchyBuilder",
     # Structures
     "Partition",
     "Bipartite",
     "HierarchicalGraph",
+    "FunctionalCommunity",
+    "CommunityCommunityEdge",
+    "TwoLevelHierarchy",
     # Ordering
     "OrderingMethod",
     "order_partition_nodes",
