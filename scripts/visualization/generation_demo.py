@@ -23,7 +23,7 @@ import torch
 from matplotlib.animation import FuncAnimation, PillowWriter
 from torch_geometric.data import Data
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # Default checkpoint paths
 DEFAULT_HDT_CKPT = "outputs/train/moses_hdt_n50000_20260122-185129/best.ckpt"
