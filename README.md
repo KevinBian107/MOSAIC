@@ -74,24 +74,9 @@ This produces:
 - **Distribution metrics**: Total Variation distance and KL divergence vs training data
 - **Molecule visualizations**: Side-by-side comparison of training vs generated molecular structures
 
-### Visualization
+### Demo
 
 ```bash
-# Visualize hierarchical tokenization of molecules
-python scripts/visualize_htoken.py --name cholesterol
-
-# Visualize by SMILES string
-python scripts/visualize_htoken.py --smiles "CC(=O)OC1=CC=CC=C1C(=O)O"
-
-# Run demo with multiple complex molecules and save
-python scripts/visualize_htoken.py --demo --output-dir ./figures --no-show
-
-# List available molecules
-python scripts/visualize_htoken.py --list
-
-# Visualize molecular motifs
-python scripts/visualize_motifs.py --smiles "c1ccccc1O"
-
 # Generation Demo
 python scripts/generation_demo.py
 ```

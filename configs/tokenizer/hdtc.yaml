@@ -1,0 +1,32 @@
+# HDTC (HDT Compositional) Tokenizer configuration
+#
+# HDTC is a compositional tokenizer that builds a two-level functional hierarchy:
+# - Level 1: Functional communities (rings, functional groups, singletons)
+# - Level 2: Super-graph showing how communities connect
+#
+# Key differences from HDT:
+# - Uses functional group detection instead of spectral clustering
+# - Two-level hierarchy (flat) instead of recursive hierarchy
+# - Explicit super-graph representation
+# - Guarantees functional group preservation
+#
+# Usage:
+#   python scripts/train.py tokenizer=hdtc
+#   python scripts/train.py tokenizer=hdtc tokenizer.include_rings=false
+
+# Tokenizer type identifier
+type: hdtc
+
+# Sequence length settings
+max_length: -1              # Maximum sequence length (-1 for unlimited)
+truncation_length: 2048     # Truncate sequences longer than this
+
+# Node ordering within communities
+# Options: BFS, DFS, BFSAC (ascending cutset), BFSDC (descending cutset)
+node_order: BFS
+
+# Ring detection settings
+include_rings: true         # Whether to detect ring structures as communities
+
+# Labeled graph support (encode atom/bond types for molecules)
+labeled_graph: true

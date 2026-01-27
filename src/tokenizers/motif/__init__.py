@@ -10,6 +10,12 @@ Key components:
 - detect_motifs_from_data: Detect motifs from PyG Data objects
 - compute_motif_affinity_matrix: Compute motif co-membership matrix
 - compute_motif_cohesion: Evaluate motif preservation in partitions
+
+Functional group detection (for HDTC):
+- FUNCTIONAL_GROUP_PATTERNS: Dictionary of functional group SMARTS patterns
+- FunctionalGroupInstance: Data class for detected functional groups
+- FunctionalGroupDetector: Detector with overlap resolution
+- detect_functional_groups: Convenience function for detection
 """
 
 from src.tokenizers.motif.affinity import (
@@ -21,6 +27,16 @@ from src.tokenizers.motif.detection import (
     MotifInstance,
     detect_motifs_from_data,
     detect_motifs_from_smiles,
+)
+from src.tokenizers.motif.functional_detection import (
+    FunctionalGroupDetector,
+    FunctionalGroupInstance,
+    detect_functional_groups,
+)
+from src.tokenizers.motif.functional_patterns import (
+    FUNCTIONAL_GROUP_PATTERNS,
+    PATTERN_PRIORITY,
+    RING_PATTERNS,
 )
 from src.tokenizers.motif.patterns import CLUSTERING_MOTIFS
 
@@ -35,4 +51,12 @@ __all__ = [
     "compute_motif_affinity_matrix",
     "compute_motif_cohesion",
     "get_motif_summary",
+    # Functional group patterns (for HDTC)
+    "FUNCTIONAL_GROUP_PATTERNS",
+    "PATTERN_PRIORITY",
+    "RING_PATTERNS",
+    # Functional group detection (for HDTC)
+    "FunctionalGroupInstance",
+    "FunctionalGroupDetector",
+    "detect_functional_groups",
 ]

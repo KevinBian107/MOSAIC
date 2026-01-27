@@ -271,7 +271,7 @@ class HierarchicalGraph:
             edge_index=edge_index,
             num_nodes=self.num_nodes,
             x=self.node_features,  # Will be None if not present
-            edge_attr=edge_attr,   # Will be None if not present
+            edge_attr=edge_attr,  # Will be None if not present
         )
 
     def get_level_info(self) -> dict:
@@ -313,3 +313,193 @@ def create_empty_hierarchy(num_nodes: int) -> HierarchicalGraph:
         bipartites=[],
         community_assignment=[0] * num_nodes,
     )
+
+
+# ===========================================================================
+# Two-Level Hierarchy Structures for HDTC Tokenization
+# ===========================================================================
+
+
+@dataclass
+class FunctionalCommunity:
+    """A functional community in the two-level hierarchy.
+
+    Represents a group of atoms that belong to a functional unit
+    (ring, functional group, or singleton).
+
+    Attributes:
+        community_id: Unique identifier for this community.
+        community_type: Type of community ("ring", "functional", "singleton").
+        group_name: Name of the functional group (e.g., "benzene", "hydroxyl").
+        atom_indices: List of global atom indices in this community.
+        internal_edges: List of (src, dst) tuples for edges within the community.
+        node_features: Optional tensor of node features for atoms in this community.
+    """
+
+    community_id: int
+    community_type: str
+    group_name: str
+    atom_indices: list[int]
+    internal_edges: list[tuple[int, int]]
+    node_features: Optional[Tensor] = None
+
+    @property
+    def num_atoms(self) -> int:
+        """Number of atoms in this community."""
+        return len(self.atom_indices)
+
+    @property
+    def num_edges(self) -> int:
+        """Number of internal edges in this community."""
+        return len(self.internal_edges)
+
+
+@dataclass
+class CommunityCommunityEdge:
+    """An edge between two communities in the super-graph.
+
+    Represents a bond connecting atoms in different communities.
+
+    Attributes:
+        source_community: ID of the source community.
+        target_community: ID of the target community.
+        source_atom: Global index of the source atom.
+        target_atom: Global index of the target atom.
+        bond_type: Bond type (0 for unknown/default).
+    """
+
+    source_community: int
+    target_community: int
+    source_atom: int
+    target_atom: int
+    bond_type: int = 0
+
+
+@dataclass
+class TwoLevelHierarchy:
+    """Two-level functional hierarchy for HDTC tokenization.
+
+    This structure represents a graph decomposed into:
+    - Level 1: Functional communities (rings, functional groups, singletons)
+    - Level 2: Super-graph showing how communities connect
+
+    Attributes:
+        communities: List of FunctionalCommunity objects.
+        super_edges: List of CommunityCommunityEdge objects.
+        atom_to_community: Mapping from atom index to community ID.
+        num_atoms: Total number of atoms in the graph.
+        node_features: Optional global node features tensor.
+        edge_features: Optional dictionary mapping (src, dst) to bond type.
+    """
+
+    communities: list[FunctionalCommunity]
+    super_edges: list[CommunityCommunityEdge]
+    atom_to_community: list[int]
+    num_atoms: int
+    node_features: Optional[Tensor] = None
+    edge_features: Optional[dict[tuple[int, int], int]] = None
+
+    @property
+    def num_communities(self) -> int:
+        """Number of communities in this hierarchy."""
+        return len(self.communities)
+
+    @property
+    def num_super_edges(self) -> int:
+        """Number of edges in the super-graph."""
+        return len(self.super_edges)
+
+    def get_community(self, community_id: int) -> FunctionalCommunity:
+        """Get a community by its ID.
+
+        Args:
+            community_id: Community identifier.
+
+        Returns:
+            The FunctionalCommunity with the given ID.
+
+        Raises:
+            KeyError: If no community with the given ID exists.
+        """
+        for comm in self.communities:
+            if comm.community_id == community_id:
+                return comm
+        raise KeyError(f"Community {community_id} not found")
+
+    def get_all_edges_global(self) -> list[tuple[int, int]]:
+        """Get all edges in global indices.
+
+        Collects edges from all communities and super-edges.
+
+        Returns:
+            List of (src, dst) tuples in global atom indices.
+        """
+        all_edges: list[tuple[int, int]] = []
+
+        # Collect internal edges from each community
+        for comm in self.communities:
+            for src, dst in comm.internal_edges:
+                all_edges.append((src, dst))
+
+        # Collect super-edges (inter-community edges)
+        for se in self.super_edges:
+            all_edges.append((se.source_atom, se.target_atom))
+            all_edges.append((se.target_atom, se.source_atom))
+
+        return all_edges
+
+    def reconstruct(self) -> Data:
+        """Reconstruct the original graph from the two-level hierarchy.
+
+        This is the key method for validating the roundtrip:
+        raw_graph -> TwoLevelHierarchy -> reconstruct() -> raw_graph
+
+        Returns:
+            PyTorch Geometric Data object with edge_index, num_nodes, and
+            optionally x (node features) and edge_attr (edge features).
+        """
+        all_edges = self.get_all_edges_global()
+
+        if all_edges:
+            edge_index = torch.tensor(all_edges, dtype=torch.long).t().contiguous()
+            # Remove duplicate edges
+            edge_index = torch.unique(edge_index, dim=1)
+        else:
+            edge_index = torch.zeros((2, 0), dtype=torch.long)
+
+        # Reconstruct edge attributes if edge_features exist
+        edge_attr = None
+        if self.edge_features is not None and edge_index.shape[1] > 0:
+            edge_attr_list = []
+            for i in range(edge_index.shape[1]):
+                src = int(edge_index[0, i])
+                dst = int(edge_index[1, i])
+                bond_type = self.edge_features.get((src, dst), 0)
+                edge_attr_list.append(bond_type)
+            edge_attr = torch.tensor(edge_attr_list, dtype=torch.long)
+
+        return Data(
+            edge_index=edge_index,
+            num_nodes=self.num_atoms,
+            x=self.node_features,
+            edge_attr=edge_attr,
+        )
+
+    def get_level_info(self) -> dict:
+        """Get information about the hierarchy for debugging/visualization.
+
+        Returns:
+            Dictionary with hierarchy statistics.
+        """
+        community_types = {}
+        for comm in self.communities:
+            comm_type = comm.community_type
+            community_types[comm_type] = community_types.get(comm_type, 0) + 1
+
+        return {
+            "num_communities": self.num_communities,
+            "num_super_edges": self.num_super_edges,
+            "community_sizes": [comm.num_atoms for comm in self.communities],
+            "community_types": community_types,
+            "num_atoms": self.num_atoms,
+        }
