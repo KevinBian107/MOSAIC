@@ -30,6 +30,7 @@ from src.evaluation.motif_distribution import (
     get_ring_system_info,
     kl_divergence,
 )
+from src.evaluation.polygraph_metric import PolygraphMetric
 
 __all__ = [
     # Distance helpers
@@ -61,4 +62,6 @@ __all__ = [
     "compute_cooccurrence_matrix",
     "kl_divergence",
     "MOLECULAR_MOTIFS",
+    # PolyGraph metrics
+    "PolygraphMetric",
 ]
