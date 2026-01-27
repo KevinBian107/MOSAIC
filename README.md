@@ -48,7 +48,6 @@ python scripts/train.py \
 
 ```bash
 python scripts/test.py
-python scripts/compare_results.py
 ```
 
 ### Realistic Generation
@@ -69,11 +68,11 @@ python scripts/realistic_gen.py \
     generation.num_samples=500
 ```
 
-This produces:
-- **Generated SMILES**: Saved to `generated_smiles.txt`
-- **Statistical analysis**: Substitution patterns (mono/di/tri), ortho/meta/para ratios, functional group frequencies
-- **Distribution metrics**: Total Variation distance and KL divergence vs training data
-- **Molecule visualizations**: Side-by-side comparison of training vs generated molecular structures
+### Table Comparison
+
+```bash
+python scripts/compare_results.py
+```
 
 ### Demo
 

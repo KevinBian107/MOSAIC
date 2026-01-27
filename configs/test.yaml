@@ -2,7 +2,7 @@
 
 defaults:
   - experiment: moses
-  - tokenizer: hdtc    # Options: sent, hsent, hdt, hdtc
+  - tokenizer: hdt    # Options: sent, hsent, hdt, hdtc
   - _self_  # Must be last to override experiment defaults
 
 # Random seed
@@ -10,7 +10,11 @@ seed: 42
 
 # Model configuration
 model:
-  checkpoint_path: outputs/train/moses_hdtc_n100000_20260126-204311/best.ckpt  # Required: path to model checkpoint
+  checkpoint_path: outputs/train/moses_hdt_n1000000_20260125-233951/best.ckpt
+  # outputs/train/moses_hdtc_n100000_20260126-204311/best.ckpt
+  # outputs/train/moses_hdt_n1000000_20260125-233951/best.ckpt
+  # outputs/train/moses_hsent_n50000_20260122-093526/best.ckpt
+  # outputs/train/moses_sent_n1000000_20260123-140906/best.ckpt
   is_autograph: false  # Set to true for AutoGraph checkpoints (auto-detected if false)
 
 # Data configuration
