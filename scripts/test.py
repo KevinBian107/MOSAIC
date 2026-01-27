@@ -29,7 +29,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Suppress RDKit error messages for invalid SMILES parsing
 from rdkit import RDLogger
-RDLogger.DisableLog('rdApp.*')
+
+RDLogger.DisableLog("rdApp.*")
 
 from src.data.datamodule import MolecularDataModule
 from src.data.molecular import graph_to_smiles, smiles_to_graph
@@ -37,7 +38,7 @@ from src.evaluation.molecular_metrics import MolecularMetrics, compute_fcd
 from src.evaluation.motif_distribution import MotifDistributionMetric
 from src.evaluation.polygraph_metric import PolygraphMetric
 from src.models.transformer import GraphGeneratorModule
-from src.tokenizers import HDTTokenizer, HSENTTokenizer, SENTTokenizer
+from src.tokenizers import HDTCTokenizer, HDTTokenizer, HSENTTokenizer, SENTTokenizer
 from src.visualization import visualize_generated_molecules
 
 # Import AutoGraph conversion functions for handling AutoGraph checkpoints
@@ -46,6 +47,7 @@ try:
     if str(autograph_path) not in sys.path:
         sys.path.insert(0, str(autograph_path))
     from autograph.evaluation.molsets import build_molecule, mol2smiles
+
     AUTOGRAPH_AVAILABLE = True
 except ImportError:
     AUTOGRAPH_AVAILABLE = False
@@ -161,6 +163,19 @@ def main(cfg: DictConfig) -> None:
             labeled_graph=cfg.tokenizer.get("labeled_graph", True),
             seed=cfg.seed,
         )
+    elif tokenizer_type == "hdtc":
+        log.info("Using HDTC (compositional) tokenizer with functional hierarchy")
+        log.info(f"  node_order: {cfg.tokenizer.get('node_order', 'BFS')}")
+        log.info(f"  include_rings: {cfg.tokenizer.get('include_rings', True)}")
+
+        tokenizer = HDTCTokenizer(
+            max_length=cfg.tokenizer.max_length,
+            truncation_length=cfg.tokenizer.truncation_length,
+            node_order=cfg.tokenizer.get("node_order", "BFS"),
+            include_rings=cfg.tokenizer.get("include_rings", True),
+            labeled_graph=cfg.tokenizer.get("labeled_graph", True),
+            seed=cfg.seed,
+        )
     else:
         log.info("Using flat SENT tokenizer")
         tokenizer = SENTTokenizer(
@@ -211,12 +226,19 @@ def main(cfg: DictConfig) -> None:
                 from src.data.molecular import NUM_ATOM_TYPES, NUM_BOND_TYPES
 
                 # Get idx_offset (handle both lowercase and uppercase)
-                idx_offset = getattr(tokenizer, 'idx_offset', None) or getattr(tokenizer, 'IDX_OFFSET', 6)
+                idx_offset = getattr(tokenizer, "idx_offset", None) or getattr(
+                    tokenizer, "IDX_OFFSET", 6
+                )
 
                 # Try labeled first
-                checkpoint_max_num_nodes_labeled = checkpoint_vocab_size - idx_offset - NUM_ATOM_TYPES - NUM_BOND_TYPES
+                checkpoint_max_num_nodes_labeled = (
+                    checkpoint_vocab_size - idx_offset - NUM_ATOM_TYPES - NUM_BOND_TYPES
+                )
 
-                if checkpoint_max_num_nodes_labeled > 0 and checkpoint_max_num_nodes_labeled <= 100:
+                if (
+                    checkpoint_max_num_nodes_labeled > 0
+                    and checkpoint_max_num_nodes_labeled <= 100
+                ):
                     # This is likely a labeled graph model
                     log.info("Detected labeled checkpoint")
                     tokenizer.labeled_graph = True
@@ -225,11 +247,15 @@ def main(cfg: DictConfig) -> None:
                         num_node_types=NUM_ATOM_TYPES,
                         num_edge_types=NUM_BOND_TYPES,
                     )
-                    log.info(f"Set tokenizer: max_num_nodes={checkpoint_max_num_nodes_labeled}, labeled_graph=True")
+                    log.info(
+                        f"Set tokenizer: max_num_nodes={checkpoint_max_num_nodes_labeled}, labeled_graph=True"
+                    )
                 else:
                     # Unlabeled model
                     checkpoint_max_num_nodes = checkpoint_vocab_size - idx_offset
-                    log.info(f"Setting tokenizer max_num_nodes to {checkpoint_max_num_nodes}")
+                    log.info(
+                        f"Setting tokenizer max_num_nodes to {checkpoint_max_num_nodes}"
+                    )
                     tokenizer.set_num_nodes(checkpoint_max_num_nodes)
 
     if use_autograph:
@@ -273,7 +299,7 @@ def main(cfg: DictConfig) -> None:
     if use_autograph:
         # AutoGraph models - use AutoGraph's conversion functions
         # MOSES atom decoder (from AutoGraph's MOSESDataset): ['C', 'N', 'S', 'O', 'F', 'Cl', 'Br', 'H']
-        atom_decoder = ['C', 'N', 'S', 'O', 'F', 'Cl', 'Br', 'H']
+        atom_decoder = ["C", "N", "S", "O", "F", "Cl", "Br", "H"]
         log.info("Converting AutoGraph graphs to SMILES...")
         for g in tqdm(generated_graphs, desc="Converting to SMILES"):
             smiles = autograph_graph_to_smiles(g, atom_decoder)
@@ -286,7 +312,9 @@ def main(cfg: DictConfig) -> None:
             generated_smiles.append(smiles if smiles else INVALID_SMILES_SENTINEL)
 
     valid_count = sum(1 for s in generated_smiles if s != INVALID_SMILES_SENTINEL)
-    log.info(f"Successfully converted {valid_count}/{len(generated_smiles)} graphs to SMILES")
+    log.info(
+        f"Successfully converted {valid_count}/{len(generated_smiles)} graphs to SMILES"
+    )
 
     # Visualization (if enabled)
     if cfg.get("visualization", {}).get("enabled", False):
@@ -357,7 +385,9 @@ def main(cfg: DictConfig) -> None:
             max_ref_size = cfg.metrics.get("pgd_reference_size", 10000)
             reference_smiles = datamodule.train_smiles[:max_ref_size]
 
-            log.info(f"Converting {len(reference_smiles)} reference SMILES to graphs...")
+            log.info(
+                f"Converting {len(reference_smiles)} reference SMILES to graphs..."
+            )
             reference_graphs = []
             for smi in tqdm(reference_smiles, desc="Converting reference to graphs"):
                 try:
@@ -379,7 +409,9 @@ def main(cfg: DictConfig) -> None:
 
                 if pgd_score is not None:
                     log.info(f"  pgd                 : {pgd_score:.6f}")
-                    log.info(f"  (Lower is better: <0.1 excellent, <0.3 good, <0.5 moderate)")
+                    log.info(
+                        "  (Lower is better: <0.1 excellent, <0.3 good, <0.5 moderate)"
+                    )
                 else:
                     log.info("  PGD computation returned None")
             else:

@@ -47,7 +47,8 @@ python scripts/train.py \
 ### Evaluation
 
 ```bash
-python scripts/test.py model.checkpoint_path=outputs/model.ckpt
+python scripts/test.py
+python scripts/compare_results.py
 ```
 
 ### Realistic Generation

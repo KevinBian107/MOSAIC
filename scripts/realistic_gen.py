@@ -49,7 +49,12 @@ from src.realistic_gen import (  # noqa: E402
     generate_molecules,
     plot_combined_analysis,
 )
-from src.tokenizers import HDTTokenizer, SENTTokenizer  # noqa: E402
+from src.tokenizers import (  # noqa: E402
+    HDTCTokenizer,
+    HDTTokenizer,
+    HSENTTokenizer,
+    SENTTokenizer,
+)
 
 log = logging.getLogger(__name__)
 
@@ -75,12 +80,46 @@ def get_tokenizer(cfg: DictConfig):
             labeled_graph=cfg.tokenizer.get("labeled_graph", True),
             seed=cfg.seed,
         )
+    elif tokenizer_type == "hsent":
+        motif_aware = cfg.tokenizer.get("motif_aware", False)
+        if motif_aware:
+            log.info("Using hierarchical H-SENT tokenizer with motif-aware coarsening")
+            log.info(f"  motif_alpha: {cfg.tokenizer.get('motif_alpha', 1.0)}")
+        else:
+            log.info("Using hierarchical H-SENT tokenizer with spectral coarsening")
+        log.info(f"  node_order: {cfg.tokenizer.get('node_order', 'BFS')}")
+        log.info(f"  min_community_size: {cfg.tokenizer.get('min_community_size', 4)}")
+
+        tokenizer = HSENTTokenizer(
+            max_length=cfg.tokenizer.max_length,
+            truncation_length=cfg.tokenizer.truncation_length,
+            node_order=cfg.tokenizer.get("node_order", "BFS"),
+            min_community_size=cfg.tokenizer.get("min_community_size", 4),
+            motif_aware=motif_aware,
+            motif_alpha=cfg.tokenizer.get("motif_alpha", 1.0),
+            normalize_by_motif_size=cfg.tokenizer.get("normalize_by_motif_size", False),
+            labeled_graph=cfg.tokenizer.get("labeled_graph", True),
+            seed=cfg.seed,
+        )
     elif tokenizer_type == "sent":
         log.info("Using SENT tokenizer")
         tokenizer = SENTTokenizer(
             max_length=cfg.tokenizer.max_length,
             truncation_length=cfg.tokenizer.truncation_length,
             undirected=cfg.tokenizer.get("undirected", True),
+            labeled_graph=cfg.tokenizer.get("labeled_graph", True),
+            seed=cfg.seed,
+        )
+    elif tokenizer_type == "hdtc":
+        log.info("Using HDTC (compositional) tokenizer with functional hierarchy")
+        log.info(f"  node_order: {cfg.tokenizer.get('node_order', 'BFS')}")
+        log.info(f"  include_rings: {cfg.tokenizer.get('include_rings', True)}")
+
+        tokenizer = HDTCTokenizer(
+            max_length=cfg.tokenizer.max_length,
+            truncation_length=cfg.tokenizer.truncation_length,
+            node_order=cfg.tokenizer.get("node_order", "BFS"),
+            include_rings=cfg.tokenizer.get("include_rings", True),
             labeled_graph=cfg.tokenizer.get("labeled_graph", True),
             seed=cfg.seed,
         )
@@ -299,9 +338,7 @@ def main(cfg: DictConfig) -> None:
         train_pct = (
             100 * train_sub["disubstitution_pattern"].get(pattern, 0) / train_di_total
         )
-        gen_pct = (
-            100 * gen_sub["disubstitution_pattern"].get(pattern, 0) / gen_di_total
-        )
+        gen_pct = 100 * gen_sub["disubstitution_pattern"].get(pattern, 0) / gen_di_total
         log.info(f"  {pattern:<15} {train_pct:>11.1f}% {gen_pct:>11.1f}%")
 
     # Analyze functional groups
@@ -383,7 +420,9 @@ def main(cfg: DictConfig) -> None:
         "num_valid": len(generated_smiles),
         "validity_rate": len(generated_smiles) / len(generated_graphs),
         "num_with_motif": len(gen_filtered),
-        "motif_rate": len(gen_filtered) / len(generated_smiles) if generated_smiles else 0,
+        "motif_rate": len(gen_filtered) / len(generated_smiles)
+        if generated_smiles
+        else 0,
         "generation_time": gen_time,
         "substitution_tv": sub_metrics["total_variation"],
         "substitution_kl": sub_metrics["kl_divergence"],
