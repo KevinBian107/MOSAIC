@@ -13,6 +13,7 @@ from src.evaluation.metrics import (
     spectral_histogram,
     clustering_histogram,
 )
+from src.evaluation.polygraph_metric import PolygraphMetric
 from tests.fixtures.graphs import sample_graph_list, erdos_renyi_graph
 
 
@@ -111,3 +112,98 @@ class TestValidityMetrics:
 
         result = compute_validity_metrics(graphs, [])
         assert result["uniqueness"] == 1.0
+
+
+class TestPolygraphMetric:
+    """Tests for PolygraphMetric class."""
+
+    def test_init(self, sample_graph_list: list[Data]) -> None:
+        """Test PolygraphMetric initialization."""
+        try:
+            metric = PolygraphMetric(sample_graph_list)
+            assert len(metric.reference_graphs) == len(sample_graph_list)
+            assert metric.max_reference_size == 10000
+        except ImportError:
+            pytest.skip("polygraph-benchmark not installed")
+
+    def test_init_with_custom_size(self, sample_graph_list: list[Data]) -> None:
+        """Test initialization with custom max_reference_size."""
+        try:
+            metric = PolygraphMetric(sample_graph_list, max_reference_size=100)
+            assert metric.max_reference_size == 100
+        except ImportError:
+            pytest.skip("polygraph-benchmark not installed")
+
+    def test_compute_returns_dict(self, sample_graph_list: list[Data]) -> None:
+        """Test compute returns dictionary with pgd key."""
+        try:
+            metric = PolygraphMetric(sample_graph_list)
+            result = metric.compute(sample_graph_list)
+
+            assert isinstance(result, dict)
+            assert "pgd" in result
+            assert isinstance(result["pgd"], float)
+        except ImportError:
+            pytest.skip("polygraph-benchmark not installed")
+
+    def test_pgd_bounded(self, sample_graph_list: list[Data]) -> None:
+        """Test PGD score is bounded in [0, 1]."""
+        try:
+            metric = PolygraphMetric(sample_graph_list)
+            result = metric.compute(sample_graph_list)
+
+            assert 0.0 <= result["pgd"] <= 1.0
+        except ImportError:
+            pytest.skip("polygraph-benchmark not installed")
+
+    def test_self_reference_low_pgd(self, sample_graph_list: list[Data]) -> None:
+        """Test PGD is low when comparing distribution to itself."""
+        try:
+            metric = PolygraphMetric(sample_graph_list)
+            result = metric.compute(sample_graph_list)
+
+            # When comparing to self, PGD should be relatively low
+            # (classifier can't distinguish well)
+            assert result["pgd"] < 0.5
+        except ImportError:
+            pytest.skip("polygraph-benchmark not installed")
+
+    def test_callable_interface(self, sample_graph_list: list[Data]) -> None:
+        """Test __call__ works same as compute."""
+        try:
+            metric = PolygraphMetric(sample_graph_list)
+            result1 = metric.compute(sample_graph_list)
+            result2 = metric(sample_graph_list)
+
+            assert result1.keys() == result2.keys()
+            assert result1["pgd"] == result2["pgd"]
+        except ImportError:
+            pytest.skip("polygraph-benchmark not installed")
+
+    def test_empty_generated(self, sample_graph_list: list[Data]) -> None:
+        """Test handling of empty generated graph list."""
+        try:
+            metric = PolygraphMetric(sample_graph_list)
+            result = metric.compute([])
+
+            # Should return worst score for no valid graphs
+            assert result["pgd"] == 1.0
+        except ImportError:
+            pytest.skip("polygraph-benchmark not installed")
+
+    def test_networkx_input(self) -> None:
+        """Test PolygraphMetric accepts NetworkX graphs."""
+        try:
+            import networkx as nx
+
+            # Create reference graphs as NetworkX
+            ref_graphs = [nx.erdos_renyi_graph(20, 0.3, seed=i) for i in range(3)]
+
+            metric = PolygraphMetric(ref_graphs)
+            result = metric.compute(ref_graphs)
+
+            assert "pgd" in result
+            assert 0.0 <= result["pgd"] <= 1.0
+        except ImportError:
+            pytest.skip("polygraph-benchmark or networkx not installed")
+
