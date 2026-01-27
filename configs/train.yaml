@@ -1,9 +1,9 @@
 # @package _global_
 
 defaults:
-  - _self_
   - experiment: moses
-  - tokenizer: hdt    # Options: sent, hsent, hdt
+  - tokenizer: hdtc    # Options: sent, hsent, hdt, hdtc
+  - _self_  # Applied last so train.yaml settings override experiment defaults
 
 # Random seed
 seed: 42
@@ -24,7 +24,7 @@ data:
   dataset_name: moses  # 'moses' or 'qm9'
   batch_size: 32
   num_workers: 8  # Must be 0 for SENT tokenizer (Cython multiprocessing issue)
-  num_train: 1000000  # Use null for full dataset
+  num_train: 100000 #1000000  # Use null for full dataset
   num_val: 1000
   num_test: 1000
   include_hydrogens: false

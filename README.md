@@ -32,7 +32,7 @@ conda activate mosaic
 python scripts/train.py
 
 # Train with hierarchical H-SENT tokenization
-python scripts/train.py tokenizer.type=hsent
+python scripts/train.py tokenizer.type=hdtc
 
 # Train on QM9 dataset
 python scripts/train.py data.dataset_name=qm9

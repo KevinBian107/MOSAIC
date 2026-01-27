@@ -230,12 +230,13 @@ class MolecularDataModule(pl.LightningDataModule):
 
         # Add tokenizer-specific config
         if hasattr(self.tokenizer, "node_order"):
-            config.update(
-                {
-                    "node_order": self.tokenizer.node_order,
-                    "min_community_size": self.tokenizer.min_community_size,
-                }
-            )
+            config["node_order"] = self.tokenizer.node_order
+
+        if hasattr(self.tokenizer, "min_community_size"):
+            config["min_community_size"] = self.tokenizer.min_community_size
+
+        if hasattr(self.tokenizer, "include_rings"):
+            config["include_rings"] = self.tokenizer.include_rings
 
         if hasattr(self.tokenizer, "motif_aware"):
             config.update(
