@@ -10,7 +10,7 @@ Metrics are organized into three categories:
 
 | Category | Purpose | Key Metrics |
 |----------|---------|-------------|
-| **Graph Metrics** | Structural similarity | Degree, Spectral, Clustering MMD |
+| **Graph Metrics** | Structural similarity | Degree, Spectral, Clustering MMD, PGD |
 | **Molecular Metrics** | Chemical validity & diversity | Validity, Uniqueness, Novelty, FCD, SNN |
 | **Motif Metrics** | Substructure preservation | Motif distribution, Ring systems, BRICS |
 
@@ -47,6 +47,41 @@ Eigenvalues are binned into histograms and compared via MMD.
 Compares distributions of local clustering coefficients.
 
 $$C_v = \frac{2 \cdot |\{(u,w) : u,w \in N(v), (u,w) \in E\}|}{|N(v)| \cdot (|N(v)| - 1)}$$
+
+### PolyGraph Discrepancy (PGD)
+
+**Type:** Classifier-based graph distribution discrepancy
+
+**Range:** [0, 1] (lower is better)
+
+A classifier-based metric that measures the quality of generated graphs by training a binary classifier to distinguish between reference and generated distributions. The classifier's ability to discriminate serves as a measure of distribution mismatch.
+
+**Advantages over MMD:**
+- Bounded range [0, 1] for interpretability
+- No hyperparameter tuning required (MMD needs kernel bandwidth)
+- Captures complex distributional differences through learned representations
+- Single unified score across multiple graph properties
+
+**Formulation:**
+The metric trains a classifier $f: \mathcal{G} \to \{0, 1\}$ to distinguish between:
+- Real graphs $G_r \sim P_{ref}$ (labeled 0)
+- Generated graphs $G_g \sim P_{gen}$ (labeled 1)
+
+$$\text{PGD} = \text{accuracy}(f) - 0.5$$
+
+Normalized to [0, 1] where:
+- PGD ≈ 0: Generator produces distribution indistinguishable from reference (optimal)
+- PGD ≈ 1: Distributions are easily distinguishable (poor quality)
+
+**Interpretation:**
+- PGD < 0.1: Excellent generation quality (indistinguishable from reference)
+- PGD < 0.3: Good generation quality
+- PGD < 0.5: Moderate quality (noticeable differences)
+- PGD ≥ 0.5: Poor quality (easily distinguishable)
+
+**Reference:**
+- Paper: https://arxiv.org/abs/2510.06122
+- GitHub: https://github.com/BorgwardtLab/polygraph-benchmark
 
 ---
 
@@ -266,6 +301,26 @@ summary = evaluator.get_cooccurrence_summary(generated_smiles, top_k=10)
 # {'top_pairs': [('benzene', 'hydroxyl', 0.85), ...]}
 ```
 
+### PolygraphMetric
+
+```python
+from src.evaluation import PolygraphMetric
+from src.data.molecular import smiles_to_graph
+
+# Convert SMILES to graph objects
+reference_graphs = [smiles_to_graph(s) for s in reference_smiles[:10000]]
+
+evaluator = PolygraphMetric(reference_graphs, max_reference_size=10000)
+results = evaluator.compute(generated_graphs)
+# {'pgd': 0.15}
+
+# Interpretation:
+# pgd < 0.1: Excellent
+# pgd < 0.3: Good (our result)
+# pgd < 0.5: Moderate
+# pgd >= 0.5: Poor
+```
+
 ---
 
 ## Metric Summary Table
@@ -283,6 +338,7 @@ summary = evaluator.get_cooccurrence_summary(generated_smiles, top_k=10)
 | Degree MMD | [0, ∞) | 0.0 | Degree distribution |
 | Spectral MMD | [0, ∞) | 0.0 | Spectral properties |
 | Clustering MMD | [0, ∞) | 0.0 | Local clustering |
+| **PGD** | **[0, 1]** | **0.0** | **Classifier-based graph quality** |
 | Motif MMD | [0, ∞) | 0.0 | Motif preservation |
 | Motif Hist Mean | [0, ∞) | 0.0 | Per-motif count distributions |
 | Motif Hist Max | [0, ∞) | 0.0 | Worst motif distribution |
@@ -296,3 +352,4 @@ summary = evaluator.get_cooccurrence_summary(generated_smiles, top_k=10)
 2. **FCD**: Fréchet ChemNet Distance - Preuer et al. (2018)
 3. **MMD**: Maximum Mean Discrepancy - Gretton et al. (2012)
 4. **BRICS**: Breaking of Retrosynthetically Interesting Chemical Substructures - Degen et al. (2008)
+5. **PolyGraph**: A Classifier-Based Metric for Graph Generation - https://arxiv.org/abs/2510.06122 (2024)

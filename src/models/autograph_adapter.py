@@ -64,7 +64,8 @@ class AutoGraphAdapter(pl.LightningModule):
 
         # Load AutoGraph model
         self.autograph_model = SequenceModel.load_from_checkpoint(
-            autograph_checkpoint_path
+            autograph_checkpoint_path,
+            weights_only=False,
         )
         self.autograph_model.eval()
 

@@ -34,7 +34,10 @@ sampling:
 
 # Metrics configuration
 metrics:
+  compute_motif: true  # Compute motif distribution metrics (MSC, MFD)
   compute_fcd: true  # Requires moses or fcd package
+  compute_pgd: true  # Requires polygraph-benchmark package
+  pgd_reference_size: 10000  # Max number of reference molecules for PGD (memory constraint)
 
 # Visualization configuration
 visualization:

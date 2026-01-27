@@ -23,6 +23,7 @@ import hydra
 import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig, OmegaConf
+from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -31,9 +32,10 @@ from rdkit import RDLogger
 RDLogger.DisableLog('rdApp.*')
 
 from src.data.datamodule import MolecularDataModule
-from src.data.molecular import graph_to_smiles
+from src.data.molecular import graph_to_smiles, smiles_to_graph
 from src.evaluation.molecular_metrics import MolecularMetrics, compute_fcd
 from src.evaluation.motif_distribution import MotifDistributionMetric
+from src.evaluation.polygraph_metric import PolygraphMetric
 from src.models.transformer import GraphGeneratorModule
 from src.tokenizers import HDTTokenizer, HSENTTokenizer, SENTTokenizer
 from src.visualization import visualize_generated_molecules
@@ -193,7 +195,9 @@ def main(cfg: DictConfig) -> None:
     # For MOSAIC checkpoints, extract vocab size and update tokenizer
     if not use_autograph:
         log.info(f"Extracting vocab size from checkpoint: {cfg.model.checkpoint_path}")
-        checkpoint = torch.load(cfg.model.checkpoint_path, map_location="cpu")
+        checkpoint = torch.load(
+            cfg.model.checkpoint_path, map_location="cpu", weights_only=False
+        )
         if "state_dict" in checkpoint:
             # Extract vocab size from embedding weight shape
             wte_key = "model.model.transformer.wte.weight"
@@ -246,6 +250,7 @@ def main(cfg: DictConfig) -> None:
         model = GraphGeneratorModule.load_from_checkpoint(
             cfg.model.checkpoint_path,
             tokenizer=tokenizer,
+            weights_only=False,
         )
     model.eval()
 
@@ -270,13 +275,13 @@ def main(cfg: DictConfig) -> None:
         # MOSES atom decoder (from AutoGraph's MOSESDataset): ['C', 'N', 'S', 'O', 'F', 'Cl', 'Br', 'H']
         atom_decoder = ['C', 'N', 'S', 'O', 'F', 'Cl', 'Br', 'H']
         log.info("Converting AutoGraph graphs to SMILES...")
-        for g in generated_graphs:
+        for g in tqdm(generated_graphs, desc="Converting to SMILES"):
             smiles = autograph_graph_to_smiles(g, atom_decoder)
             generated_smiles.append(smiles if smiles else INVALID_SMILES_SENTINEL)
     else:
         # MOSAIC models - use MOSAIC's conversion function
         log.info("Converting MOSAIC graphs to SMILES...")
-        for g in generated_graphs:
+        for g in tqdm(generated_graphs, desc="Converting to SMILES"):
             smiles = graph_to_smiles(g)
             generated_smiles.append(smiles if smiles else INVALID_SMILES_SENTINEL)
 
@@ -310,17 +315,86 @@ def main(cfg: DictConfig) -> None:
     for name, value in mol_results.items():
         log.info(f"  {name:20s}: {value:.6f}")
 
+    # Motif Distribution Metrics
     log.info("\n" + "=" * 50)
     log.info("MOTIF DISTRIBUTION METRICS")
     log.info("=" * 50)
 
-    motif_metrics = MotifDistributionMetric(
-        reference_smiles=datamodule.train_smiles,
-    )
-    motif_results = motif_metrics(generated_smiles)
+    motif_results = {}
+    motif_summary = {}
+    if cfg.metrics.get("compute_motif", True):  # Default enabled
+        try:
+            motif_metrics = MotifDistributionMetric(
+                reference_smiles=datamodule.train_smiles,
+            )
+            motif_results = motif_metrics(generated_smiles)
 
-    for name, value in motif_results.items():
-        log.info(f"  {name:20s}: {value:.6f}")
+            for name, value in motif_results.items():
+                log.info(f"  {name:20s}: {value:.6f}")
+
+            # Get motif summary for top 100 molecules
+            motif_summary = motif_metrics.get_motif_summary(generated_smiles[:100])
+
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            log.error(f"  Motif metrics computation failed: {e}")
+            motif_results = {}
+            motif_summary = {}
+    else:
+        log.info("  [Motif metrics computation disabled in config]")
+
+    # PolyGraph Discrepancy Metric
+    log.info("\n" + "=" * 50)
+    log.info("POLYGRAPH DISCREPANCY METRIC")
+    log.info("=" * 50)
+
+    pgd_score = None
+    if cfg.metrics.get("compute_pgd", True):  # Default enabled
+        try:
+            # Convert reference SMILES to graphs for PGD
+            # Limit to max_reference_size for memory constraints
+            max_ref_size = cfg.metrics.get("pgd_reference_size", 10000)
+            reference_smiles = datamodule.train_smiles[:max_ref_size]
+
+            log.info(f"Converting {len(reference_smiles)} reference SMILES to graphs...")
+            reference_graphs = []
+            for smi in tqdm(reference_smiles, desc="Converting reference to graphs"):
+                try:
+                    g = smiles_to_graph(smi)
+                    if g is not None and g.num_nodes > 0:
+                        reference_graphs.append(g)
+                except Exception:
+                    continue  # Skip invalid SMILES
+
+            log.info(f"Successfully converted {len(reference_graphs)} reference graphs")
+
+            if len(reference_graphs) > 0:
+                polygraph_metric = PolygraphMetric(
+                    reference_graphs=reference_graphs,
+                    max_reference_size=max_ref_size,
+                )
+                polygraph_results = polygraph_metric(generated_graphs)
+                pgd_score = polygraph_results.get("pgd")
+
+                if pgd_score is not None:
+                    log.info(f"  pgd                 : {pgd_score:.6f}")
+                    log.info(f"  (Lower is better: <0.1 excellent, <0.3 good, <0.5 moderate)")
+                else:
+                    log.info("  PGD computation returned None")
+            else:
+                log.info("  No valid reference graphs - skipping PGD")
+        except ImportError:
+            log.info("  PolyGraph not installed - skipping PGD metric")
+            log.info("  Install with: pip install polygraph-benchmark")
+            pgd_score = None
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            log.error(f"  PGD computation failed: {e}")
+            pgd_score = None
+    else:
+        log.info("  [PGD computation disabled in config]")
 
     # Try to compute FCD if available
     log.info("\n" + "=" * 50)
@@ -328,44 +402,51 @@ def main(cfg: DictConfig) -> None:
     log.info("=" * 50)
 
     fcd_score = None
-    try:
-        fcd_score = compute_fcd(generated_smiles, datamodule.test_smiles)
-        if not (fcd_score != fcd_score):  # Check for NaN
-            log.info(f"  FCD: {fcd_score:.6f}")
-        else:
-            log.info("  FCD: Not available (install moses or fcd package)")
+    if cfg.metrics.get("compute_fcd", True):  # Default enabled
+        try:
+            fcd_score = compute_fcd(generated_smiles, datamodule.test_smiles)
+            if not (fcd_score != fcd_score):  # Check for NaN
+                log.info(f"  FCD: {fcd_score:.6f}")
+            else:
+                log.info("  FCD: Not available (install moses or fcd package)")
+                fcd_score = None
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            log.error(f"  FCD: Failed with error: {e}")
+            log.info("  FCD: Skipping due to error")
             fcd_score = None
-    except KeyboardInterrupt:
-        raise
-    except Exception as e:
-        log.error(f"  FCD: Failed with error: {e}")
-        log.info("  FCD: Skipping due to error")
-        fcd_score = None
+    else:
+        log.info("  [FCD computation disabled in config]")
 
-    # Get motif summary for reference
-    log.info("\n" + "=" * 50)
-    log.info("MOTIF SUMMARY (Top 10)")
-    log.info("=" * 50)
+    # Get motif summary for reference (if motif metrics were computed)
+    if cfg.metrics.get("compute_motif", True) and len(motif_summary) > 0:
+        log.info("\n" + "=" * 50)
+        log.info("MOTIF SUMMARY (Top 10)")
+        log.info("=" * 50)
 
-    summary = motif_metrics.get_motif_summary(generated_smiles[:100])
-    log.info("\nSMARTS Motifs found:")
-    for name, count in list(summary["smarts_motifs"].items())[:10]:
-        log.info(f"  {name}: {count}")
+        log.info("\nSMARTS Motifs found:")
+        for name, count in list(motif_summary["smarts_motifs"].items())[:10]:
+            log.info(f"  {name}: {count}")
 
-    log.info("\nFunctional Groups found:")
-    for name, count in list(summary["functional_groups"].items())[:10]:
-        log.info(f"  {name}: {count}")
+        log.info("\nFunctional Groups found:")
+        for name, count in list(motif_summary["functional_groups"].items())[:10]:
+            log.info(f"  {name}: {count}")
 
-    # Compile all results including motif summary
+    # Compile all results
     all_results = {
         **mol_results,
         **motif_results,
+        "pgd": pgd_score,
         "fcd": fcd_score,
         "generation_time": gen_time,
         "num_samples": num_samples,
         "num_valid_smiles": valid_count,
-        "motif_summary": summary,  # Add detailed motif counts
     }
+
+    # Add motif summary only if computed
+    if len(motif_summary) > 0:
+        all_results["motif_summary"] = motif_summary
 
     # Save results
     output_path = Path(cfg.logs.path)
