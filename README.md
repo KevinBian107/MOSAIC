@@ -78,7 +78,7 @@ This produces:
 
 ```bash
 # Generation Demo
-python scripts/generation_demo.py
+python scripts/visualization/generation_demo.py
 ```
 
 ### Running Tests
