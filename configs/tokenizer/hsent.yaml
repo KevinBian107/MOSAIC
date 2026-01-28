@@ -26,7 +26,7 @@ min_community_size: 4       # Minimum nodes before stopping recursion
 #   - spectral: Standard spectral clustering (default)
 #   - motif_aware_spectral: Spectral clustering with motif preservation
 #   - motif_community: Direct motif-based community assignment (not yet implemented)
-coarsening_strategy: motif_community
+coarsening_strategy: spectral
 
 # Motif-aware coarsening settings (only used with motif-aware strategies)
 motif_alpha: 1.0            # Weight for motif affinity (higher = stronger preservation)

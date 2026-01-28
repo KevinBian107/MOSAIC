@@ -10,12 +10,13 @@ Usage:
     python scripts/compare_results.py
     python scripts/compare_results.py --filter "moses"
     python scripts/compare_results.py --output comparison.png
-    python scripts/compare_results.py --all  # Show all runs, not just best per tokenizer
+    python scripts/compare_results.py --all  # Show all runs, not just best per tokenizer+coarsening
     python scripts/compare_results.py --test-only  # Exclude realistic gen metrics
 """
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -23,8 +24,70 @@ import matplotlib.pyplot as plt
 import yaml
 
 
-# Default metrics to display (in order)
-# Test metrics
+# Default metrics to display (in order), organized by section
+# Each section is a tuple of (section_name, list_of_metrics)
+# Use None as section_name for metrics without a section header
+METRIC_SECTIONS = [
+    (
+        "Training Info",
+        [
+            "train_data_size",
+            "train_max_steps",
+            "coarsening_strategy",
+            "generation_time",
+        ],
+    ),
+    (
+        "Core Generation Quality",
+        [
+            "validity",
+            "uniqueness",
+            "novelty",
+        ],
+    ),
+    (
+        "Distribution Matching",
+        [
+            "pgd",
+            "fcd",
+            "snn",
+        ],
+    ),
+    (
+        "Structural Similarity",
+        [
+            "frag_similarity",
+            "scaff_similarity",
+            "internal_diversity",
+        ],
+    ),
+    (
+        "Motif MMD",
+        [
+            "motif_fg_mmd",
+            "motif_smarts_mmd",
+            "motif_ring_mmd",
+            "motif_brics_mmd",
+        ],
+    ),
+    (
+        "Realistic Generation",
+        [
+            "validity_rate",
+            "motif_rate",
+            "substitution_tv",
+            "substitution_kl",
+            "functional_group_tv",
+            "functional_group_kl",
+        ],
+    ),
+]
+
+# Flat list of all metrics (for backward compatibility)
+TRAINING_INFO_METRICS = ["train_data_size", "train_max_steps", "coarsening_strategy"]
+
+# Categorical metrics that should not have best/second-best highlighting
+CATEGORICAL_METRICS = {"coarsening_strategy"}
 DEFAULT_TEST_METRICS = [
     "validity",
     "uniqueness",
@@ -41,8 +104,6 @@ DEFAULT_TEST_METRICS = [
     "motif_brics_mmd",
     "generation_time",
 ]
-
-# Realistic generation metrics
 DEFAULT_REALISTIC_METRICS = [
     "validity_rate",
     "motif_rate",
@@ -53,10 +114,16 @@ DEFAULT_REALISTIC_METRICS = [
 ]
 
 # Combined default metrics
-DEFAULT_METRICS = DEFAULT_TEST_METRICS + DEFAULT_REALISTIC_METRICS
+DEFAULT_METRICS = (
+    TRAINING_INFO_METRICS + DEFAULT_TEST_METRICS + DEFAULT_REALISTIC_METRICS
+)
 
 # Metrics where lower is better (for highlighting)
 LOWER_IS_BETTER = {
+    # Training info (smaller/more efficient is better)
+    "train_data_size",
+    "train_max_steps",
+    # Test metrics
     "pgd",
     "fcd",
     "motif_fg_mmd",
@@ -73,6 +140,10 @@ LOWER_IS_BETTER = {
 
 # Display names for metrics
 METRIC_DISPLAY_NAMES = {
+    # Training info
+    "train_data_size": "Train Data Size",
+    "train_max_steps": "Train Steps",
+    "coarsening_strategy": "Coarsening",
     # Test metrics
     "validity": "Validity",
     "uniqueness": "Uniqueness",
@@ -90,7 +161,7 @@ METRIC_DISPLAY_NAMES = {
     "generation_time": "Gen Time (s)",
     "num_valid_smiles": "Valid SMILES",
     # Realistic generation metrics
-    "validity_rate": "Valid Rate (RG)",
+    "validity_rate": "Reality Rate",
     "motif_rate": "Motif Rate",
     "substitution_tv": "Subst TV",
     "substitution_kl": "Subst KL",
@@ -101,9 +172,20 @@ METRIC_DISPLAY_NAMES = {
 # Display names for tokenizers
 TOKENIZER_DISPLAY_NAMES = {
     "sent": "SENT",
-    "hsent": "H-SENT",
-    "hdt": "HDT",
-    "hdtc": "HDTC",
+    "hsent": "H-SENT (ours)",
+    "hdt": "HDT (ours)",
+    "hdtc": "HDTC (ours)",
+}
+
+# Display names for coarsening strategies
+COARSENING_DISPLAY_NAMES = {
+    "N/A": "N/A",
+    "motif": "Motif",
+    "spectral": "Spectral",
+    "motif_aware_spectral": "MAS",
+    "motif_community": "MC",
+    "motif_fg_community": "MFC",
+    "functional_group": "FG",
 }
 
 
@@ -130,6 +212,10 @@ def load_run_data(run_dir: Path) -> dict | None:
         if config_path.exists():
             with open(config_path) as f:
                 config = yaml.safe_load(f)
+
+        # Extract training info and add to results
+        training_info = extract_training_info(config)
+        results.update(training_info)
 
         return {
             "name": run_dir.name,
@@ -180,6 +266,129 @@ def get_checkpoint_key(config: dict) -> str | None:
         # becomes "moses_hdtc_n100000_20260126-204311"
         return Path(checkpoint_path).parent.name
     return None
+
+
+def load_training_config(config: dict) -> dict | None:
+    """Load training config from the checkpoint's training directory.
+
+    Args:
+        config: Test run configuration dictionary.
+
+    Returns:
+        Training configuration dictionary or None if not found.
+    """
+    checkpoint_path = config.get("model", {}).get("checkpoint_path")
+    if not checkpoint_path:
+        return None
+
+    # Get the training directory from checkpoint path
+    train_dir = Path(checkpoint_path).parent
+    train_config_path = train_dir / "config.yaml"
+
+    if not train_config_path.exists():
+        return None
+
+    try:
+        with open(train_config_path) as f:
+            return yaml.safe_load(f)
+    except Exception:
+        return None
+
+
+def get_checkpoint_global_step(checkpoint_path: str | None) -> int | None:
+    """Extract global_step from a PyTorch Lightning checkpoint.
+
+    Args:
+        checkpoint_path: Path to the checkpoint file.
+
+    Returns:
+        The global step count or None if not available.
+    """
+    if not checkpoint_path or not Path(checkpoint_path).exists():
+        return None
+
+    try:
+        import torch
+
+        # Load only the metadata, not the full state dict
+        ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        return ckpt.get("global_step")
+    except Exception:
+        return None
+
+
+def extract_training_info(config: dict) -> dict:
+    """Extract training info (data size, actual steps, coarsening) from config.
+
+    Extracts the actual global_step from the checkpoint file to show how many
+    steps the model was trained for. Falls back to max_steps from config.
+    For data size, attempts to load from training config or parse directory name.
+    For coarsening strategy, extracts from tokenizer config (N/A for SENT).
+
+    Args:
+        config: Test run configuration dictionary.
+
+    Returns:
+        Dictionary with train_data_size, train_max_steps, and coarsening_strategy.
+    """
+    info = {
+        "train_data_size": None,
+        "train_max_steps": None,
+        "coarsening_strategy": None,
+    }
+
+    # Extract coarsening strategy from tokenizer config
+    tokenizer_config = config.get("tokenizer", {})
+    tokenizer_type = tokenizer_config.get("type", "").lower()
+    if tokenizer_type == "sent":
+        # SENT tokenizer doesn't use coarsening
+        info["coarsening_strategy"] = "N/A"
+    elif tokenizer_type == "hdtc":
+        # HDTC uses fixed FunctionalHierarchyBuilder (motif + functional group communities)
+        info["coarsening_strategy"] = "motif_fg_community"
+    else:
+        # For hierarchical tokenizers (hsent, hdt), get the strategy from config
+        coarsening = tokenizer_config.get("coarsening_strategy")
+        if coarsening:
+            info["coarsening_strategy"] = coarsening
+
+    checkpoint_path = config.get("model", {}).get("checkpoint_path")
+    dir_name = Path(checkpoint_path).parent.name if checkpoint_path else None
+
+    # Get actual training steps from checkpoint
+    actual_steps = get_checkpoint_global_step(checkpoint_path)
+    if actual_steps is not None:
+        info["train_max_steps"] = actual_steps
+
+    # Try to load training config for data size (and fallback steps)
+    train_config = load_training_config(config)
+    if train_config:
+        num_train = train_config.get("data", {}).get("num_train")
+
+        # Use config max_steps as fallback if checkpoint didn't have it
+        if info["train_max_steps"] is None:
+            info["train_max_steps"] = train_config.get("trainer", {}).get("max_steps")
+
+        # If num_train is -1 (full dataset), try to parse from directory name
+        if num_train is not None and num_train != -1:
+            info["train_data_size"] = num_train
+        elif dir_name:
+            # Fallback: parse from directory name
+            match = re.search(r"_n(\d+)_", dir_name)
+            if match:
+                info["train_data_size"] = int(match.group(1))
+
+        return info
+
+    # Fallback: parse checkpoint directory name
+    # e.g., "moses_hdtc_n100000_20260126-204311" -> n=100000
+    if dir_name:
+        # Look for pattern like _n100000_ or _n1000000_
+        match = re.search(r"_n(\d+)_", dir_name)
+        if match:
+            info["train_data_size"] = int(match.group(1))
+
+    return info
 
 
 def match_realistic_gen_to_test(
@@ -298,7 +507,13 @@ def format_value(value: float | int | None, metric: str) -> str:
     """
     if value is None:
         return "-"
+    # Use display names for coarsening strategy
+    if metric == "coarsening_strategy" and isinstance(value, str):
+        return COARSENING_DISPLAY_NAMES.get(value, value)
     if isinstance(value, int):
+        # Use thousands separator for large integers (training info metrics)
+        if metric in TRAINING_INFO_METRICS:
+            return f"{value:,}"
         return str(value)
     if isinstance(value, float):
         if abs(value) < 0.001 and value != 0:
@@ -307,42 +522,57 @@ def format_value(value: float | int | None, metric: str) -> str:
     return str(value)
 
 
-def select_best_per_tokenizer(runs: list[dict]) -> list[dict]:
-    """Select the best run for each tokenizer type based on PGD score.
+def select_best_per_tokenizer_and_coarsening(runs: list[dict]) -> list[dict]:
+    """Select the best run for each tokenizer + coarsening strategy combination.
+
+    Groups runs by (tokenizer_type, coarsening_strategy) and selects the best
+    run from each group based on PGD score (lower is better).
 
     Args:
         runs: List of run data dictionaries.
 
     Returns:
-        List with only the best run per tokenizer (lowest PGD).
+        List with only the best run per (tokenizer, coarsening) combination.
     """
-    tokenizer_runs: dict[str, list[dict]] = {}
+    # Group runs by (tokenizer, coarsening_strategy)
+    grouped_runs: dict[tuple[str, str], list[dict]] = {}
 
     for run in runs:
         tokenizer_type = get_run_info(run)["tokenizer"]
-        if tokenizer_type not in tokenizer_runs:
-            tokenizer_runs[tokenizer_type] = []
-        tokenizer_runs[tokenizer_type].append(run)
+        coarsening = run["results"].get("coarsening_strategy", "N/A") or "N/A"
+        key = (tokenizer_type, coarsening)
+        if key not in grouped_runs:
+            grouped_runs[key] = []
+        grouped_runs[key].append(run)
 
     best_runs = []
-    for tokenizer_type, type_runs in tokenizer_runs.items():
+    for (tokenizer_type, coarsening), group_runs in grouped_runs.items():
         # Sort by PGD (lower is better), treating None as infinity
         def get_pgd(r: dict) -> float:
             pgd = r["results"].get("pgd")
             return pgd if pgd is not None else float("inf")
 
-        sorted_runs = sorted(type_runs, key=get_pgd)
+        sorted_runs = sorted(group_runs, key=get_pgd)
         best_runs.append(sorted_runs[0])
 
-    # Sort by tokenizer type for consistent ordering
+    # Sort by tokenizer type, then coarsening strategy for consistent ordering
     tokenizer_order = ["sent", "hsent", "hdt", "hdtc"]
-    best_runs.sort(
-        key=lambda r: (
-            tokenizer_order.index(get_run_info(r)["tokenizer"])
-            if get_run_info(r)["tokenizer"] in tokenizer_order
+    coarsening_order = ["N/A", "motif", "spectral", "functional_group", "motif_fg_community"]
+
+    def sort_key(r: dict) -> tuple[int, int]:
+        tokenizer = get_run_info(r)["tokenizer"]
+        coarsening = r["results"].get("coarsening_strategy", "N/A") or "N/A"
+        tok_idx = (
+            tokenizer_order.index(tokenizer) if tokenizer in tokenizer_order else 999
+        )
+        coarse_idx = (
+            coarsening_order.index(coarsening)
+            if coarsening in coarsening_order
             else 999
         )
-    )
+        return (tok_idx, coarse_idx)
+
+    best_runs.sort(key=sort_key)
 
     return best_runs
 
@@ -353,7 +583,7 @@ def create_table_image(
     output_path: Path,
     title: str = "Model Comparison Results",
 ) -> None:
-    """Create a table image comparing runs.
+    """Create a table image comparing runs with section separators.
 
     Args:
         runs: List of run data dictionaries.
@@ -365,49 +595,103 @@ def create_table_image(
         print("No runs to display.")
         return
 
-    # Prepare data for table
+    num_cols = len(runs)
     col_labels = [get_run_info(r)["tokenizer_display"] for r in runs]
-    row_labels = [METRIC_DISPLAY_NAMES.get(m, m) for m in metrics]
 
-    # Build cell data and track best values per metric
+    # Build table data with section headers
     cell_data = []
     cell_colors = []
+    row_labels = []
+    section_rows = []  # Track which rows are section headers
 
-    for metric in metrics:
-        row_values = []
-        raw_values = []
+    # Build a set of available metrics for filtering
+    available_metrics_set = set(metrics)
 
-        for run in runs:
-            value = run["results"].get(metric)
-            row_values.append(format_value(value, metric))
-            raw_values.append(
-                value
-                if value is not None
-                else float("inf")
-                if metric in LOWER_IS_BETTER
-                else float("-inf")
-            )
+    row_idx = 0
+    for section_name, section_metrics in METRIC_SECTIONS:
+        # Filter to only metrics that are in the available list
+        section_metrics_filtered = [
+            m for m in section_metrics if m in available_metrics_set
+        ]
+        if not section_metrics_filtered:
+            continue
 
-        cell_data.append(row_values)
+        # Add section header row
+        row_labels.append(section_name)
+        cell_data.append([""] * num_cols)
+        cell_colors.append(["#D9E2F3"] * num_cols)  # Light blue for section headers
+        section_rows.append(row_idx)
+        row_idx += 1
 
-        # Determine best value for highlighting
-        row_colors = []
-        if metric in LOWER_IS_BETTER:
-            best_val = min(v for v in raw_values if v != float("inf"))
-        else:
-            best_val = max(v for v in raw_values if v != float("-inf"))
+        # Add metric rows for this section
+        for metric in section_metrics_filtered:
+            row_labels.append(METRIC_DISPLAY_NAMES.get(metric, metric))
 
-        for val in raw_values:
-            if val == best_val and val not in (float("inf"), float("-inf")):
-                row_colors.append("#90EE90")  # Light green for best
+            row_values = []
+            raw_values = []
+
+            for run in runs:
+                value = run["results"].get(metric)
+                row_values.append(format_value(value, metric))
+                raw_values.append(
+                    value
+                    if value is not None
+                    else float("inf")
+                    if metric in LOWER_IS_BETTER
+                    else float("-inf")
+                )
+
+            cell_data.append(row_values)
+
+            # Determine gradient colors based on value ranking
+            row_colors = []
+
+            # Skip highlighting for categorical metrics
+            if metric in CATEGORICAL_METRICS:
+                row_colors = ["white"] * len(raw_values)
+                cell_colors.append(row_colors)
+                row_idx += 1
+                continue
+
+            valid_values = [
+                v for v in raw_values if v not in (float("inf"), float("-inf"))
+            ]
+
+            if not valid_values:
+                row_colors = ["white"] * len(raw_values)
             else:
-                row_colors.append("white")
+                # Sort values to find best and second best
+                if metric in LOWER_IS_BETTER:
+                    sorted_vals = sorted(set(valid_values))
+                else:
+                    sorted_vals = sorted(set(valid_values), reverse=True)
 
-        cell_colors.append(row_colors)
+                best_val = sorted_vals[0] if len(sorted_vals) >= 1 else None
+                second_val = sorted_vals[1] if len(sorted_vals) >= 2 else None
+
+                # Count how many have the best value (for tie detection)
+                best_count = sum(1 for v in raw_values if v == best_val)
+                is_tie = best_count > 1
+
+                for val in raw_values:
+                    if val in (float("inf"), float("-inf")):
+                        row_colors.append("white")
+                    elif val == best_val:
+                        if is_tie:
+                            row_colors.append("#FFFF99")  # Yellow for ties
+                        else:
+                            row_colors.append("#90EE90")  # Light green for best
+                    elif val == second_val:
+                        row_colors.append("#ADD8E6")  # Light blue for second
+                    else:
+                        row_colors.append("white")
+
+            cell_colors.append(row_colors)
+            row_idx += 1
 
     # Create figure
-    fig_width = max(8, 2 + len(runs) * 1.5)
-    fig_height = max(6, 1 + len(metrics) * 0.4)
+    fig_width = max(8, 2 + num_cols * 1.5)
+    fig_height = max(6, 1 + len(row_labels) * 0.4)
 
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
     ax.axis("off")
@@ -419,7 +703,7 @@ def create_table_image(
         colLabels=col_labels,
         cellColours=cell_colors,
         rowColours=["#f0f0f0"] * len(row_labels),
-        colColours=["#4472C4"] * len(col_labels),
+        colColours=["#4472C4"] * num_cols,
         cellLoc="center",
         loc="center",
     )
@@ -430,21 +714,27 @@ def create_table_image(
     table.scale(1.2, 1.5)
 
     # Style header cells
-    for j in range(len(col_labels)):
+    for j in range(num_cols):
         cell = table[(0, j)]
         cell.set_text_props(weight="bold", color="white")
 
-    # Style row labels
+    # Style row labels and section headers
     for i in range(len(row_labels)):
         cell = table[(i + 1, -1)]
-        cell.set_text_props(weight="bold")
+        if i in section_rows:
+            # Section header styling
+            cell.set_text_props(weight="bold", style="italic")
+            cell.set_facecolor("#D9E2F3")
+        else:
+            cell.set_text_props(weight="bold")
 
     # Add title
     plt.title(title, fontsize=14, fontweight="bold", pad=20)
 
     # Add footnote
     footnote = (
-        "Best values per metric highlighted in green. PGD/FCD/MMD: lower is better."
+        "Green = best, Yellow = tie, Blue = second best. "
+        "Train size/steps, PGD/FCD/MMD, Gen Time: lower is better."
     )
     fig.text(0.5, 0.02, footnote, ha="center", fontsize=8, style="italic")
 
@@ -541,7 +831,7 @@ Examples:
     parser.add_argument(
         "--all",
         action="store_true",
-        help="Show all runs instead of best per tokenizer",
+        help="Show all runs instead of best per tokenizer+coarsening",
     )
     parser.add_argument(
         "--metrics",
@@ -552,7 +842,7 @@ Examples:
     parser.add_argument(
         "--title",
         type=str,
-        default="Model Comparison Results (Best per Tokenizer by PGD)",
+        default="Model Comparison Results (Best per Tokenizer+Coarsening by PGD)",
         help="Title for the table",
     )
     parser.add_argument(
@@ -619,13 +909,16 @@ Examples:
         else:
             print("No realistic generation runs found")
 
-    # Select best per tokenizer unless --all is specified
+    # Select best per tokenizer+coarsening unless --all is specified
     if not args.all:
-        runs = select_best_per_tokenizer(runs)
-        print(f"Selected {len(runs)} best runs (one per tokenizer by PGD)")
+        runs = select_best_per_tokenizer_and_coarsening(runs)
+        print(
+            f"Selected {len(runs)} best runs "
+            "(one per tokenizer+coarsening combination by PGD)"
+        )
         title = args.title
     else:
-        title = args.title.replace("(Best per Tokenizer by PGD)", "(All Runs)")
+        title = args.title.replace("(Best per Tokenizer+Coarsening by PGD)", "(All Runs)")
 
     # Determine metrics to show
     if args.metrics:
