@@ -43,7 +43,12 @@ MOSAIC automatically downloads datasets on first use.
 
 Custom data directory:
 ```bash
-python scripts/train.py data.data_root=/path/to/data/
+mkdir -p data/moses
+cd data/moses
+wget https://media.githubusercontent.com/media/molecularsets/moses/master/data/train.csv
+wget https://media.githubusercontent.com/media/molecularsets/moses/master/data/test.csv
+wget https://media.githubusercontent.com/media/molecularsets/moses/master/data/test_scaffolds.csv
+cd ~/MOSAIC 
 ```
 
 ---
