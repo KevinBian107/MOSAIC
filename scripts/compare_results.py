@@ -73,7 +73,6 @@ METRIC_SECTIONS = [
     (
         "Realistic Generation",
         [
-            "validity_rate",
             "motif_rate",
             "substitution_tv",
             "substitution_kl",
@@ -105,7 +104,6 @@ DEFAULT_TEST_METRICS = [
     "generation_time",
 ]
 DEFAULT_REALISTIC_METRICS = [
-    "validity_rate",
     "motif_rate",
     "substitution_tv",
     "substitution_kl",
@@ -157,11 +155,10 @@ METRIC_DISPLAY_NAMES = {
     "motif_fg_mmd": "FG MMD",
     "motif_smarts_mmd": "SMARTS MMD",
     "motif_ring_mmd": "Ring MMD",
-    "motif_brics_mmd": "BRICS MMD",
+    "motif_brics_mmd": "BRICS L2",
     "generation_time": "Gen Time (s)",
     "num_valid_smiles": "Valid SMILES",
     # Realistic generation metrics
-    "validity_rate": "Reality Rate",
     "motif_rate": "Motif Rate",
     "substitution_tv": "Subst TV",
     "substitution_kl": "Subst KL",

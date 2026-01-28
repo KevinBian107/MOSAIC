@@ -56,28 +56,107 @@ $$C_v = \frac{2 \cdot |\{(u,w) : u,w \in N(v), (u,w) \in E\}|}{|N(v)| \cdot (|N(
 
 A classifier-based metric that measures the quality of generated graphs by training a binary classifier to distinguish between reference and generated distributions. The classifier's ability to discriminate serves as a measure of distribution mismatch.
 
-**Advantages over MMD:**
-- Bounded range [0, 1] for interpretability
-- No hyperparameter tuning required (MMD needs kernel bandwidth)
-- Captures complex distributional differences through learned representations
-- Single unified score across multiple graph properties
+#### Key Advantages
 
-**Formulation:**
-The metric trains a classifier $f: \mathcal{G} \to \{0, 1\}$ to distinguish between:
-- Real graphs $G_r \sim P_{ref}$ (labeled 0)
-- Generated graphs $G_g \sim P_{gen}$ (labeled 1)
+| Advantage | Description |
+|-----------|-------------|
+| **Bounded Range** | Score ∈ [0, 1] provides interpretable quality assessment |
+| **No Hyperparameters** | Unlike MMD which requires kernel bandwidth tuning |
+| **Multi-Descriptor** | Aggregates information across multiple graph properties |
+| **Learned Features** | GIN-based descriptors capture complex distributional differences |
 
-$$\text{PGD} = \text{accuracy}(f) - 0.5$$
+#### How PGD Works
 
-Normalized to [0, 1] where:
-- PGD ≈ 0: Generator produces distribution indistinguishable from reference (optimal)
-- PGD ≈ 1: Distributions are easily distinguishable (poor quality)
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        PGD Pipeline                              │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Step 1: Graph Descriptor Extraction                             │
+│  ┌──────────────┐     ┌──────────────┐                          │
+│  │  Reference   │     │  Generated   │                          │
+│  │   Graphs     │     │   Graphs     │                          │
+│  └──────┬───────┘     └──────┬───────┘                          │
+│         │                    │                                   │
+│         ▼                    ▼                                   │
+│  ┌──────────────────────────────────────┐                       │
+│  │     GIN (Graph Isomorphism Network)  │                       │
+│  │     Extract feature vectors          │                       │
+│  └──────────────────┬───────────────────┘                       │
+│                     │                                            │
+│  Step 2: Binary Classification                                   │
+│                     ▼                                            │
+│  ┌──────────────────────────────────────┐                       │
+│  │         TabPFN Classifier            │                       │
+│  │   Class 0: Reference graphs          │                       │
+│  │   Class 1: Generated graphs          │                       │
+│  └──────────────────┬───────────────────┘                       │
+│                     │                                            │
+│  Step 3: Compute Score                                           │
+│                     ▼                                            │
+│  ┌──────────────────────────────────────┐                       │
+│  │  PGD = classifier_accuracy - 0.5     │                       │
+│  │                                      │                       │
+│  │  Low accuracy → PGD ≈ 0 → GOOD      │                       │
+│  │  High accuracy → PGD ≈ 1 → POOR     │                       │
+│  └──────────────────────────────────────┘                       │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-**Interpretation:**
-- PGD < 0.1: Excellent generation quality (indistinguishable from reference)
-- PGD < 0.3: Good generation quality
-- PGD < 0.5: Moderate quality (noticeable differences)
-- PGD ≥ 0.5: Poor quality (easily distinguishable)
+**GIN Descriptors Capture:**
+- Node degree distributions
+- Spectral properties
+- Clustering coefficients
+- Higher-order structural patterns
+
+#### Comparison with Other Metrics
+
+| Metric | Range | Hyperparameters | Stability | Best For |
+|--------|-------|-----------------|-----------|----------|
+| **PGD** | [0, 1] | None | Stable at 256+ samples | Overall graph structure |
+| **MMD** | [0, ∞) | Kernel bandwidth | High variance at small samples | Local statistics |
+| **FCD** | [0, ∞) | None | Stable | Molecular chemistry (drug-like) |
+
+**PGD vs MMD:**
+- PGD: Bounded, no tuning, stable with 256+ samples
+- MMD: Unbounded, requires kernel bandwidth tuning, high variance at small sample sizes
+
+**PGD vs FCD:**
+- PGD: General graph structure, works on any graph type
+- FCD: Molecular-specific, uses ChemNet features trained on drug-like molecules
+
+#### When to Use PGD
+
+✅ **Use PGD when:**
+- Comparing different generation methods on the same dataset
+- Evaluating how well a model captures the training distribution
+- Benchmarking against published baselines (PolyGraph paper includes many)
+- You have 256+ generated and reference graphs
+
+❌ **Don't rely solely on PGD when:**
+- Sample size < 256 (high variance, unreliable)
+- Molecular properties matter more than structure (use FCD, QED, SA)
+- Specific motifs are critical (combine with motif metrics)
+
+#### Interpretation Guidelines
+
+| PGD Score | Quality | Meaning |
+|-----------|---------|---------|
+| < 0.1 | Excellent | Generated distribution matches reference very closely |
+| < 0.3 | Good | Generated distribution is similar to reference |
+| < 0.5 | Moderate | Noticeable differences but reasonable quality |
+| ≥ 0.5 | Poor | Generated graphs easily distinguishable from reference |
+
+#### Sample Size Recommendations
+
+Based on the PolyGraph paper findings:
+
+| Sample Size | Stability | Recommendation |
+|-------------|-----------|----------------|
+| < 256 | High variance, unreliable | Not recommended |
+| ~256 | Mean and variance stabilize | Minimum for stability |
+| 1000-2048 | Ideal range | Recommended for benchmarks |
 
 **Reference:**
 - Paper: https://arxiv.org/abs/2510.06122
@@ -169,9 +248,9 @@ MMD between ring system feature vectors:
 - Spiro atoms, bridgehead atoms
 - Ring size distribution (3, 4, 5, 6, 7, 8-membered)
 
-### BRICS Fragment MMD
+### BRICS Fragment L2
 
-L2 distance between normalized BRICS fragment frequency distributions.
+L2 distance between normalized BRICS fragment frequency distributions (not MMD).
 
 ---
 
@@ -214,28 +293,161 @@ $$D_{\text{co-occur}} = \|C_{\text{gen}} - C_{\text{ref}}\|_F$$
 
 ---
 
-## 5. Planned Metrics
+## 5. Realistic Generation Metrics
 
-The following metrics are planned for future implementation:
+Metrics for evaluating whether generated molecules exhibit realistic structural patterns matching training data.
 
-### PolyGraph
+### What Makes a Molecule Realistic?
 
-Graph-level evaluation using polynomial features of graph structure.
+A realistic molecule exhibits the same **structural patterns** as molecules found in real-world chemical databases. Beyond basic validity, a realistic molecule should:
 
-**Purpose**: Capture global graph properties beyond local statistics.
+1. **Follow chemical preferences** - Real molecules exhibit biases in how functional groups attach, where substituents are placed, and which structures co-occur
+2. **Match training distribution** - Generated molecules should statistically resemble the training data, not just be valid
 
-**Approach**:
-- Compute polynomial features of adjacency matrix eigenspectrum
-- Compare feature distributions via MMD
+#### Examples of Chemical Biases
 
-$$\phi(G) = [\text{Tr}(A), \text{Tr}(A^2), \text{Tr}(A^3), \ldots, \text{Tr}(A^k)]$$
+**1. Functional Group Attachment Biases**
 
-Trace of Aᵏ counts closed walks of length k, capturing:
-- Tr(A²): Number of edges
-- Tr(A³): 6 × number of triangles
-- Higher powers: Larger cycle structures
+Not all attachment points are equally likely. Real chemistry favors certain patterns:
 
-**Reference**: PolyGraph metric from graph generation literature.
+```
+COMMON (seen in training):          RARE (chemically unusual):
+
+     OH                                  OH   OH
+      |                                   |    |
+  ●───●───●───COOH                    ●───●───●───●
+      |                                   |
+     NH₂                                 OH
+
+Phenol + carboxylic acid              Multiple adjacent -OH on
+at chain terminus                     aliphatic chain (unstable)
+```
+
+**2. Substituent Placement Biases**
+
+For di-substituted benzenes, position matters:
+
+```
+COMMON (~60% in drugs):             LESS COMMON (~15%):
+
+    COOH                                COOH
+      |                                   |
+      ●                                   ●
+     / \                                 / \
+    ●   ●                               ●   ●
+    |   |                                \ /
+    ●   ●                                 ●
+     \ /                                  |
+      ●                                   ●
+      |                                   |
+     NH₂                                 NH₂
+
+Para-aminobenzoic acid              Meta-aminobenzoic acid
+(PABA - symmetric, stable)          (less symmetric)
+```
+
+**3. Functional Group Co-occurrence Biases**
+
+Certain groups naturally appear together in drug-like molecules:
+
+```
+COMMON CO-OCCURRENCES:              RARE CO-OCCURRENCES:
+
+    O    H                              O    O
+    ‖    |                              ‖    ‖
+────C────N────[aromatic]           ────C────C────
+                                        |    |
+Amide + aromatic ring                  OH   OH
+(found in ~40% of drugs)
+                                   Adjacent carboxylic acids
+                                   (would react/dehydrate)
+
+
+    F                                   I    I
+    |                                   |    |
+   [aromatic]───CF₃                [aromatic]
+                                        |
+Fluorine + trifluoromethyl             I
+(common in modern drugs,
+metabolically stable)              Multiple iodines
+                                   (rare, too heavy/reactive)
+```
+
+A model that generates only valid molecules but ignores these biases has not truly learned chemistry. For example, generating many meta-substituted benzenes when training data is predominantly para-substituted indicates poor distribution learning.
+
+### Benzene Substitution Patterns
+
+Benzene rings are ubiquitous in drug-like molecules. How substituents attach follows well-known chemical principles:
+
+**Substitution Count**:
+- **Mono-substituted**: One group attached (e.g., toluene, phenol)
+- **Di-substituted**: Two groups attached
+- **Tri-substituted**: Three groups attached
+- **Poly-substituted**: Four or more groups attached
+
+**Di-substitution Position (ortho/meta/para)**:
+
+```
+    ortho (1,2)         meta (1,3)          para (1,4)
+       X                   X                    X
+      /                   /                    /
+     ●                   ●                    ●
+    / \                 / \                  / \
+   ●   ●               ●   ●                ●   ●
+    \ /                 \ /                  \ /
+     ●                   ●                    ●
+      \                   \                    \
+       X                   ●                    X
+                            \
+                             X
+```
+
+Real molecules show preferences:
+- **Para** is often favored (less steric hindrance, symmetric)
+- **Ortho** can be favored for intramolecular interactions
+- **Meta** is typically less common
+
+### Functional Group Distribution
+
+Different functional groups appear with different frequencies in drug-like molecules:
+
+| Functional Group | Description | Typical Role |
+|-----------------|-------------|--------------|
+| Hydroxyl (-OH) | Alcohol/phenol | H-bonding, solubility |
+| Amino (-NH2) | Amine | H-bonding, basicity |
+| Carbonyl (C=O) | Ketone/aldehyde | H-bonding, reactivity |
+| Carboxyl (-COOH) | Carboxylic acid | Ionizable, H-bonding |
+| Halogen (-F, -Cl, -Br) | Halide | Lipophilicity, metabolic stability |
+| Ether (-OR) | Ether/methoxy | Solubility, metabolic site |
+| Methyl (-CH3) | Methyl | Lipophilicity, steric |
+| Cyano (-CN) | Nitrile | H-bond acceptor |
+
+### Total Variation Distance (TV)
+
+Measures the maximum difference between two probability distributions:
+
+$$\text{TV}(P, Q) = 0.5 \times \sum |P(x) - Q(x)|$$
+
+- **TV = 0**: Identical distributions
+- **TV = 1**: Completely different distributions
+- **TV < 0.1**: Good match
+
+**Output Metrics**:
+- `substitution_tv`: TV distance for substitution count distribution
+- `functional_group_tv`: TV distance for functional group distribution
+
+### KL Divergence
+
+Measures information lost when using generated distribution to approximate training:
+
+$$\text{KL}(P \| Q) = \sum P(x) \times \log(P(x) / Q(x))$$
+
+- **KL = 0**: Identical distributions
+- **KL > 0**: Divergence (lower is better)
+
+**Output Metrics**:
+- `substitution_kl`: KL divergence for substitution patterns
+- `functional_group_kl`: KL divergence for functional groups
 
 ---
 
@@ -325,6 +537,17 @@ results = evaluator.compute(generated_graphs)
 
 ## Metric Summary Table
 
+### Graph Metrics
+
+| Metric | Range | Ideal | Measures |
+|--------|-------|-------|----------|
+| Degree MMD | [0, ∞) | 0.0 | Degree distribution |
+| Spectral MMD | [0, ∞) | 0.0 | Spectral properties |
+| Clustering MMD | [0, ∞) | 0.0 | Local clustering |
+| **PGD** | **[0, 1]** | **0.0** | **Classifier-based graph quality** |
+
+### Molecular Metrics
+
 | Metric | Range | Ideal | Measures |
 |--------|-------|-------|----------|
 | Validity | [0, 1] | 1.0 | Chemical correctness |
@@ -335,14 +558,28 @@ results = evaluator.compute(generated_graphs)
 | Fragment Sim | [0, 1] | 1.0 | Fragment distribution |
 | Scaffold Sim | [0, 1] | 1.0 | Scaffold distribution |
 | Internal Div | [0, 1] | ~0.8-0.9 | Output diversity |
-| Degree MMD | [0, ∞) | 0.0 | Degree distribution |
-| Spectral MMD | [0, ∞) | 0.0 | Spectral properties |
-| Clustering MMD | [0, ∞) | 0.0 | Local clustering |
-| **PGD** | **[0, 1]** | **0.0** | **Classifier-based graph quality** |
-| Motif MMD | [0, ∞) | 0.0 | Motif preservation |
+
+### Motif Metrics
+
+| Metric | Range | Ideal | Measures |
+|--------|-------|-------|----------|
+| FG MMD | [0, ∞) | 0.0 | Functional group preservation |
+| SMARTS MMD | [0, ∞) | 0.0 | SMARTS pattern preservation |
+| Ring MMD | [0, ∞) | 0.0 | Ring system preservation |
+| BRICS L2 | [0, ∞) | 0.0 | BRICS fragment distribution |
 | Motif Hist Mean | [0, ∞) | 0.0 | Per-motif count distributions |
 | Motif Hist Max | [0, ∞) | 0.0 | Worst motif distribution |
 | Motif Co-occur | [0, ∞) | 0.0 | Motif combination patterns |
+
+### Realistic Generation Metrics
+
+| Metric | Range | Ideal | Measures |
+|--------|-------|-------|----------|
+| Motif Rate | [0, 1] | ~training | Fraction with target motif |
+| Subst TV | [0, 1] | 0.0 | Substitution pattern match |
+| Subst KL | [0, ∞) | 0.0 | Substitution pattern divergence |
+| FG TV | [0, 1] | 0.0 | Functional group match |
+| FG KL | [0, ∞) | 0.0 | Functional group divergence |
 
 ---
 
