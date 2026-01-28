@@ -418,7 +418,6 @@ def main(cfg: DictConfig) -> None:
         "tokenizer_type": tokenizer_type,
         "num_generated": len(generated_graphs),
         "num_valid": len(generated_smiles),
-        "validity_rate": len(generated_smiles) / len(generated_graphs),
         "num_with_motif": len(gen_filtered),
         "motif_rate": len(gen_filtered) / len(generated_smiles)
         if generated_smiles
