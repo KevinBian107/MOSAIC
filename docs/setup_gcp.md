@@ -226,6 +226,12 @@ This shows all your VMs with name, zone, machine type, IPs, and status (RUNNING/
 gcloud compute ssh mosaic-v100 --zone=europe-west4-a
 ```
 
+If you can't ssh into it, it's probably an meta-info loss issue, just reset:
+
+```bash
+gcloud compute instances reset mosaic-v100 --zone=europe-west4-a
+```
+
 ### Verify GPU is Available
 
 ```bash
@@ -259,23 +265,6 @@ conda activate mosaic
 
 # Verify PyTorch sees GPU
 python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
-```
-
-### Setup tmux (Important!)
-
-tmux keeps your training running even if SSH disconnects:
-
-```bash
-# Start a new tmux session
-tmux new -s training
-
-# Inside tmux, run your training
-cd ~/MOSAIC
-conda activate mosaic
-python scripts/train.py ...
-
-# Detach from tmux: Ctrl+B, then D
-# Reattach later: tmux attach -t training
 ```
 
 ---
@@ -372,33 +361,33 @@ wget https://media.githubusercontent.com/media/molecularsets/moses/master/data/t
 cd ~/MOSAIC
 
 # ===== Window 0: SENT tokenizer (flat, no hierarchy) =====
-python scripts/train.py tokenizer=sent
+python scripts/train.py tokenizer=sent data.num_train=1000000
 
 # ===== Window 1: HDT with motif_community coarsening =====
 # Create new window: Control+B, then C
 # Activate env in new window:
 conda activate mosaic && cd ~/MOSAIC
-python scripts/train.py tokenizer=hdt tokenizer.coarsening_strategy=motif_community
+python scripts/train.py tokenizer=hdt tokenizer.coarsening_strategy=motif_community data.num_train=1000000
 
 # ===== Window 2: HDT with spectral coarsening =====
 # Create new window: Control+B, then C
 conda activate mosaic && cd ~/MOSAIC
-python scripts/train.py tokenizer=hdt tokenizer.coarsening_strategy=spectral
+python scripts/train.py tokenizer=hdt tokenizer.coarsening_strategy=spectral data.num_train=1000000
 
 # ===== Window 3: HSENT with motif_community coarsening =====
 # Create new window: Control+B, then C
 conda activate mosaic && cd ~/MOSAIC
-python scripts/train.py tokenizer=hsent tokenizer.coarsening_strategy=motif_community
+python scripts/train.py tokenizer=hsent tokenizer.coarsening_strategy=motif_community data.num_train=1000000
 
 # ===== Window 4: HSENT with spectral coarsening =====
 # Create new window: Control+B, then C
 conda activate mosaic && cd ~/MOSAIC
-python scripts/train.py tokenizer=hsent tokenizer.coarsening_strategy=spectral
+python scripts/train.py tokenizer=hsent tokenizer.coarsening_strategy=spectral data.num_train=1000000
 
 # ===== Window 5: HDTC tokenizer (compositional, uses functional groups) =====
 # Create new window: Control+B, then C
 conda activate mosaic && cd ~/MOSAIC
-python scripts/train.py tokenizer=hdtc
+python scripts/train.py tokenizer=hdtc data.num_train=1000000
 
 # To check on experiments: Control+B, then W to list all windows
 # To detach and leave running: Control+B, then D
@@ -435,99 +424,6 @@ for i in 1 2 3 4 5 6; do
     --provisioning-model=SPOT \
     --metadata="install-nvidia-driver=True"
 done
-```
-
-### Method 3: Automated Multi-VM Setup Script
-
-Create a script to setup and run experiments across multiple VMs:
-
-```bash
-#!/bin/bash
-# save as: run_parallel_experiments.sh
-
-EXPERIMENTS=(
-  "tokenizer=sent"
-  "tokenizer=hdt tokenizer.coarsening_strategy=motif_community"
-  "tokenizer=hdt tokenizer.coarsening_strategy=spectral"
-  "tokenizer=hsent tokenizer.coarsening_strategy=motif_community"
-  "tokenizer=hsent tokenizer.coarsening_strategy=spectral"
-  "tokenizer=hdtc"
-)
-
-ZONE="us-central1-a"
-BASE_NAME="mosaic-exp"
-
-for i in "${!EXPERIMENTS[@]}"; do
-  VM_NAME="${BASE_NAME}-$i"
-  EXPERIMENT="${EXPERIMENTS[$i]}"
-
-  echo "Starting $VM_NAME with: $EXPERIMENT"
-
-  # Create VM
-  gcloud compute instances create $VM_NAME \
-    --zone=$ZONE \
-    --machine-type=n1-standard-8 \
-    --accelerator=type=nvidia-tesla-t4,count=1 \
-    --image-family=pytorch-2-7-cu128-ubuntu-2204-nvidia-570 \
-    --image-project=deeplearning-platform-release \
-    --boot-disk-size=200GB \
-    --provisioning-model=SPOT \
-    --metadata="install-nvidia-driver=True" \
-    --metadata-from-file=startup-script=startup.sh
-
-  # Run experiment via SSH (in background)
-  gcloud compute ssh $VM_NAME --zone=$ZONE --command="
-    cd ~
-    git clone https://github.com/KevinBian107/MOSAIC.git
-    cd MOSAIC
-    # Install Miniconda if not present
-    if ! command -v conda &> /dev/null; then
-      wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
-      bash Miniconda3-latest-Linux-x86_64.sh -b
-      ~/miniconda3/bin/conda init bash
-      source ~/.bashrc
-    fi
-    conda env create -f environment_server.yaml
-    conda activate mosaic
-    nohup python scripts/train.py $EXPERIMENT > train.log 2>&1 &
-  " &
-done
-
-echo "All experiments started!"
-```
-
-### Method 4: Using GNU Parallel on Single Multi-GPU VM
-
-For VMs with multiple GPUs (ideal for running all 6 experiments):
-
-```bash
-# Create a VM with 6 GPUs (or 4 GPUs if 6 unavailable - experiments will cycle)
-gcloud compute instances create mosaic-multi-gpu \
-  --zone=us-central1-a \
-  --machine-type=n1-standard-48 \
-  --accelerator=type=nvidia-tesla-t4,count=4 \
-  --image-family=pytorch-2-7-cu128-ubuntu-2204-nvidia-570 \
-  --image-project=deeplearning-platform-release \
-  --boot-disk-size=500GB \
-  --maintenance-policy=TERMINATE
-```
-
-Then run experiments on different GPUs:
-
-```bash
-# experiments.txt - one experiment config per line
-# tokenizer=sent
-# tokenizer=hdt tokenizer.coarsening_strategy=motif_community
-# tokenizer=hdt tokenizer.coarsening_strategy=spectral
-# tokenizer=hsent tokenizer.coarsening_strategy=motif_community
-# tokenizer=hsent tokenizer.coarsening_strategy=spectral
-# tokenizer=hdtc
-
-# Run experiments in parallel across 4 GPUs
-# -j 4 runs 4 jobs simultaneously, each assigned to a different GPU
-# When a job finishes, the next queued experiment starts on that GPU
-cat experiments.txt | parallel -j 4 \
-  'CUDA_VISIBLE_DEVICES=$((({#} - 1) % 4)) python scripts/train.py {}'
 ```
 
 ---
@@ -640,20 +536,6 @@ gcloud compute instances create mosaic-dev \
   --image-project=debian-cloud \
   --boot-disk-size=50GB
 ```
-
----
-
-## Quick Reference
-
-| Task | Command |
-|------|---------|
-| SSH into VM | `gcloud compute ssh VM_NAME --zone=us-central1-a` |
-| Stop VM | `gcloud compute instances stop VM_NAME --zone=us-central1-a` |
-| Start VM | `gcloud compute instances start VM_NAME --zone=us-central1-a` |
-| Delete VM | `gcloud compute instances delete VM_NAME --zone=us-central1-a` |
-| List VMs | `gcloud compute instances list` |
-| Copy file from VM | `gcloud compute scp VM_NAME:~/path/file ./local/ --zone=us-central1-a` |
-| Copy file to VM | `gcloud compute scp ./local/file VM_NAME:~/path/ --zone=us-central1-a` |
 
 ---
 
@@ -849,22 +731,4 @@ gcloud compute ssh mosaic-v100 --zone=europe-west4-a
 conda activate mosaic
 python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
 # Should print: True and Tesla V100-SXM2-16GB
-```
-
-**If still failing after reboot**, there may be a CUDA version mismatch. Check versions:
-
-```bash
-# Driver CUDA version
-nvidia-smi | grep "CUDA Version"
-
-# PyTorch CUDA version
-python -c "import torch; print(torch.version.cuda)"
-```
-
-If mismatched, reinstall PyTorch for the correct CUDA version:
-
-```bash
-# For CUDA 12.4 (works with driver CUDA 12.8)
-pip uninstall torch torchvision torchaudio -y
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 ```
