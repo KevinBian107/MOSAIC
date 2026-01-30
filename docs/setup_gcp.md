@@ -361,33 +361,33 @@ wget https://media.githubusercontent.com/media/molecularsets/moses/master/data/t
 cd ~/MOSAIC
 
 # ===== Window 0: SENT tokenizer (flat, no hierarchy) =====
-python scripts/train.py tokenizer=sent data.num_train=1000000
+python scripts/train.py tokenizer=sent data.num_train=500000 resume=False
 
 # ===== Window 1: HDT with motif_community coarsening =====
 # Create new window: Control+B, then C
 # Activate env in new window:
 conda activate mosaic && cd ~/MOSAIC
-python scripts/train.py tokenizer=hdt tokenizer.coarsening_strategy=motif_community data.num_train=1000000
+python scripts/train.py tokenizer=hdt tokenizer.coarsening_strategy=motif_community data.num_train=500000 resume=False
 
 # ===== Window 2: HDT with spectral coarsening =====
 # Create new window: Control+B, then C
 conda activate mosaic && cd ~/MOSAIC
-python scripts/train.py tokenizer=hdt tokenizer.coarsening_strategy=spectral data.num_train=1000000
+python scripts/train.py tokenizer=hdt tokenizer.coarsening_strategy=spectral data.num_train=500000 resume=False
 
 # ===== Window 3: HSENT with motif_community coarsening =====
 # Create new window: Control+B, then C
 conda activate mosaic && cd ~/MOSAIC
-python scripts/train.py tokenizer=hsent tokenizer.coarsening_strategy=motif_community data.num_train=1000000
+python scripts/train.py tokenizer=hsent tokenizer.coarsening_strategy=motif_community data.num_train=500000 resume=False
 
 # ===== Window 4: HSENT with spectral coarsening =====
 # Create new window: Control+B, then C
 conda activate mosaic && cd ~/MOSAIC
-python scripts/train.py tokenizer=hsent tokenizer.coarsening_strategy=spectral data.num_train=1000000
+python scripts/train.py tokenizer=hsent tokenizer.coarsening_strategy=spectral data.num_train=500000 resume=False
 
 # ===== Window 5: HDTC tokenizer (compositional, uses functional groups) =====
 # Create new window: Control+B, then C
 conda activate mosaic && cd ~/MOSAIC
-python scripts/train.py tokenizer=hdtc data.num_train=1000000
+python scripts/train.py tokenizer=hdtc data.num_train=500000 resume=False
 
 # To check on experiments: Control+B, then W to list all windows
 # To detach and leave running: Control+B, then D
