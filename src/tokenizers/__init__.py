@@ -10,7 +10,8 @@ Tokenizers:
 - HDTCTokenizer: Compositional tokenization with functional hierarchy
 
 Coarsening strategies:
-- SpectralCoarsening: Modularity-optimized spectral clustering
+- SpectralCoarsening: Modularity-optimized spectral clustering (multi-level)
+- SimpleSpectralCoarsening: Single-level spectral clustering
 - MotifAwareSpectralCoarsening: Spectral clustering with motif preservation
 - FunctionalHierarchyBuilder: Two-level functional hierarchy for HDTC
 
@@ -28,6 +29,7 @@ from src.tokenizers.coarsening import (
     MotifAwareCoarsening,
     MotifAwareSpectralCoarsening,
     MotifCommunityCoarsening,
+    SimpleSpectralCoarsening,
     SpectralCoarsening,
 )
 from src.tokenizers.hdt import HDTTokenizer
@@ -56,6 +58,7 @@ __all__ = [
     # Coarsening
     "CoarseningStrategy",
     "SpectralCoarsening",
+    "SimpleSpectralCoarsening",
     "MotifAwareSpectralCoarsening",
     "MotifAwareCoarsening",  # Backwards compatibility
     "MotifCommunityCoarsening",

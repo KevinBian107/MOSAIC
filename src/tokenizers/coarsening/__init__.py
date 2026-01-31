@@ -4,7 +4,8 @@ This module provides coarsening algorithms that partition graphs into
 communities for hierarchical representation.
 
 Available strategies:
-- SpectralCoarsening: Modularity-optimized spectral clustering
+- SpectralCoarsening: Modularity-optimized spectral clustering (multi-level)
+- SimpleSpectralCoarsening: Single-level spectral clustering
 - MotifAwareSpectralCoarsening: Spectral clustering with motif preservation
 - MotifCommunityCoarsening: Direct motif-based community assignment
 - FunctionalHierarchyBuilder: Two-level functional hierarchy for HDTC
@@ -23,13 +24,17 @@ from src.tokenizers.coarsening.motif_aware_spectral import (
     MotifAwareSpectralCoarsening,
 )
 from src.tokenizers.coarsening.motif_community import MotifCommunityCoarsening
-from src.tokenizers.coarsening.spectral import SpectralCoarsening
+from src.tokenizers.coarsening.spectral import (
+    SimpleSpectralCoarsening,
+    SpectralCoarsening,
+)
 
 __all__ = [
     # Protocol
     "CoarseningStrategy",
     # Strategies
     "SpectralCoarsening",
+    "SimpleSpectralCoarsening",
     "MotifAwareSpectralCoarsening",
     "MotifAwareCoarsening",  # Backwards compatibility
     "MotifCommunityCoarsening",
