@@ -10,7 +10,13 @@ figures/
 __pycache__/
 *.py[cod]
 *$py.class
+
+# Cython compiled files
 *.so
+*.c
+!setup.py
+*.cpp
+*.pyc
 .Python
 build/
 develop-eggs/

@@ -170,8 +170,9 @@ def sample_labeled_sent(
         int[:] indptr = csr_matrix.indptr
         int num_nodes = csr_matrix.shape[0]
         int num_edges = indices.shape[0]
-        int num_node_features = node_labels.shape[1]
-        int num_edge_features = edge_labels.shape[1]
+        # Node/edge labels are 1D arrays with single integer labels per node/edge
+        int num_node_features = 1
+        int num_edge_features = 1
 
     if seq_length < 0:
         if num_nodes == 0 or num_nodes == 1:
