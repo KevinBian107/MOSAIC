@@ -74,6 +74,9 @@ python scripts/realistic_gen.py \
 python scripts/compare_results.py
 ```
 
+### Trained Checkpoint
+gdown our trained checkpoint for different models from [this google drive](https://drive.google.com/drive/folders/1aMo5cQvexJ11GyIXACQys_UlA1CxKv7e?usp=drive_link).
+
 ### Demo
 
 ```bash
