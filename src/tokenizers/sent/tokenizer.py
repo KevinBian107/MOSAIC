@@ -132,10 +132,18 @@ class SENTTokenizer(Tokenizer):
 
         if self.labeled_graph:
             # Use AutoGraph's labeled SENT (matches tokenizer.py lines 74-88)
+            # Handle missing labels gracefully (e.g., from visualization code)
+            node_labels = data.x
+            edge_labels = data.edge_attr
+            if node_labels is None:
+                node_labels = torch.zeros(num_nodes, dtype=torch.long)
+            if edge_labels is None:
+                num_edges = edge_index.shape[1] if edge_index.numel() > 0 else 0
+                edge_labels = torch.zeros(num_edges, dtype=torch.long)
             walk, _ = sample_labeled_sent_from_graph(
                 edge_index=edge_index,
-                node_labels=data.x,  # Integer labels
-                edge_labels=data.edge_attr,  # Integer labels
+                node_labels=node_labels,
+                edge_labels=edge_labels,
                 node_idx_offset=self.node_idx_offset,
                 edge_idx_offset=self.edge_idx_offset,
                 num_nodes=num_nodes,
