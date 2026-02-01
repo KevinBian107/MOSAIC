@@ -76,15 +76,23 @@ def main():
         all_smiles.extend(chunk_data["smiles"])
         all_indices.extend(chunk_data["global_indices"])
 
-        # Verify consistency
+        # Track maximum values and verify consistency
         if vocab_size is None:
             vocab_size = chunk_data["vocab_size"]
             max_num_nodes = chunk_data["max_num_nodes"]
             tokenizer_type = chunk_data["tokenizer_type"]
             tokenizer_config = chunk_data["tokenizer_config"]
         else:
-            assert vocab_size == chunk_data["vocab_size"], "Vocab size mismatch!"
-            assert max_num_nodes == chunk_data["max_num_nodes"], "Max nodes mismatch!"
+            # Use maximum vocab_size and max_num_nodes across all chunks
+            # (chunks may see different max values depending on molecules)
+            if chunk_data["vocab_size"] > vocab_size:
+                log.info(f"  Updating vocab_size: {vocab_size} -> {chunk_data['vocab_size']}")
+                vocab_size = chunk_data["vocab_size"]
+            if chunk_data["max_num_nodes"] > max_num_nodes:
+                log.info(f"  Updating max_num_nodes: {max_num_nodes} -> {chunk_data['max_num_nodes']}")
+                max_num_nodes = chunk_data["max_num_nodes"]
+
+            # Verify tokenizer settings are consistent
             assert tokenizer_type == chunk_data["tokenizer_type"], "Tokenizer type mismatch!"
             assert tokenizer_config == chunk_data["tokenizer_config"], "Tokenizer config mismatch!"
 
