@@ -48,3 +48,29 @@ outputs/benchmark/
 │   └── best.ckpt
 └── ...
 ```
+
+### Naming convention
+
+The script automatically extracts tokenizer type and coarsening strategy from directory names.
+
+**Directory name pattern:** `moses_{tokenizer}_{coarsening}_{other}_...`
+
+**Tokenizer types:**
+- `hsent` - Hierarchical SENT (supports coarsening)
+- `hdt` - Hierarchical DFS-based Tokenizer (supports coarsening)
+- `hdtc` - HDT Compositional (no coarsening, uses FunctionalHierarchyBuilder)
+- `sent` - Flat SENT (no coarsening)
+
+**Coarsening strategies** (only for `hsent` and `hdt`):
+- `mc` → `motif_community` - Direct motif-based community assignment
+- `sc` → `spectral` - Standard spectral clustering (default)
+- `mas` → `motif_aware_spectral` - Spectral clustering with motif preservation
+
+**Examples:**
+```
+moses_hsent_mc_n100000_20260126/   → tokenizer=hsent, coarsening=motif_community
+moses_hdt_sc_n100000_20260126/    → tokenizer=hdt, coarsening=spectral
+moses_hsent_mas_n100000_20260126/ → tokenizer=hsent, coarsening=motif_aware_spectral
+moses_hdtc_n100000_20260126/      → tokenizer=hdtc (no coarsening)
+moses_sent_n100000_20260126/      → tokenizer=sent (no coarsening)
+```
