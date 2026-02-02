@@ -68,6 +68,38 @@ python scripts/realistic_gen.py \
     generation.num_samples=500
 ```
 
+### Scaffold-Primed Generation
+
+Generate molecules starting from a scaffold structure. This enables zero-shot generation of complex molecules by priming the model with known structural motifs.
+
+```python
+from src.models import GraphGeneratorModule
+from src.transfer_learning import PrimedGenerator, ScaffoldLibrary
+
+# Load trained model
+model = GraphGeneratorModule.load_from_checkpoint("path/to/checkpoint.ckpt")
+
+# Create primed generator
+generator = PrimedGenerator(model)
+
+# Generate from a named scaffold
+graphs, time = generator.generate_from_scaffold("naphthalene", num_samples=10)
+
+# Generate from custom SMILES
+graphs, time = generator.generate_from_smiles("c1ccc2ccccc2c1", num_samples=5)
+
+# Generate from all Tier 2 scaffolds (fused bicyclic)
+results, time = generator.generate_by_tier(tier=2, samples_per_scaffold=5)
+
+# List available scaffolds
+print(generator.list_available_scaffolds())
+```
+
+**Scaffold Tiers:**
+- **Tier 1**: Simple monocyclic (benzene, pyridine, furan, etc.)
+- **Tier 2**: Fused bicyclic (naphthalene, indole, quinoline, etc.)
+- **Tier 3**: Complex polycyclic (carbazole, pyrene, phenanthrene, etc.)
+
 ### Table Comparison
 
 ```bash
@@ -95,16 +127,21 @@ pytest tests/ -v
 ```
 MOSAIC/
 ├── src/
-│   ├── data/           # Data loading, generation, and motif detection
-│   ├── tokenizers/     # Graph tokenization (SENT, H-SENT, HDT)
-│   │   └── hierarchical/   # Hierarchical tokenization module
-│   ├── models/         # Transformer models
-│   ├── evaluation/     # Standard and motif metrics
-│   └── realistic_gen/  # Generation quality analysis
-├── configs/            # Hydra configuration
-├── scripts/            # Training, evaluation, and visualization scripts
-├── tests/              # Test suite
-└── docs/               # Documentation
+│   ├── data/              # Data loading, generation, and motif detection
+│   ├── tokenizers/        # Graph tokenization (SENT, H-SENT, HDT, HDTC)
+│   │   ├── coarsening/    # Coarsening strategies (spectral, motif-aware)
+│   │   └── motif/         # Motif detection and patterns
+│   ├── models/            # Transformer models
+│   ├── evaluation/        # Standard and motif metrics
+│   ├── realistic_gen/     # Generation quality analysis
+│   └── transfer_learning/ # Scaffold priming for complex generation
+│       ├── scaffolds/     # Scaffold library and tier patterns
+│       ├── primers/       # Tokenizer-specific primers
+│       └── generation/    # Primed generation utilities
+├── configs/               # Hydra configuration
+├── scripts/               # Training, evaluation, and visualization scripts
+├── tests/                 # Test suite
+└── docs/                  # Documentation
 ```
 
 ## Documentation
