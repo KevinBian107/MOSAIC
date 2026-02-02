@@ -34,8 +34,8 @@ model:
 # Scaffold configuration
 scaffold:
   # Scaffold selection (use ONE of these options):
-  name: null              # Named scaffold (e.g., "benzene", "naphthalene", "carbazole")
-  smiles: null            # Custom SMILES string
+  name: benzene           # Named scaffold (e.g., "benzene", "naphthalene", "carbazole")
+  smiles: null            # Custom SMILES string (overrides name if set)
   tier: null              # Generate from all scaffolds in tier (1, 2, or 3)
 
   # Generation settings
