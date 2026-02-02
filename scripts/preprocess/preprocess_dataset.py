@@ -21,7 +21,7 @@ import torch
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.data.molecular import MolecularDataset
 from src.tokenizers import HDTTokenizer, HSENTTokenizer, SENTTokenizer
@@ -88,6 +88,7 @@ def preprocess_split(
     # Load molecular dataset
     labeled = hasattr(tokenizer, "labeled_graph") and tokenizer.labeled_graph
 
+    log.info(f"Loading {dataset_name} dataset...")
     if dataset_name == "moses":
         mol_dataset = MolecularDataset.from_moses(
             split="train" if split == "train" else "test",
@@ -159,7 +160,7 @@ def preprocess_split(
     return cache_path
 
 
-@hydra.main(version_base="1.3", config_path="../configs", config_name="train")
+@hydra.main(version_base="1.3", config_path="../../configs", config_name="train")
 def main(cfg: DictConfig) -> None:
     """Main preprocessing function.
 

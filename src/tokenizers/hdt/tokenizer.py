@@ -23,6 +23,7 @@ from src.tokenizers.base import BatchConverter, Tokenizer
 from src.tokenizers.coarsening import (
     MotifAwareCoarsening,
     MotifCommunityCoarsening,
+    SimpleSpectralCoarsening,
     SpectralCoarsening,
 )
 from src.tokenizers.ordering import OrderingMethod, order_partition_nodes
@@ -111,9 +112,9 @@ class HDTTokenizer(Tokenizer):
         undirected: bool = True,
         seed: Optional[int] = None,
         min_community_size: int = 4,
-        k_min_factor: float = 0.7,
-        k_max_factor: float = 1.3,
-        n_init: int = 100,
+        k_min_factor: float = 0.9,
+        k_max_factor: float = 1.1,
+        n_init: int = 1,
         coarsening_strategy: Optional[CoarseningStrategyType] = None,
         motif_aware: bool = False,
         motif_alpha: float = 1.0,
@@ -188,6 +189,13 @@ class HDTTokenizer(Tokenizer):
             self.coarsener = MotifCommunityCoarsening(
                 motif_patterns=motif_patterns,
                 min_community_size=min_community_size,
+                seed=seed,
+            )
+        elif coarsening_strategy == "simple_spectral":
+            self.coarsener = SimpleSpectralCoarsening(
+                k_min_factor=k_min_factor,
+                k_max_factor=k_max_factor,
+                n_init=n_init,
                 seed=seed,
             )
         else:  # Default: spectral

@@ -22,6 +22,7 @@ from src.tokenizers.base import BatchConverter, Tokenizer
 from src.tokenizers.coarsening import (
     MotifAwareCoarsening,
     MotifCommunityCoarsening,
+    SimpleSpectralCoarsening,
     SpectralCoarsening,
 )
 from src.tokenizers.ordering import OrderingMethod, order_partition_nodes
@@ -114,9 +115,9 @@ class HSENTTokenizer(Tokenizer):
         undirected: bool = True,
         seed: Optional[int] = None,
         min_community_size: int = 4,
-        k_min_factor: float = 0.7,
-        k_max_factor: float = 1.3,
-        n_init: int = 100,
+        k_min_factor: float = 0.9,
+        k_max_factor: float = 1.1,
+        n_init: int = 1,
         coarsening_strategy: Optional[CoarseningStrategyType] = None,
         motif_aware: bool = False,
         motif_alpha: float = 1.0,
@@ -134,13 +135,14 @@ class HSENTTokenizer(Tokenizer):
             seed: Random seed for reproducibility.
             min_community_size: Minimum community size for decomposition.
                 Communities smaller than this become leaf partitions.
-            k_min_factor: Factor for minimum cluster count in spectral clustering.
-            k_max_factor: Factor for maximum cluster count in spectral clustering.
-            n_init: Number of spectral clustering initializations.
+            k_min_factor: Factor for minimum cluster count in spectral clustering (default 0.9, optimized).
+            k_max_factor: Factor for maximum cluster count in spectral clustering (default 1.1, optimized).
+            n_init: Number of spectral clustering initializations (default 2, optimized).
             coarsening_strategy: Strategy for graph coarsening. Options:
                 - "spectral": Standard spectral clustering (default)
                 - "motif_aware_spectral": Spectral clustering with motif preservation
                 - "motif_community": Direct motif-based community assignment
+                - "simple_spectral": Single-level spectral (optimized, ~50x faster)
             motif_aware: DEPRECATED. Use coarsening_strategy="motif_aware_spectral".
             motif_alpha: Weight for motif affinity matrix (only used with
                 motif-aware strategies). Higher values = stronger motif preservation.
@@ -191,6 +193,13 @@ class HSENTTokenizer(Tokenizer):
             self.coarsener = MotifCommunityCoarsening(
                 motif_patterns=motif_patterns,
                 min_community_size=min_community_size,
+                seed=seed,
+            )
+        elif coarsening_strategy == "simple_spectral":
+            self.coarsener = SimpleSpectralCoarsening(
+                k_min_factor=k_min_factor,
+                k_max_factor=k_max_factor,
+                n_init=n_init,
                 seed=seed,
             )
         else:  # Default: spectral
