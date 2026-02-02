@@ -250,11 +250,13 @@ def graph_to_smiles(data: Data) -> Optional[str]:
         return None
 
 
-def load_moses_dataset(split: str = "train") -> list[str]:
-    """Load MOSES dataset.
+def load_moses_dataset(split: str = "train", max_molecules: Optional[int] = None, seed: int = 42) -> list[str]:
+    """Load MOSES dataset with efficient random sampling.
 
     Args:
         split: Dataset split ('train', 'test', 'test_scaffolds').
+        max_molecules: Maximum number of molecules to load (randomly sampled).
+        seed: Random seed for sampling.
 
     Returns:
         List of SMILES strings.
@@ -262,10 +264,28 @@ def load_moses_dataset(split: str = "train") -> list[str]:
     # Workaround: Read directly from CSV files to avoid rdkit.six import error
     import pandas as pd
     import os
+    import random
 
     csv_file = f"data/moses/{split}.csv"
     if os.path.exists(csv_file):
-        df = pd.read_csv(csv_file)
+        if max_molecules is not None:
+            # Count total rows efficiently
+            with open(csv_file, 'r') as f:
+                total_rows = sum(1 for _ in f) - 1  # -1 for header
+
+            if max_molecules >= total_rows:
+                # Just read everything if asking for all/more rows
+                df = pd.read_csv(csv_file)
+            else:
+                # Random sample: generate random row indices to keep
+                random.seed(seed)
+                skip_indices = sorted(random.sample(range(1, total_rows + 1), total_rows - max_molecules))
+
+                # Read CSV skipping random rows (keep header row 0)
+                df = pd.read_csv(csv_file, skiprows=skip_indices)
+        else:
+            df = pd.read_csv(csv_file)
+
         # MOSES CSV has 'SMILES' column
         if 'SMILES' in df.columns:
             return df['SMILES'].tolist()
@@ -278,7 +298,13 @@ def load_moses_dataset(split: str = "train") -> list[str]:
     # Fallback to moses package if CSV doesn't exist
     try:
         import moses
-        return moses.get_dataset(split)
+        smiles_list = moses.get_dataset(split)
+
+        if max_molecules is not None and max_molecules < len(smiles_list):
+            random.seed(seed)
+            smiles_list = random.sample(smiles_list, max_molecules)
+
+        return smiles_list
     except ImportError:
         raise ImportError(
             f"MOSES CSV file not found at {csv_file} and moses package not installed. "
@@ -353,7 +379,11 @@ class MolecularDataset:
         self.smiles_list = []
         self.graphs = []
 
-        for smiles in smiles_list:
+        print(f"Converting {len(smiles_list)} SMILES to graphs...")
+        for i, smiles in enumerate(smiles_list):
+            if i % 10000 == 0 and i > 0:
+                print(f"  Processed {i}/{len(smiles_list)} molecules...")
+
             graph = smiles_to_graph(
                 smiles,
                 include_hydrogens=include_hydrogens,
@@ -363,6 +393,8 @@ class MolecularDataset:
                 graph.dataset_name = dataset_name
                 self.smiles_list.append(smiles)
                 self.graphs.append(graph)
+
+        print(f"✓ Loaded {len(self.graphs)} valid graphs from {len(smiles_list)} SMILES")
 
     def __len__(self) -> int:
         """Return number of molecules."""
@@ -384,24 +416,26 @@ class MolecularDataset:
         max_molecules: Optional[int] = None,
         include_hydrogens: bool = False,
         labeled: bool = False,
+        seed: int = 42,
     ) -> "MolecularDataset":
-        """Create dataset from MOSES.
+        """Create dataset from MOSES with random sampling.
 
         Args:
             split: Dataset split ('train', 'test', 'test_scaffolds').
-            max_molecules: Maximum number of molecules to load.
+            max_molecules: Maximum number of molecules to load (randomly sampled).
             include_hydrogens: Whether to include explicit hydrogens.
             labeled: If True, use integer labels (AutoGraph format).
+            seed: Random seed for sampling.
 
         Returns:
             MolecularDataset instance.
         """
-        smiles_list = load_moses_dataset(split)
+        smiles_list = load_moses_dataset(split, max_molecules=max_molecules, seed=seed)
         return cls(
             smiles_list,
             dataset_name=f"moses_{split}",
             include_hydrogens=include_hydrogens,
-            max_molecules=max_molecules,
+            max_molecules=None,  # Already filtered in load_moses_dataset
             labeled=labeled,
         )
 

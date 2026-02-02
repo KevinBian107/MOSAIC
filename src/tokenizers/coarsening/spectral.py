@@ -428,38 +428,36 @@ class SpectralCoarsening:
         child_hg: HierarchicalGraph,
         parent_node_list: list[int],
     ) -> HierarchicalGraph:
-        """Remap a child hierarchy's indices to parent's coordinate system.
+        """Remap a child hierarchy's top-level indices to parent's coordinate system.
 
-        When we recursively build a hierarchy for a subgraph, the child
-        uses indices 0..k-1. We need to remap these to the parent's
-        local indices.
+        When we recursively build a hierarchy for a subgraph, the child uses indices
+        0..k-1. This function remaps only the top-level partition indices to the
+        parent's coordinate system. Nested child hierarchies remain in their local
+        coordinate systems.
 
         Args:
-            child_hg: Child hierarchy with local indices.
-            parent_node_list: Parent's global node indices (sorted).
+            child_hg: Child hierarchy with local indices 0..k-1.
+            parent_node_list: Parent's global node indices (sorted, length k).
 
         Returns:
-            Child hierarchy with remapped global indices.
+            Child hierarchy with remapped top-level indices.
         """
         # Remap partitions
         remapped_partitions = []
         for part in child_hg.partitions:
             # Child's global indices are 0..k-1, map to parent's global indices
+
             remapped_global = [
                 parent_node_list[idx] for idx in part.global_node_indices
             ]
-            # Recursively remap child hierarchy if present
-            remapped_child = None
-            if part.child_hierarchy is not None:
-                remapped_child = self._remap_child_hierarchy(
-                    part.child_hierarchy, remapped_global
-                )
+            # Child hierarchies should remain in their local coordinate system
+            # They should NOT be recursively remapped - only top-level indices are remapped
             remapped_partitions.append(
                 Partition(
                     part_id=part.part_id,
                     global_node_indices=remapped_global,
                     edge_index=part.edge_index.clone(),
-                    child_hierarchy=remapped_child,
+                    child_hierarchy=part.child_hierarchy,  # Keep in local coords
                 )
             )
 
@@ -475,4 +473,285 @@ class SpectralCoarsening:
             partitions=remapped_partitions,
             bipartites=child_hg.bipartites,  # Bipartites use local indices, no change
             community_assignment=remapped_assignment,
+        )
+
+
+class SimpleSpectralCoarsening:
+    """Single-level spectral clustering-based graph coarsening.
+
+    This is a simplified version of SpectralCoarsening that performs only
+    single-level spectral clustering without recursive hierarchical decomposition.
+
+    Attributes:
+        k_min_factor: Factor for minimum cluster count (k_min = sqrt(n) * factor).
+        k_max_factor: Factor for maximum cluster count (k_max = sqrt(n) * factor).
+        n_init: Number of initializations for spectral clustering.
+        seed: Random seed for reproducibility.
+    """
+
+    def __init__(
+        self,
+        k_min_factor: float = 0.9,
+        k_max_factor: float = 1.1,
+        n_init: int = 1,
+        seed: int | None = None,
+    ) -> None:
+        """Initialize the simple spectral coarsening strategy.
+
+        Args:
+            k_min_factor: Multiplier for minimum k (default 0.9, optimized for speed/quality).
+            k_max_factor: Multiplier for maximum k (default 1.1, optimized for speed/quality).
+            n_init: Number of spectral clustering initializations (default 1, max speed).
+            seed: Random seed for reproducibility.
+        """
+        self.k_min_factor = k_min_factor
+        self.k_max_factor = k_max_factor
+        self.n_init = n_init
+        self.seed = seed
+
+    def _compute_modularity(
+        self, adj: np.ndarray, partition: dict[int, int]
+    ) -> float:
+        """Compute modularity score for a partition.
+
+        Args:
+            adj: Adjacency matrix as numpy array.
+            partition: Dictionary mapping node -> community ID.
+
+        Returns:
+            Modularity score (higher is better, max is 1.0).
+        """
+        # Try to use python-louvain if available
+        try:
+            import community as community_louvain
+
+            return community_louvain.modularity(partition, adj)
+        except ImportError:
+            pass
+
+        # Fallback: manual computation
+        m = adj.sum() / 2.0
+        if m == 0:
+            return 0.0
+
+        communities: dict[int, list[int]] = {}
+        for node, comm in partition.items():
+            communities.setdefault(comm, []).append(node)
+
+        Q = 0.0
+        for nodes in communities.values():
+            for i in nodes:
+                ki = adj[i].sum()
+                for j in nodes:
+                    kj = adj[j].sum()
+                    Q += adj[i, j] - (ki * kj) / (2 * m)
+
+        return Q / (2 * m)
+
+    def partition(self, data: Data) -> list[set[int]]:
+        """Partition graph into communities using spectral clustering.
+
+        Args:
+            data: PyTorch Geometric Data object with edge_index.
+
+        Returns:
+            List of sets containing node indices for each community.
+        """
+        n = data.num_nodes
+
+        # Handle trivial cases
+        if n <= 1:
+            return [set(range(n))]
+
+        # Build adjacency matrix
+        adj = to_dense_adj(data.edge_index, max_num_nodes=n)[0]
+        adj = ((adj + adj.t()) / 2).numpy()  # Symmetrize for undirected
+
+        if adj.sum() == 0:
+            return [set(range(n))]
+
+        # Compute k range based on graph size
+        k_min = max(2, int(np.sqrt(n) * self.k_min_factor))
+        k_max = min(n - 1, int(np.sqrt(n) * self.k_max_factor))
+
+        if k_min > k_max:
+            k_min = k_max = max(2, min(n - 1, 2))
+
+        # Search for best K by modularity
+        best_modularity = -float("inf")
+        best_partition: dict[int, int] | None = None
+
+        from sklearn.cluster import SpectralClustering
+
+        for K in range(k_min, k_max + 1):
+            try:
+                sc = SpectralClustering(
+                    n_clusters=K,
+                    affinity="precomputed",
+                    n_init=self.n_init,
+                    random_state=self.seed,
+                    assign_labels="kmeans",
+                )
+                labels = sc.fit_predict(adj + np.eye(n) * 1e-6)
+                partition = dict(enumerate(labels))
+
+                modularity = self._compute_modularity(adj, partition)
+                if modularity > best_modularity:
+                    best_modularity = modularity
+                    best_partition = partition
+            except Exception:
+                continue
+
+        if best_partition is None:
+            return [set(range(n))]
+
+        # Convert to list of sets
+        communities: dict[int, set[int]] = {}
+        for node, comm in best_partition.items():
+            communities.setdefault(comm, set()).add(node)
+
+        return list(communities.values())
+
+    def build_hierarchy(self, data: Data) -> HierarchicalGraph:
+        """Build single-level hierarchical graph from spectral partitioning.
+
+        Unlike SpectralCoarsening.build_hierarchy(), this performs only
+        single-level clustering without recursive decomposition.
+
+        Args:
+            data: PyTorch Geometric Data object.
+
+        Returns:
+            HierarchicalGraph with single-level partitions (no child hierarchies).
+        """
+        n = data.num_nodes
+
+        # Extract node features if present
+        node_features_global = data.x if hasattr(data, "x") and data.x is not None else None
+
+        # Extract edge features if present
+        edge_features_global: dict[tuple[int, int], int] | None = None
+        if hasattr(data, "edge_attr") and data.edge_attr is not None:
+            edge_features_global = {}
+            for i in range(data.edge_index.shape[1]):
+                src = int(data.edge_index[0, i])
+                dst = int(data.edge_index[1, i])
+                bond_type = int(data.edge_attr[i])
+                edge_features_global[(src, dst)] = bond_type
+
+        # Partition into communities (single level only)
+        communities = self.partition(data)
+
+        # If only one community, return single partition
+        if len(communities) <= 1:
+            return HierarchicalGraph(
+                partitions=[
+                    Partition(
+                        part_id=0,
+                        global_node_indices=list(range(n)),
+                        edge_index=data.edge_index,
+                        child_hierarchy=None,
+                        node_features=node_features_global,
+                    )
+                ],
+                bipartites=[],
+                community_assignment=[0] * n,
+                node_features=node_features_global,
+                edge_features=edge_features_global,
+            )
+
+        # Build community assignment
+        community_assignment = [0] * n
+        for comm_id, nodes in enumerate(communities):
+            for node in nodes:
+                community_assignment[node] = comm_id
+
+        # Extract partitions (no child hierarchies)
+        partitions = []
+        for comm_id, nodes in enumerate(communities):
+            node_list = sorted(nodes)
+
+            # Extract subgraph edges
+            if len(node_list) > 0:
+                sub_edge_index, _ = subgraph(
+                    subset=torch.tensor(node_list, dtype=torch.long),
+                    edge_index=data.edge_index,
+                    relabel_nodes=True,
+                    num_nodes=n,
+                )
+            else:
+                sub_edge_index = torch.zeros((2, 0), dtype=torch.long)
+
+            # Extract partition node features
+            part_node_features = None
+            if node_features_global is not None:
+                part_node_features = node_features_global[node_list]
+
+            partitions.append(
+                Partition(
+                    part_id=comm_id,
+                    global_node_indices=node_list,
+                    edge_index=sub_edge_index,
+                    child_hierarchy=None,  # No recursion
+                    node_features=part_node_features,
+                )
+            )
+
+        # Extract bipartites (off-diagonal blocks)
+        bipartites = []
+        for i in range(len(partitions)):
+            for j in range(i + 1, len(partitions)):
+                left_nodes = set(partitions[i].global_node_indices)
+                right_nodes = set(partitions[j].global_node_indices)
+
+                # Find edges between the two partitions
+                bipart_edges = []
+                bipart_edge_features = []
+                for edge_idx in range(data.edge_index.shape[1]):
+                    src = int(data.edge_index[0, edge_idx])
+                    dst = int(data.edge_index[1, edge_idx])
+
+                    if (src in left_nodes and dst in right_nodes) or (
+                        src in right_nodes and dst in left_nodes
+                    ):
+                        # Remap to local indices within partitions
+                        if src in left_nodes:
+                            local_src = partitions[i].global_node_indices.index(src)
+                            local_dst = partitions[j].global_node_indices.index(dst)
+                        else:
+                            local_src = partitions[j].global_node_indices.index(src)
+                            local_dst = partitions[i].global_node_indices.index(dst)
+
+                        bipart_edges.append([local_src, local_dst])
+
+                        if edge_features_global is not None:
+                            bond = edge_features_global.get((src, dst), 0)
+                            bipart_edge_features.append(bond)
+
+                if bipart_edges:
+                    bipart_edge_index = torch.tensor(
+                        bipart_edges, dtype=torch.long
+                    ).t()
+
+                    bipart_edge_attr = None
+                    if bipart_edge_features:
+                        bipart_edge_attr = torch.tensor(
+                            bipart_edge_features, dtype=torch.long
+                        )
+
+                    bipartites.append(
+                        Bipartite(
+                            left_part_id=i,
+                            right_part_id=j,
+                            edge_index=bipart_edge_index,
+                            edge_features=bipart_edge_attr,
+                        )
+                    )
+
+        return HierarchicalGraph(
+            partitions=partitions,
+            bipartites=bipartites,
+            community_assignment=community_assignment,
+            node_features=node_features_global,
+            edge_features=edge_features_global,
         )
