@@ -1,0 +1,65 @@
+# @package _global_
+#
+# Scaffold-Primed Generation Configuration
+#
+# Generate molecules starting from scaffold structures using trained models.
+# This enables zero-shot generation of complex molecules by priming with
+# known structural motifs.
+#
+# Usage:
+#   # Generate from naphthalene scaffold
+#   python scripts/primed_gen.py scaffold.name=naphthalene
+#
+#   # Generate from custom SMILES
+#   python scripts/primed_gen.py scaffold.smiles="c1ccc2ccccc2c1"
+#
+#   # Generate from all Tier 2 scaffolds
+#   python scripts/primed_gen.py scaffold.tier=2
+#
+#   # Use different tokenizer
+#   python scripts/primed_gen.py tokenizer=hsent
+
+defaults:
+  - /experiment: moses
+  - /tokenizer: hdtc
+  - _self_
+
+# Random seed
+seed: 42
+
+# Model configuration
+model:
+  checkpoint_path: outputs/benchmark/moses_hdtc_n500000_20260129-171812/best.ckpt
+
+# Scaffold configuration
+scaffold:
+  # Scaffold selection (use ONE of these options):
+  name: null              # Named scaffold (e.g., "benzene", "naphthalene", "carbazole")
+  smiles: null            # Custom SMILES string
+  tier: null              # Generate from all scaffolds in tier (1, 2, or 3)
+
+  # Generation settings
+  num_samples: 10         # Samples per scaffold
+  priming_level: scaffold_only  # Priming detail level
+
+# Generation configuration
+generation:
+  batch_size: 32          # Batch size for generation
+
+# Sampling configuration
+sampling:
+  top_k: 10
+  temperature: 1.0
+  max_length: 2048
+
+# Output configuration
+output:
+  save_smiles: true       # Save generated SMILES to file
+  save_graphs: false      # Save generated graphs as .pt file
+  visualize: true         # Generate molecule visualizations
+
+# Logging configuration
+logs:
+  base_dir: outputs/primed_gen
+  run_name: ${data.dataset_name}_${tokenizer.type}
+  path: ${logs.base_dir}/${logs.run_name}_${now:%Y%m%d-%H%M%S}

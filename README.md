@@ -72,9 +72,41 @@ python scripts/realistic_gen.py \
 
 Generate molecules starting from a scaffold structure. This enables zero-shot generation of complex molecules by priming the model with known structural motifs.
 
+```bash
+# Generate from a named scaffold (e.g., naphthalene)
+python scripts/primed_gen.py \
+    model.checkpoint_path=outputs/train/moses_hdt_*/best.ckpt \
+    scaffold.name=naphthalene \
+    scaffold.num_samples=10
+
+# Generate from custom SMILES
+python scripts/primed_gen.py \
+    model.checkpoint_path=outputs/train/moses_hdt_*/best.ckpt \
+    scaffold.smiles="c1ccc2ccccc2c1"
+
+# Generate from all Tier 2 scaffolds (fused bicyclic)
+python scripts/primed_gen.py \
+    model.checkpoint_path=outputs/train/moses_hdt_*/best.ckpt \
+    scaffold.tier=2
+
+# Use different tokenizer (HSENT)
+python scripts/primed_gen.py \
+    model.checkpoint_path=outputs/train/moses_hsent_*/best.ckpt \
+    tokenizer=hsent \
+    scaffold.name=carbazole
+```
+
+**Scaffold Tiers:**
+- **Tier 1**: Simple monocyclic (benzene, pyridine, furan, etc.)
+- **Tier 2**: Fused bicyclic (naphthalene, indole, quinoline, etc.)
+- **Tier 3**: Complex polycyclic (carbazole, pyrene, phenanthrene, etc.)
+
+<details>
+<summary>Python API</summary>
+
 ```python
 from src.models import GraphGeneratorModule
-from src.transfer_learning import PrimedGenerator, ScaffoldLibrary
+from src.transfer_learning import PrimedGenerator
 
 # Load trained model
 model = GraphGeneratorModule.load_from_checkpoint("path/to/checkpoint.ckpt")
@@ -88,17 +120,13 @@ graphs, time = generator.generate_from_scaffold("naphthalene", num_samples=10)
 # Generate from custom SMILES
 graphs, time = generator.generate_from_smiles("c1ccc2ccccc2c1", num_samples=5)
 
-# Generate from all Tier 2 scaffolds (fused bicyclic)
+# Generate from all Tier 2 scaffolds
 results, time = generator.generate_by_tier(tier=2, samples_per_scaffold=5)
 
 # List available scaffolds
 print(generator.list_available_scaffolds())
 ```
-
-**Scaffold Tiers:**
-- **Tier 1**: Simple monocyclic (benzene, pyridine, furan, etc.)
-- **Tier 2**: Fused bicyclic (naphthalene, indole, quinoline, etc.)
-- **Tier 3**: Complex polycyclic (carbazole, pyrene, phenanthrene, etc.)
+</details>
 
 ### Table Comparison
 
