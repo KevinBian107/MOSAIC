@@ -5,6 +5,7 @@ and a library class for managing scaffolds.
 """
 
 from src.transfer_learning.scaffolds.library import Scaffold, ScaffoldLibrary
+from src.transfer_learning.scaffolds.murcko_extractor import MurckoExtractor
 from src.transfer_learning.scaffolds.tier_patterns import (
     TIER1_SCAFFOLDS,
     TIER2_SCAFFOLDS,
@@ -12,6 +13,7 @@ from src.transfer_learning.scaffolds.tier_patterns import (
 )
 
 __all__ = [
+    "MurckoExtractor",
     "Scaffold",
     "ScaffoldLibrary",
     "TIER1_SCAFFOLDS",

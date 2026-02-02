@@ -70,63 +70,41 @@ python scripts/realistic_gen.py \
 
 ### Scaffold-Primed Generation
 
-Generate molecules starting from a scaffold structure. This enables zero-shot generation of complex molecules by priming the model with known structural motifs.
+Evaluate scaffold priming using real complex natural products from COCONUT. This extracts Murcko scaffolds from complex molecules, primes the model with scaffold tokens, and evaluates how well generated molecules match the original targets.
 
 ```bash
-# Generate from a named scaffold (e.g., naphthalene)
-python scripts/primed_gen.py \
-    model.checkpoint_path=outputs/train/moses_hdt_*/best.ckpt \
-    scaffold.name=naphthalene \
-    scaffold.num_samples=10
+# First, prepare the complex molecule dataset (one-time setup)
+# Downloads and filters COCONUT natural products (~191MB download)
+python scripts/prepare_coconut_data.py
 
-# Generate from custom SMILES
-python scripts/primed_gen.py \
-    model.checkpoint_path=outputs/train/moses_hdt_*/best.ckpt \
-    scaffold.smiles="c1ccc2ccccc2c1"
+# Custom filtering thresholds
+python scripts/prepare_coconut_data.py \
+    --n-molecules 10000 \
+    --min-atoms 25 \
+    --min-rings 3
 
-# Generate from all Tier 2 scaffolds (fused bicyclic)
-python scripts/primed_gen.py \
-    model.checkpoint_path=outputs/train/moses_hdt_*/best.ckpt \
-    scaffold.tier=2
+# Run scaffold priming evaluation
+python scripts/primed_gen.py
 
-# Use different tokenizer (HSENT)
+# Customize evaluation
 python scripts/primed_gen.py \
-    model.checkpoint_path=outputs/train/moses_hsent_*/best.ckpt \
-    tokenizer=hsent \
-    scaffold.name=carbazole
+    data_source.n_molecules=100 \
+    evaluation.samples_per_molecule=10
+
+# Use different tokenizer
+python scripts/primed_gen.py tokenizer=hsent
 ```
 
-**Scaffold Tiers:**
-- **Tier 1**: Simple monocyclic (benzene, pyridine, furan, etc.)
-- **Tier 2**: Fused bicyclic (naphthalene, indole, quinoline, etc.)
-- **Tier 3**: Complex polycyclic (carbazole, pyrene, phenanthrene, etc.)
+**Evaluation Metrics:**
+- **Scaffold Preservation**: Fraction of generated molecules containing the input scaffold
+- **Tanimoto Similarity**: Fingerprint similarity to target molecule
+- **Validity Rate**: Fraction of valid SMILES generated
+- **Atom Ratio**: Ratio of generated/target atom counts
 
-<details>
-<summary>Python API</summary>
-
-```python
-from src.models import GraphGeneratorModule
-from src.transfer_learning import PrimedGenerator
-
-# Load trained model
-model = GraphGeneratorModule.load_from_checkpoint("path/to/checkpoint.ckpt")
-
-# Create primed generator
-generator = PrimedGenerator(model)
-
-# Generate from a named scaffold
-graphs, time = generator.generate_from_scaffold("naphthalene", num_samples=10)
-
-# Generate from custom SMILES
-graphs, time = generator.generate_from_smiles("c1ccc2ccccc2c1", num_samples=5)
-
-# Generate from all Tier 2 scaffolds
-results, time = generator.generate_by_tier(tier=2, samples_per_scaffold=5)
-
-# List available scaffolds
-print(generator.list_available_scaffolds())
-```
-</details>
+**Output:**
+- `evaluation_results.json`: Aggregated metrics (mean, std, max)
+- `visualizations/sample_XXX.png`: Comparison images showing scaffold (primer) → generated molecules → target
+- `summary_grid.png`: Grid overview of scaffold → best generated → target for multiple samples
 
 ### Table Comparison
 
@@ -163,8 +141,10 @@ MOSAIC/
 │   ├── evaluation/        # Standard and motif metrics
 │   ├── realistic_gen/     # Generation quality analysis
 │   └── transfer_learning/ # Scaffold priming for complex generation
-│       ├── scaffolds/     # Scaffold library and tier patterns
-│       ├── primers/       # Tokenizer-specific primers
+│       ├── scaffolds/     # Scaffold library, tier patterns, and Murcko extraction
+│       ├── primers/       # Tokenizer-specific primers with cut point detection
+│       ├── datasets/      # Complex molecule datasets for evaluation
+│       ├── evaluation/    # Priming evaluation metrics
 │       └── generation/    # Primed generation utilities
 ├── configs/               # Hydra configuration
 ├── scripts/               # Training, evaluation, and visualization scripts

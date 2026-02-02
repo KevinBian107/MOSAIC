@@ -120,6 +120,35 @@ class HDTPrimer(TokenizerPrimer):
 
         return True
 
+    def find_valid_cut_points(self, tokens: Tensor) -> list[int]:
+        """Find indices after EXIT tokens when back at root level.
+
+        HDT tokenization structure:
+            SOS [ENTER nodes EXIT back_edges]* EOS
+
+        Valid cut points are after EXIT tokens when the depth returns
+        to 0 (root level), marking complete subtrees.
+
+        Args:
+            tokens: 1D tensor of token indices.
+
+        Returns:
+            List of valid cut point indices (after EXIT at root level).
+        """
+        cut_points: list[int] = []
+        depth = 0
+
+        for i, tok in enumerate(tokens):
+            tok_val = tok.item()
+            if tok_val == self._tokenizer.ENTER:
+                depth += 1
+            elif tok_val == self._tokenizer.EXIT:
+                depth -= 1
+                if depth == 0:
+                    cut_points.append(i)
+
+        return cut_points
+
     def get_special_tokens(self) -> dict[str, int]:
         """Get HDT special token mappings.
 

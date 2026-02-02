@@ -41,12 +41,12 @@ for arg in "$@"; do
     esac
 done
 
-# Find all best.ckpt files in benchmark directory
-CHECKPOINTS=$(find "$BENCHMARK_DIR" -name "best.ckpt" -type f 2>/dev/null)
+# Find all last.ckpt files in benchmark directory
+CHECKPOINTS=$(find "$BENCHMARK_DIR" -name "last.ckpt" -type f 2>/dev/null)
 
 if [ -z "$CHECKPOINTS" ]; then
     echo "Error: No checkpoints found in $BENCHMARK_DIR"
-    echo "Expected to find best.ckpt files in the benchmark directory."
+    echo "Expected to find last.ckpt files in the benchmark directory."
     exit 1
 fi
 
@@ -57,19 +57,21 @@ echo ""
 cd "$PROJECT_ROOT"
 
 # Extract tokenizer type from checkpoint path
-# Directory names follow pattern: moses_{tokenizer}_{variant}_...
+# Directory names follow pattern: moses_{tokenizer}_{variant}_... or moses_{tokenizer}_n{count}_...
 get_tokenizer_type() {
     local ckpt_path="$1"
     local dir_name=$(basename "$(dirname "$ckpt_path")")
 
-    # Extract tokenizer from directory name (e.g., moses_hsent_mc_... -> hsent)
-    if [[ "$dir_name" == *"_hsent_"* ]]; then
+    # Extract tokenizer from directory name
+    # Check order matters: hsent before sent, hdtc before hdt
+    # Patterns match both _tokenizer_ and _tokenizer followed by non-alpha (e.g., _sent_n, _hdt-)
+    if [[ "$dir_name" == *"_hsent_"* ]] || [[ "$dir_name" =~ _hsent[^a-z] ]]; then
         echo "hsent"
-    elif [[ "$dir_name" == *"_hdtc_"* ]]; then
+    elif [[ "$dir_name" == *"_hdtc_"* ]] || [[ "$dir_name" =~ _hdtc[^a-z] ]]; then
         echo "hdtc"
-    elif [[ "$dir_name" == *"_hdt_"* ]]; then
+    elif [[ "$dir_name" == *"_hdt_"* ]] || [[ "$dir_name" =~ _hdt[^a-z] ]]; then
         echo "hdt"
-    elif [[ "$dir_name" == *"_sent_"* ]]; then
+    elif [[ "$dir_name" == *"_sent_"* ]] || [[ "$dir_name" =~ _sent[^a-z] ]]; then
         echo "sent"
     else
         echo "hsent"  # Default fallback
@@ -84,11 +86,12 @@ get_coarsening_strategy() {
     local dir_name=$(basename "$(dirname "$ckpt_path")")
 
     # Extract coarsening strategy from directory name
-    if [[ "$dir_name" == *"_mc_"* ]] || [[ "$dir_name" == *"_mc-"* ]]; then
+    # Patterns match _strategy_ or _strategy followed by non-alpha (e.g., _mc_, _mcn, _mc-)
+    if [[ "$dir_name" == *"_mc_"* ]] || [[ "$dir_name" =~ _mc[^a-z] ]]; then
         echo "motif_community"
-    elif [[ "$dir_name" == *"_sc_"* ]] || [[ "$dir_name" == *"_sc-"* ]]; then
+    elif [[ "$dir_name" == *"_sc_"* ]] || [[ "$dir_name" =~ _sc[^a-z] ]]; then
         echo "spectral"
-    elif [[ "$dir_name" == *"_mas_"* ]] || [[ "$dir_name" == *"_mas-"* ]]; then
+    elif [[ "$dir_name" == *"_mas_"* ]] || [[ "$dir_name" =~ _mas[^a-z] ]]; then
         echo "motif_aware_spectral"
     else
         echo "spectral"  # Default fallback

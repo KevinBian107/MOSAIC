@@ -74,6 +74,75 @@ class TokenizerPrimer(ABC):
         """
         pass
 
+    @abstractmethod
+    def find_valid_cut_points(self, tokens: Tensor) -> list[int]:
+        """Find indices where tokens can be safely cut for priming.
+
+        Each tokenizer has specific structural boundaries where it's safe
+        to cut the token sequence. For example:
+        - HDTC: After COMM_END tokens (complete communities)
+        - HDT: After EXIT tokens when back at root level
+        - HSENT: After RCOM tokens (complete communities)
+
+        Cutting at invalid points could result in malformed partial sequences
+        that the model cannot properly complete.
+
+        Args:
+            tokens: 1D tensor of token indices (full tokenization with EOS).
+
+        Returns:
+            List of valid cut point indices (sorted ascending).
+        """
+        pass
+
+    def create_primer_at_level(
+        self,
+        scaffold: "Scaffold",
+        cut_level: int = -1,
+    ) -> Tensor:
+        """Create primer tokens cut at a specific structural level.
+
+        Instead of simply stripping EOS, this method cuts the token sequence
+        at a structurally valid boundary (e.g., after a complete community).
+
+        Args:
+            scaffold: Scaffold object to create primer from.
+            cut_level: Index into the list of valid cut points.
+                -1 means the last valid cut point (most complete).
+                0 means the first valid cut point (least complete).
+
+        Returns:
+            1D tensor of token indices cut at the specified level.
+
+        Raises:
+            ValueError: If no valid cut points exist.
+        """
+        # Get full tokenization (includes SOS and EOS)
+        graph = scaffold.get_graph(labeled=True)
+        if graph is None:
+            raise ValueError(f"Failed to create graph from scaffold: {scaffold.smiles}")
+
+        # Ensure max_num_nodes is set
+        if self.tokenizer.max_num_nodes is None:
+            self.tokenizer.set_num_nodes(graph.num_nodes)
+        elif graph.num_nodes > self.tokenizer.max_num_nodes:
+            self.tokenizer.set_num_nodes(graph.num_nodes)
+
+        tokens = self.tokenizer.tokenize(graph)
+
+        # Find valid cut points
+        cut_points = self.find_valid_cut_points(tokens)
+
+        if not cut_points:
+            # No valid cut points, fall back to just SOS
+            return torch.tensor([self.tokenizer.sos], dtype=torch.long)
+
+        # Get the requested cut point
+        cut_idx = cut_points[cut_level]
+
+        # Return tokens up to and including the cut point
+        return tokens[: cut_idx + 1]
+
     def batch_primers(
         self,
         scaffolds: list["Scaffold"],

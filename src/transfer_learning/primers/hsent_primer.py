@@ -124,6 +124,27 @@ class HSENTPrimer(TokenizerPrimer):
 
         return True
 
+    def find_valid_cut_points(self, tokens: Tensor) -> list[int]:
+        """Find indices after RCOM tokens (complete communities).
+
+        HSENT tokenization structure:
+            SOS [LCOM nodes RCOM bipartite]* EOS
+
+        Valid cut points are after RCOM tokens, which mark the end
+        of a complete community block.
+
+        Args:
+            tokens: 1D tensor of token indices.
+
+        Returns:
+            List of valid cut point indices (after each RCOM).
+        """
+        cut_points: list[int] = []
+        for i, tok in enumerate(tokens):
+            if tok.item() == self._tokenizer.RCOM:
+                cut_points.append(i)
+        return cut_points
+
     def get_special_tokens(self) -> dict[str, int]:
         """Get HSENT special token mappings.
 

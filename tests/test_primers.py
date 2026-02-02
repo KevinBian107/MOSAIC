@@ -307,3 +307,163 @@ class TestPrimerRoundTrip:
 
         # Should have same number of atoms
         assert decoded.num_atoms == benzene_scaffold.num_atoms
+
+
+class TestHDTCCutPoints:
+    """Tests for HDTC find_valid_cut_points."""
+
+    @pytest.fixture
+    def tokenizer(self) -> HDTCTokenizer:
+        """Create HDTC tokenizer."""
+        tokenizer = HDTCTokenizer()
+        tokenizer.set_num_nodes(50)
+        return tokenizer
+
+    @pytest.fixture
+    def primer(self, tokenizer: HDTCTokenizer) -> HDTCPrimer:
+        """Create HDTC primer."""
+        return HDTCPrimer(tokenizer)
+
+    def test_find_cut_points_returns_list(
+        self, primer: HDTCPrimer, benzene_scaffold: Scaffold
+    ) -> None:
+        """find_valid_cut_points should return a list of indices."""
+        graph = benzene_scaffold.get_graph(labeled=True)
+        tokens = primer._tokenizer.tokenize(graph)
+        cut_points = primer.find_valid_cut_points(tokens)
+
+        assert isinstance(cut_points, list)
+
+    def test_cut_points_are_after_comm_end(
+        self, primer: HDTCPrimer, benzene_scaffold: Scaffold
+    ) -> None:
+        """Cut points should be at COMM_END token positions."""
+        graph = benzene_scaffold.get_graph(labeled=True)
+        tokens = primer._tokenizer.tokenize(graph)
+        cut_points = primer.find_valid_cut_points(tokens)
+
+        # Each cut point should be at a COMM_END token
+        for idx in cut_points:
+            assert tokens[idx].item() == primer._tokenizer.COMM_END
+
+    def test_create_primer_at_level(
+        self, primer: HDTCPrimer, naphthalene_scaffold: Scaffold
+    ) -> None:
+        """create_primer_at_level should cut at valid boundaries."""
+        # Naphthalene should have at least one community
+        primer_tokens = primer.create_primer_at_level(
+            naphthalene_scaffold, cut_level=-1
+        )
+
+        # Should start with SOS
+        assert primer_tokens[0].item() == primer._tokenizer.SOS
+        # Should not end with EOS
+        assert primer_tokens[-1].item() != primer._tokenizer.EOS
+        # Should be valid primer
+        assert primer.validate_primer(primer_tokens)
+
+
+class TestHDTCutPoints:
+    """Tests for HDT find_valid_cut_points."""
+
+    @pytest.fixture
+    def tokenizer(self) -> HDTTokenizer:
+        """Create HDT tokenizer."""
+        tokenizer = HDTTokenizer()
+        tokenizer.set_num_nodes(50)
+        return tokenizer
+
+    @pytest.fixture
+    def primer(self, tokenizer: HDTTokenizer) -> HDTPrimer:
+        """Create HDT primer."""
+        return HDTPrimer(tokenizer)
+
+    def test_find_cut_points_returns_list(
+        self, primer: HDTPrimer, benzene_scaffold: Scaffold
+    ) -> None:
+        """find_valid_cut_points should return a list of indices."""
+        graph = benzene_scaffold.get_graph(labeled=True)
+        tokens = primer._tokenizer.tokenize(graph)
+        cut_points = primer.find_valid_cut_points(tokens)
+
+        assert isinstance(cut_points, list)
+
+    def test_cut_points_are_after_exit_at_root(
+        self, primer: HDTPrimer, benzene_scaffold: Scaffold
+    ) -> None:
+        """Cut points should be at EXIT tokens when depth returns to 0."""
+        graph = benzene_scaffold.get_graph(labeled=True)
+        tokens = primer._tokenizer.tokenize(graph)
+        cut_points = primer.find_valid_cut_points(tokens)
+
+        # Each cut point should be at an EXIT token
+        for idx in cut_points:
+            assert tokens[idx].item() == primer._tokenizer.EXIT
+
+    def test_create_primer_at_level(
+        self, primer: HDTPrimer, naphthalene_scaffold: Scaffold
+    ) -> None:
+        """create_primer_at_level should cut at valid boundaries."""
+        primer_tokens = primer.create_primer_at_level(
+            naphthalene_scaffold, cut_level=-1
+        )
+
+        # Should start with SOS
+        assert primer_tokens[0].item() == primer._tokenizer.SOS
+        # Should not end with EOS
+        assert primer_tokens[-1].item() != primer._tokenizer.EOS
+        # Should be valid primer
+        assert primer.validate_primer(primer_tokens)
+
+
+class TestHSENTCutPoints:
+    """Tests for HSENT find_valid_cut_points."""
+
+    @pytest.fixture
+    def tokenizer(self) -> HSENTTokenizer:
+        """Create HSENT tokenizer."""
+        tokenizer = HSENTTokenizer()
+        tokenizer.set_num_nodes(50)
+        return tokenizer
+
+    @pytest.fixture
+    def primer(self, tokenizer: HSENTTokenizer) -> HSENTPrimer:
+        """Create HSENT primer."""
+        return HSENTPrimer(tokenizer)
+
+    def test_find_cut_points_returns_list(
+        self, primer: HSENTPrimer, benzene_scaffold: Scaffold
+    ) -> None:
+        """find_valid_cut_points should return a list of indices."""
+        graph = benzene_scaffold.get_graph(labeled=True)
+        tokens = primer._tokenizer.tokenize(graph)
+        cut_points = primer.find_valid_cut_points(tokens)
+
+        assert isinstance(cut_points, list)
+
+    def test_cut_points_are_after_rcom(
+        self, primer: HSENTPrimer, benzene_scaffold: Scaffold
+    ) -> None:
+        """Cut points should be at RCOM token positions."""
+        graph = benzene_scaffold.get_graph(labeled=True)
+        tokens = primer._tokenizer.tokenize(graph)
+        cut_points = primer.find_valid_cut_points(tokens)
+
+        # Each cut point should be at an RCOM token
+        for idx in cut_points:
+            assert tokens[idx].item() == primer._tokenizer.RCOM
+
+    def test_create_primer_at_level(
+        self, primer: HSENTPrimer, naphthalene_scaffold: Scaffold
+    ) -> None:
+        """create_primer_at_level should cut at valid boundaries."""
+        primer_tokens = primer.create_primer_at_level(
+            naphthalene_scaffold, cut_level=-1
+        )
+
+        # Should start with SOS
+        assert primer_tokens[0].item() == primer._tokenizer.SOS
+        # Should not end with EOS
+        assert primer_tokens[-1].item() != primer._tokenizer.EOS
+        # Should be valid primer
+        assert primer.validate_primer(primer_tokens)

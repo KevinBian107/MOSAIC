@@ -125,6 +125,27 @@ class HDTCPrimer(TokenizerPrimer):
 
         return True
 
+    def find_valid_cut_points(self, tokens: Tensor) -> list[int]:
+        """Find indices after COMM_END tokens.
+
+        HDTC tokenization structure:
+            SOS [COMM_START nodes COMM_END edges]* EOS
+
+        Valid cut points are after COMM_END tokens, which mark the end
+        of a complete community block including its internal edges.
+
+        Args:
+            tokens: 1D tensor of token indices.
+
+        Returns:
+            List of valid cut point indices (after each COMM_END).
+        """
+        cut_points: list[int] = []
+        for i, tok in enumerate(tokens):
+            if tok.item() == self._tokenizer.COMM_END:
+                cut_points.append(i)
+        return cut_points
+
     def get_special_tokens(self) -> dict[str, int]:
         """Get HDTC special token mappings.
 

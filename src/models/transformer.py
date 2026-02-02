@@ -139,6 +139,7 @@ class TransformerLM(nn.Module):
         top_k: int = 10,
         temperature: float = 1.0,
         max_length: Optional[int] = None,
+        min_new_tokens: Optional[int] = None,
         return_tokens: bool = False,
     ) -> list:
         """Generate graphs autoregressively.
@@ -148,6 +149,8 @@ class TransformerLM(nn.Module):
             top_k: Number of highest probability tokens to sample from.
             temperature: Sampling temperature.
             max_length: Maximum generation length.
+            min_new_tokens: Minimum number of new tokens to generate beyond input.
+                If set, EOS token is suppressed until this many tokens are generated.
             return_tokens: If True, return tokens instead of Data objects.
 
         Returns:
@@ -156,13 +159,19 @@ class TransformerLM(nn.Module):
         batch_size = input_ids.shape[0]
         max_length = max_length or self.max_length
 
-        generated = self.model.generate(
-            input_ids,
-            do_sample=True,
-            top_k=top_k,
-            temperature=temperature,
-            max_length=max_length,
-        )
+        # Build generate kwargs
+        generate_kwargs = {
+            "do_sample": True,
+            "top_k": top_k,
+            "temperature": temperature,
+            "max_length": max_length,
+        }
+
+        # Add min_new_tokens if specified
+        if min_new_tokens is not None:
+            generate_kwargs["min_new_tokens"] = min_new_tokens
+
+        generated = self.model.generate(input_ids, **generate_kwargs)
 
         results = []
         for i in range(batch_size):
@@ -282,6 +291,7 @@ class GraphGeneratorModule(pl.LightningModule):
         num_samples: Optional[int] = None,
         input_ids: Optional[torch.Tensor] = None,
         show_progress: bool = False,
+        min_new_tokens: Optional[int] = None,
     ) -> tuple[list, float]:
         """Generate graphs.
 
@@ -289,6 +299,9 @@ class GraphGeneratorModule(pl.LightningModule):
             num_samples: Number of graphs to generate.
             input_ids: Optional initial tokens.
             show_progress: Whether to show a progress bar.
+            min_new_tokens: Minimum number of new tokens to generate beyond input.
+                If set, EOS token is suppressed until this many tokens are generated.
+                Useful for scaffold priming to encourage longer completions.
 
         Returns:
             Tuple of (list of Data objects, average time per sample).
@@ -327,6 +340,7 @@ class GraphGeneratorModule(pl.LightningModule):
                 top_k=self.sampling_top_k,
                 temperature=self.sampling_temperature,
                 max_length=self.sampling_max_length,
+                min_new_tokens=min_new_tokens,
             )
             toc = timer()
 

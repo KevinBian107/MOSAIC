@@ -1,31 +1,24 @@
 #!/usr/bin/env python
-"""Scaffold-primed generation script.
+"""Scaffold-primed generation evaluation script.
 
-This script generates molecules starting from scaffold structures using trained
-models. It enables zero-shot generation of complex molecules by priming with
-known structural motifs.
+This script evaluates scaffold priming using complex natural products from COCONUT.
+It extracts Murcko scaffolds from complex molecules, primes the model with scaffold
+tokens, generates completions, and evaluates how well they match the original.
 
 Usage:
-    # Generate from a named scaffold
-    python scripts/primed_gen.py \
-        model.checkpoint_path=outputs/train/moses_hdt_*/best.ckpt \
-        scaffold.name=naphthalene
+    # First, prepare the data (one-time)
+    python scripts/prepare_coconut_data.py
 
-    # Generate from custom SMILES
-    python scripts/primed_gen.py \
-        model.checkpoint_path=outputs/train/moses_hdt_*/best.ckpt \
-        scaffold.smiles="c1ccc2ccccc2c1"
+    # Run evaluation
+    python scripts/primed_gen.py
 
-    # Generate from all Tier 2 scaffolds (fused bicyclic)
+    # Customize evaluation
     python scripts/primed_gen.py \
-        model.checkpoint_path=outputs/train/moses_hdt_*/best.ckpt \
-        scaffold.tier=2
+        data_source.n_molecules=50 \
+        evaluation.samples_per_molecule=5
 
-    # Use HSENT tokenizer
-    python scripts/primed_gen.py \
-        model.checkpoint_path=outputs/train/moses_hsent_*/best.ckpt \
-        tokenizer=hsent \
-        scaffold.name=carbazole
+    # Use different tokenizer
+    python scripts/primed_gen.py tokenizer=hsent
 """
 
 import json
@@ -45,10 +38,10 @@ from rdkit import RDLogger
 
 RDLogger.DisableLog("rdApp.*")
 
+from src.data.coconut_loader import CoconutLoader  # noqa: E402
 from src.data.molecular import (  # noqa: E402
     NUM_ATOM_TYPES,
     NUM_BOND_TYPES,
-    graph_to_smiles,
 )
 from src.models.transformer import GraphGeneratorModule  # noqa: E402
 from src.tokenizers import (  # noqa: E402
@@ -58,6 +51,16 @@ from src.tokenizers import (  # noqa: E402
     SENTTokenizer,
 )
 from src.transfer_learning import PrimedGenerator  # noqa: E402
+from src.transfer_learning.datasets.complex_molecule_dataset import (  # noqa: E402
+    ComplexMoleculeDataset,
+)
+from src.transfer_learning.evaluation.priming_evaluator import (  # noqa: E402
+    PrimingEvaluator,
+)
+from src.transfer_learning.evaluation.visualization import (  # noqa: E402
+    create_summary_grid,
+    visualize_evaluation_results,
+)
 
 log = logging.getLogger(__name__)
 
@@ -174,7 +177,7 @@ def configure_tokenizer_from_checkpoint(
     config_name="primed_gen",
 )
 def main(cfg: DictConfig) -> None:
-    """Main scaffold-primed generation function.
+    """Main scaffold-primed generation evaluation function.
 
     Args:
         cfg: Hydra configuration.
@@ -185,17 +188,6 @@ def main(cfg: DictConfig) -> None:
         raise ValueError(
             "model.checkpoint_path must be specified. "
             "Example: model.checkpoint_path=outputs/train/moses_hdt_*/best.ckpt"
-        )
-
-    # Validate scaffold configuration
-    scaffold_name = cfg.scaffold.get("name")
-    scaffold_smiles = cfg.scaffold.get("smiles")
-    scaffold_tier = cfg.scaffold.get("tier")
-
-    if not any([scaffold_name, scaffold_smiles, scaffold_tier]):
-        raise ValueError(
-            "Must specify one of: scaffold.name, scaffold.smiles, or scaffold.tier. "
-            "Example: scaffold.name=naphthalene"
         )
 
     # Create output directory
@@ -212,7 +204,6 @@ def main(cfg: DictConfig) -> None:
 
     # Create tokenizer
     tokenizer = get_tokenizer(cfg)
-    tokenizer_type = cfg.tokenizer.get("type", "hdt").lower()
 
     # Configure tokenizer from checkpoint
     configure_tokenizer_from_checkpoint(tokenizer, cfg.model.checkpoint_path)
@@ -233,138 +224,139 @@ def main(cfg: DictConfig) -> None:
     log.info("Creating primed generator...")
     generator = PrimedGenerator(model)
 
-    # List available scaffolds
-    log.info(f"Available scaffolds: {len(generator.list_available_scaffolds())}")
-
-    # Generate based on scaffold configuration
-    num_samples = cfg.scaffold.num_samples
-    priming_level = cfg.scaffold.get("priming_level", "scaffold_only")
-
-    results = {}
-
+    # Run evaluation
     log.info("\n" + "=" * 60)
-    log.info("SCAFFOLD-PRIMED GENERATION")
+    log.info("SCAFFOLD PRIMING EVALUATION")
     log.info("=" * 60)
 
-    if scaffold_name:
-        # Generate from named scaffold
-        log.info(f"\nGenerating {num_samples} samples from scaffold: {scaffold_name}")
-        scaffold_info = generator.get_scaffold_info(scaffold_name)
-        log.info(f"  SMILES: {scaffold_info['smiles']}")
-        log.info(f"  Tier: {scaffold_info['tier']}")
-        log.info(f"  Atoms: {scaffold_info['num_atoms']}")
+    # Create data loader
+    data_file = cfg.data_source.data_file
+    if not Path(data_file).exists():
+        log.error(f"Data file not found: {data_file}")
+        log.error("Please run: python scripts/prepare_coconut_data.py")
+        return
 
-        graphs, gen_time = generator.generate_from_scaffold(
-            scaffold_name,
-            num_samples=num_samples,
-            priming_level=priming_level,
-        )
-        results[scaffold_name] = {
-            "graphs": graphs,
-            "time": gen_time,
-            "info": scaffold_info,
-        }
+    loader = CoconutLoader(
+        min_atoms=cfg.data_source.min_atoms,
+        max_atoms=cfg.data_source.max_atoms,
+        min_rings=cfg.data_source.min_rings,
+        min_scaffold_atoms=cfg.data_source.min_scaffold_atoms,
+        data_file=data_file,
+    )
 
-    elif scaffold_smiles:
-        # Generate from custom SMILES
-        log.info(f"\nGenerating {num_samples} samples from SMILES: {scaffold_smiles}")
+    # Create dataset
+    log.info(f"Loading {cfg.data_source.n_molecules} complex molecules...")
+    dataset = ComplexMoleculeDataset(
+        coconut_loader=loader,
+        n_samples=cfg.data_source.n_molecules,
+        seed=cfg.seed,
+    )
 
-        graphs, gen_time = generator.generate_from_smiles(
-            scaffold_smiles,
-            num_samples=num_samples,
-            priming_level=priming_level,
-        )
-        results["custom"] = {
-            "graphs": graphs,
-            "time": gen_time,
-            "info": {"smiles": scaffold_smiles, "tier": 0, "num_atoms": 0},
-        }
+    log.info(f"Loaded {len(dataset)} molecules with valid scaffolds")
 
-    elif scaffold_tier:
-        # Generate from all scaffolds in tier
-        log.info(f"\nGenerating from all Tier {scaffold_tier} scaffolds")
-        tier_results, total_time = generator.generate_by_tier(
-            tier=scaffold_tier,
-            samples_per_scaffold=num_samples,
-        )
+    if len(dataset) == 0:
+        log.error("No valid molecules found! Check data file and filtering criteria.")
+        return
 
-        for name, graphs in tier_results.items():
-            scaffold_info = generator.get_scaffold_info(name)
-            results[name] = {
-                "graphs": graphs,
-                "time": total_time / len(tier_results),
-                "info": scaffold_info,
-            }
+    # Print dataset summary
+    summary = dataset.summary()
+    log.info("Dataset summary:")
+    log.info(f"  Unique scaffolds: {summary.get('n_unique_scaffolds', 0)}")
+    log.info(f"  Scaffold size: {summary.get('scaffold_size_mean', 0):.1f} atoms (mean)")
+    log.info(f"  Molecule size: {summary.get('mol_size_mean', 0):.1f} atoms (mean)")
 
-    # Process and save results
+    # Create evaluator
+    evaluator = PrimingEvaluator()
+
+    # Run evaluation (with per-sample results for visualization)
+    samples_per_scaffold = cfg.evaluation.samples_per_molecule
+    min_new_tokens = cfg.sampling.get("min_new_tokens", None)
+    primer_fraction = cfg.sampling.get("primer_fraction", None)
+
+    log.info(f"\nGenerating {samples_per_scaffold} samples per scaffold...")
+    if primer_fraction is not None and primer_fraction < 1.0:
+        log.info(f"  primer_fraction={primer_fraction} (using partial scaffold as primer)")
+    if min_new_tokens:
+        log.info(f"  min_new_tokens={min_new_tokens} (encouraging longer completions)")
+
+    results = evaluator.evaluate_dataset(
+        dataset,
+        generator,
+        samples_per_scaffold=samples_per_scaffold,
+        verbose=True,
+        return_per_sample=True,
+        min_new_tokens=min_new_tokens,
+        primer_fraction=primer_fraction,
+    )
+
+    # Log results
     log.info("\n" + "=" * 60)
-    log.info("RESULTS")
+    log.info("EVALUATION RESULTS")
     log.info("=" * 60)
+    log.info(f"Molecules evaluated: {results.get('n_molecules', 0)}")
+    log.info(f"Samples per scaffold: {results.get('samples_per_scaffold', 0)}")
+    log.info("")
+    log.info(
+        f"Scaffold preservation: {results.get('scaffold_preservation_mean', 0):.1%} "
+        f"(+/-{results.get('scaffold_preservation_std', 0):.1%})"
+    )
+    log.info(
+        f"Tanimoto similarity: {results.get('tanimoto_mean', 0):.3f} "
+        f"(+/-{results.get('tanimoto_std', 0):.3f})"
+    )
+    log.info(f"Best Tanimoto (max of maxes): {results.get('tanimoto_max_max', 0):.3f}")
+    log.info(
+        f"Validity rate: {results.get('valid_rate_mean', 0):.1%} "
+        f"(+/-{results.get('valid_rate_std', 0):.1%})"
+    )
+    log.info(
+        f"Atom ratio: {results.get('atom_ratio_mean', 0):.2f} "
+        f"(+/-{results.get('atom_ratio_std', 0):.2f})"
+    )
 
-    all_smiles = []
-    summary = []
+    # Generate visualizations
+    if cfg.output.get("visualize", True):
+        per_sample_results = results.get("per_sample_results", [])
+        if per_sample_results:
+            log.info("\nGenerating visualizations...")
 
-    for scaffold_name, data in results.items():
-        graphs = data["graphs"]
-        info = data["info"]
+            # Create individual sample visualizations
+            vis_dir = output_dir / "visualizations"
+            saved_paths = visualize_evaluation_results(
+                per_sample_results,
+                vis_dir,
+                max_samples=min(10, len(per_sample_results)),
+                n_generated_per_sample=3,
+            )
+            log.info(f"  Saved {len(saved_paths)} sample visualizations to {vis_dir}")
 
-        # Convert to SMILES
-        smiles_list = []
-        for g in graphs:
-            smiles = graph_to_smiles(g)
-            if smiles:
-                smiles_list.append(smiles)
-                all_smiles.append(smiles)
+            # Create summary grid
+            summary_path = output_dir / "summary_grid.png"
+            try:
+                create_summary_grid(
+                    per_sample_results,
+                    summary_path,
+                    n_samples=min(6, len(per_sample_results)),
+                )
+                log.info(f"  Saved summary grid to {summary_path}")
+            except Exception as e:
+                log.warning(f"  Could not create summary grid: {e}")
 
-        valid_rate = len(smiles_list) / len(graphs) if graphs else 0
-
-        log.info(f"\n{scaffold_name}:")
-        log.info(f"  Scaffold SMILES: {info.get('smiles', 'N/A')}")
-        log.info(f"  Generated: {len(graphs)} graphs")
-        log.info(f"  Valid SMILES: {len(smiles_list)} ({valid_rate:.1%})")
-        log.info(f"  Time: {data['time']:.4f}s per sample")
-
-        if smiles_list:
-            log.info("  Examples:")
-            for smi in smiles_list[:3]:
-                log.info(f"    - {smi}")
-
-        summary.append(
-            {
-                "scaffold": scaffold_name,
-                "scaffold_smiles": info.get("smiles", ""),
-                "tier": info.get("tier", 0),
-                "num_generated": len(graphs),
-                "num_valid": len(smiles_list),
-                "valid_rate": valid_rate,
-                "time_per_sample": data["time"],
+    # Save evaluation results
+    if cfg.output.get("save_evaluation", True):
+        eval_file = output_dir / "evaluation_results.json"
+        with open(eval_file, "w") as f:
+            # Convert numpy values to Python types for JSON serialization
+            # Exclude per_sample_results from JSON (too large)
+            serializable_results = {
+                k: float(v) if hasattr(v, "item") else v
+                for k, v in results.items()
+                if k != "per_sample_results"
             }
-        )
+            json.dump(serializable_results, f, indent=2)
+        log.info(f"\nEvaluation results saved to {eval_file}")
 
-    # Save generated SMILES
-    if cfg.output.save_smiles and all_smiles:
-        smiles_file = output_dir / "generated_smiles.txt"
-        with open(smiles_file, "w") as f:
-            for smi in all_smiles:
-                f.write(smi + "\n")
-        log.info(f"\nGenerated SMILES saved to {smiles_file}")
-
-    # Save summary
-    summary_file = output_dir / "summary.json"
-    with open(summary_file, "w") as f:
-        json.dump(
-            {
-                "tokenizer_type": tokenizer_type,
-                "total_generated": sum(s["num_generated"] for s in summary),
-                "total_valid": sum(s["num_valid"] for s in summary),
-                "scaffolds": summary,
-            },
-            f,
-            indent=2,
-        )
-    log.info(f"Summary saved to {summary_file}")
-
-    log.info("\nScaffold-primed generation complete!")
+    log.info("\nScaffold priming evaluation complete!")
 
 
 if __name__ == "__main__":
