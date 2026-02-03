@@ -1,0 +1,33 @@
+# @package _global_
+
+# COCONUT dataset experiment configuration
+# Complex natural products for fine-tuning / transfer learning
+
+data:
+  dataset_name: coconut
+  data_file: data/coconut_complex.smi
+  num_train: 5000
+  num_val: 500
+  num_test: 500
+  min_atoms: 20
+  max_atoms: 100
+  min_rings: 3
+  include_hydrogens: false
+
+model:
+  pretrained_path: null  # Set via CLI: model.pretrained_path=path/to/best.ckpt
+  learning_rate: 1e-5    # Lower LR for fine-tuning
+
+trainer:
+  max_steps: 50000
+  val_check_interval: 500
+
+sampling:
+  num_samples: 100
+  top_k: 10
+  max_length: 1024  # COCONUT molecules are <1000 tokens (99th pct: 950)
+
+# Finetuning evaluation callback settings
+# Logs generated molecules and reference molecules periodically during training
+eval_every_n_steps: 1000  # Run eval every N steps (0 to disable)
+eval_num_samples: 5       # Number of molecules to generate per eval (lightweight)

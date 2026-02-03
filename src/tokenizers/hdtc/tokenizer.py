@@ -273,6 +273,18 @@ class HDTCTokenizer(Tokenizer):
         if self.max_length > 0 and len(tokens) > self.max_length:
             tokens = tokens[: self.max_length - 1] + [self.EOS]
 
+        # Validate token IDs are within vocab bounds
+        if self.max_num_nodes is not None:
+            vocab_size = self.vocab_size
+            for tok in tokens:
+                if tok >= vocab_size:
+                    raise ValueError(
+                        f"Token ID {tok} exceeds vocab_size {vocab_size}. "
+                        f"max_num_nodes={self.max_num_nodes}, "
+                        f"num_node_types={self.num_node_types}, "
+                        f"num_edge_types={self.num_edge_types}"
+                    )
+
         return torch.tensor(tokens, dtype=torch.long)
 
     def _build_full_adjacency(

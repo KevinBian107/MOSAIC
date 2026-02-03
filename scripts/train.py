@@ -20,6 +20,7 @@ from typing import Optional
 
 import hydra
 import pytorch_lightning as pl
+import torch
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
@@ -1146,6 +1147,11 @@ def main(cfg: DictConfig) -> None:
         data_root=cfg.data.get("data_root", "data"),
         use_cache=cfg.data.get("use_cache", False),
         cache_dir=cfg.data.get("cache_dir", "data/cache"),
+        # COCONUT-specific parameters
+        data_file=cfg.data.get("data_file"),
+        min_atoms=cfg.data.get("min_atoms", 20),
+        max_atoms=cfg.data.get("max_atoms", 100),
+        min_rings=cfg.data.get("min_rings", 3),
     )
 
     datamodule.setup()
@@ -1180,6 +1186,24 @@ def main(cfg: DictConfig) -> None:
         sampling_num_samples=cfg.sampling.num_samples,
         sampling_batch_size=cfg.sampling.batch_size,
     )
+
+    # Load pretrained weights if specified (for transfer learning / fine-tuning)
+    pretrained_path = cfg.model.get("pretrained_path")
+    if pretrained_path:
+        log.info(f"Loading pretrained weights from {pretrained_path}")
+        pretrained = torch.load(pretrained_path, map_location="cpu")
+        # Handle both Lightning checkpoint format and raw state dict
+        if "state_dict" in pretrained:
+            state_dict = pretrained["state_dict"]
+        else:
+            state_dict = pretrained
+        # Load with strict=False to allow for vocab size differences
+        missing, unexpected = model.load_state_dict(state_dict, strict=False)
+        if missing:
+            log.warning(f"Missing keys when loading pretrained weights: {missing}")
+        if unexpected:
+            log.warning(f"Unexpected keys when loading pretrained weights: {unexpected}")
+        log.info("Pretrained weights loaded successfully")
 
     loggers = []
     loggers.append(pl.loggers.CSVLogger(cfg.logs.path, name="csv_logs"))

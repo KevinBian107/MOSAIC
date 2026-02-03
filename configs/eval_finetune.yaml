@@ -1,0 +1,66 @@
+# @package _global_
+#
+# Evaluation Configuration for Fine-tuned COCONUT Models
+#
+# Evaluates fine-tuned models by comparing generated distribution to reference.
+#
+# Usage:
+#   python scripts/eval_finetune.py \
+#       model.checkpoint_path=outputs/coconut_finetune/best.ckpt
+#
+#   python scripts/eval_finetune.py \
+#       model.checkpoint_path=outputs/coconut_finetune/best.ckpt \
+#       generation.num_samples=1000
+
+defaults:
+  - /tokenizer: hdtc
+  - _self_
+
+# Random seed
+seed: 42
+
+# Model configuration
+model:
+  checkpoint_path: null  # Required: path to fine-tuned checkpoint
+  model_name: gpt2-xs    # Should match the pretrained model architecture
+
+# Data configuration
+data:
+  reference_file: data/coconut_complex.smi
+  n_reference: 1000
+  min_atoms: 20
+  max_atoms: 100
+  min_rings: 3
+
+# Generation configuration
+generation:
+  num_samples: 1000
+  batch_size: 32
+
+# Sampling configuration
+sampling:
+  top_k: 10
+  temperature: 1.0
+  max_length: 2048
+
+# Metrics to compute
+metrics:
+  validity: true
+  uniqueness: true
+  novelty: true
+  fragment_similarity: true
+  scaffold_similarity: true
+  internal_diversity: true
+  motif_mmd: true
+  motif_histogram: true
+  motif_cooccurrence: true
+
+# Output configuration
+output:
+  save_smiles: true
+  save_results: true
+
+# Logging configuration
+logs:
+  base_dir: outputs/eval_finetune
+  path: ${logs.base_dir}/${now:%Y%m%d-%H%M%S}

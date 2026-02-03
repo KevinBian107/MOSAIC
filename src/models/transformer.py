@@ -117,8 +117,15 @@ class TransformerLM(nn.Module):
         size_params = self.MODEL_SIZES[size_name]
         config_cls, model_cls = self.MODEL_CLASSES[arch_name]
 
+        # Set max position embeddings using architecture-specific parameter name
+        if arch_name == "gpt2":
+            position_params = {"n_positions": max_length}
+        else:
+            # LLaMA, GPT-NeoX use max_position_embeddings
+            position_params = {"max_position_embeddings": max_length}
+
         self.model = model_cls(
-            config_cls(**vocab_params, **size_params, **kwargs)
+            config_cls(**vocab_params, **size_params, **position_params, **kwargs)
         )
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
@@ -130,6 +137,20 @@ class TransformerLM(nn.Module):
         Returns:
             Logits tensor [batch_size, seq_len, vocab_size].
         """
+        # Validate token IDs are within vocab bounds
+        vocab_size = len(self.tokenizer)
+        max_token = input_ids.max().item()
+        if max_token >= vocab_size:
+            # Find which sequence has the invalid token
+            invalid_mask = input_ids >= vocab_size
+            batch_idx = invalid_mask.any(dim=1).nonzero()[0].item()
+            seq_idx = invalid_mask[batch_idx].nonzero()[0].item()
+            raise ValueError(
+                f"Token ID {max_token} at position [{batch_idx}, {seq_idx}] "
+                f"exceeds vocab_size {vocab_size}. "
+                f"tokenizer: max_num_nodes={self.tokenizer.max_num_nodes}, "
+                f"IDX_OFFSET={getattr(self.tokenizer, 'IDX_OFFSET', 'N/A')}"
+            )
         return self.model(input_ids=input_ids).logits
 
     @torch.inference_mode()
@@ -139,7 +160,6 @@ class TransformerLM(nn.Module):
         top_k: int = 10,
         temperature: float = 1.0,
         max_length: Optional[int] = None,
-        min_new_tokens: Optional[int] = None,
         return_tokens: bool = False,
     ) -> list:
         """Generate graphs autoregressively.
@@ -149,8 +169,6 @@ class TransformerLM(nn.Module):
             top_k: Number of highest probability tokens to sample from.
             temperature: Sampling temperature.
             max_length: Maximum generation length.
-            min_new_tokens: Minimum number of new tokens to generate beyond input.
-                If set, EOS token is suppressed until this many tokens are generated.
             return_tokens: If True, return tokens instead of Data objects.
 
         Returns:
@@ -159,19 +177,13 @@ class TransformerLM(nn.Module):
         batch_size = input_ids.shape[0]
         max_length = max_length or self.max_length
 
-        # Build generate kwargs
-        generate_kwargs = {
-            "do_sample": True,
-            "top_k": top_k,
-            "temperature": temperature,
-            "max_length": max_length,
-        }
-
-        # Add min_new_tokens if specified
-        if min_new_tokens is not None:
-            generate_kwargs["min_new_tokens"] = min_new_tokens
-
-        generated = self.model.generate(input_ids, **generate_kwargs)
+        generated = self.model.generate(
+            input_ids,
+            do_sample=True,
+            top_k=top_k,
+            temperature=temperature,
+            max_length=max_length,
+        )
 
         results = []
         for i in range(batch_size):
@@ -234,7 +246,7 @@ class GraphGeneratorModule(pl.LightningModule):
         self.save_hyperparameters(ignore=["tokenizer"])
 
         self.tokenizer = tokenizer
-        self.model = TransformerLM(tokenizer, model_name)
+        self.model = TransformerLM(tokenizer, model_name, max_length=sampling_max_length)
         self.loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer.pad)
 
         self.learning_rate = learning_rate
@@ -291,7 +303,6 @@ class GraphGeneratorModule(pl.LightningModule):
         num_samples: Optional[int] = None,
         input_ids: Optional[torch.Tensor] = None,
         show_progress: bool = False,
-        min_new_tokens: Optional[int] = None,
     ) -> tuple[list, float]:
         """Generate graphs.
 
@@ -299,9 +310,6 @@ class GraphGeneratorModule(pl.LightningModule):
             num_samples: Number of graphs to generate.
             input_ids: Optional initial tokens.
             show_progress: Whether to show a progress bar.
-            min_new_tokens: Minimum number of new tokens to generate beyond input.
-                If set, EOS token is suppressed until this many tokens are generated.
-                Useful for scaffold priming to encourage longer completions.
 
         Returns:
             Tuple of (list of Data objects, average time per sample).
@@ -340,7 +348,6 @@ class GraphGeneratorModule(pl.LightningModule):
                 top_k=self.sampling_top_k,
                 temperature=self.sampling_temperature,
                 max_length=self.sampling_max_length,
-                min_new_tokens=min_new_tokens,
             )
             toc = timer()
 

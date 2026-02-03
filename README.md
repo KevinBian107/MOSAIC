@@ -68,9 +68,9 @@ python scripts/realistic_gen.py \
     generation.num_samples=500
 ```
 
-### Scaffold-Primed Generation
+### Transfer Learning / Fine-tuning
 
-Evaluate scaffold priming using real complex natural products from COCONUT. This extracts Murcko scaffolds from complex molecules, primes the model with scaffold tokens, and evaluates how well generated molecules match the original targets.
+Fine-tune a pretrained model on COCONUT complex natural products to evaluate transfer learning capabilities.
 
 ```bash
 # First, prepare the complex molecule dataset (one-time setup)
@@ -83,28 +83,22 @@ python scripts/prepare_coconut_data.py \
     --min-atoms 25 \
     --min-rings 3
 
-# Run scaffold priming evaluation
-python scripts/primed_gen.py
+# Fine-tune from MOSES checkpoint
+python scripts/finetune.py \
+    model.pretrained_path=outputs/benchmark/moses_hdtc_n500000_20260129-171812/best.ckpt \
+    experiment=coconut \
+    trainer.max_steps=50000
 
-# Customize evaluation
-python scripts/primed_gen.py \
-    data_source.n_molecules=100 \
-    evaluation.samples_per_molecule=10
+# Or use train.py directly with COCONUT experiment
+python scripts/train.py \
+    experiment=coconut \
+    model.pretrained_path=outputs/moses_hdtc/best.ckpt
 
-# Use different tokenizer
-python scripts/primed_gen.py tokenizer=hsent
+# Evaluate fine-tuned model
+python scripts/eval_finetune.py \
+    model.checkpoint_path=outputs/coconut_finetune/best.ckpt \
+    generation.num_samples=1000
 ```
-
-**Evaluation Metrics:**
-- **Scaffold Preservation**: Fraction of generated molecules containing the input scaffold
-- **Tanimoto Similarity**: Fingerprint similarity to target molecule
-- **Validity Rate**: Fraction of valid SMILES generated
-- **Atom Ratio**: Ratio of generated/target atom counts
-
-**Output:**
-- `evaluation_results.json`: Aggregated metrics (mean, std, max)
-- `visualizations/sample_XXX.png`: Comparison images showing scaffold (primer) → generated molecules → target
-- `summary_grid.png`: Grid overview of scaffold → best generated → target for multiple samples
 
 ### Table Comparison
 
@@ -139,13 +133,7 @@ MOSAIC/
 │   │   └── motif/         # Motif detection and patterns
 │   ├── models/            # Transformer models
 │   ├── evaluation/        # Standard and motif metrics
-│   ├── realistic_gen/     # Generation quality analysis
-│   └── transfer_learning/ # Scaffold priming for complex generation
-│       ├── scaffolds/     # Scaffold library, tier patterns, and Murcko extraction
-│       ├── primers/       # Tokenizer-specific primers with cut point detection
-│       ├── datasets/      # Complex molecule datasets for evaluation
-│       ├── evaluation/    # Priming evaluation metrics
-│       └── generation/    # Primed generation utilities
+│   └── realistic_gen/     # Generation quality analysis
 ├── configs/               # Hydra configuration
 ├── scripts/               # Training, evaluation, and visualization scripts
 ├── tests/                 # Test suite
