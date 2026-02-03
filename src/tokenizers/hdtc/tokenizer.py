@@ -588,14 +588,15 @@ class HDTCTokenizer(Tokenizer):
 
             if tok >= self.IDX_OFFSET:
                 # Check if this is a node ID or feature token
-                if self.labeled_graph and tok >= self.node_idx_offset:
+                # Order matters: check edge_idx_offset first (largest)
+                if self.labeled_graph and tok >= self.edge_idx_offset:
+                    # This is a bond type token - skip (handled in LEDGE block)
+                    idx += 1
+                elif self.labeled_graph and tok >= self.node_idx_offset:
                     # This is an atom type token
                     if current_atom is not None:
                         atom_type = tok - self.node_idx_offset
                         node_features_dict[current_atom] = atom_type
-                    idx += 1
-                elif self.labeled_graph and tok >= self.edge_idx_offset:
-                    # This is a bond type token - skip (handled in LEDGE block)
                     idx += 1
                 else:
                     # This is a node ID

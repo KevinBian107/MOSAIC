@@ -150,6 +150,10 @@ def main(cfg: DictConfig) -> None:
                     num_samples=self.num_samples, show_progress=False
                 )
 
+                # Suppress RDKit stderr noise from invalid generated molecules
+                from rdkit import RDLogger
+                RDLogger.DisableLog("rdApp.*")
+
                 # Convert to SMILES
                 generated_smiles = []
                 valid_count = 0
@@ -190,6 +194,9 @@ def main(cfg: DictConfig) -> None:
                     for smi in ref_sample:
                         f.write(f"{smi}\n")
 
+                # Re-enable RDKit logging
+                RDLogger.EnableLog("rdApp.*")
+
                 # Log to trainer loggers if available
                 if trainer.logger:
                     trainer.logger.log_metrics({
@@ -198,10 +205,80 @@ def main(cfg: DictConfig) -> None:
                         "eval/gen_time_per_sample": gen_time,
                     }, step=global_step)
 
+                # Log molecule images to WandB
+                self._log_molecule_images(
+                    trainer, generated_smiles, ref_sample, global_step
+                )
+
             except Exception as e:
                 log.warning(f"  [Eval] Error during intermediate evaluation: {e}")
             finally:
                 pl_module.train()
+
+        def _log_molecule_images(
+            self,
+            trainer: pl.Trainer,
+            generated_smiles: list[str],
+            reference_smiles: list[str],
+            global_step: int,
+        ) -> None:
+            """Log generated and reference molecule images to WandB.
+
+            Args:
+                trainer: PyTorch Lightning trainer.
+                generated_smiles: List of generated SMILES (may include "INVALID").
+                reference_smiles: List of reference SMILES for comparison.
+                global_step: Current training step.
+            """
+            try:
+                import wandb
+                from rdkit import Chem
+                from rdkit.Chem import Draw
+
+                # Find WandB logger
+                wandb_logger = None
+                for logger in trainer.loggers:
+                    if isinstance(logger, pl.loggers.WandbLogger):
+                        wandb_logger = logger
+                        break
+                if wandb_logger is None:
+                    return
+
+                def _render_grid(smiles_list: list[str]) -> "wandb.Image | None":
+                    mols = []
+                    legends = []
+                    for smi in smiles_list:
+                        if smi == "INVALID":
+                            continue
+                        mol = Chem.MolFromSmiles(smi)
+                        if mol is not None:
+                            mols.append(mol)
+                            # Truncate long SMILES for legend
+                            legends.append(smi[:50] + "..." if len(smi) > 50 else smi)
+                    if not mols:
+                        return None
+                    img = Draw.MolsToGridImage(
+                        mols,
+                        molsPerRow=min(3, len(mols)),
+                        subImgSize=(300, 300),
+                        legends=legends,
+                    )
+                    return wandb.Image(img)
+
+                gen_img = _render_grid(generated_smiles)
+                ref_img = _render_grid(reference_smiles)
+
+                log_dict = {}
+                if gen_img is not None:
+                    log_dict["eval/generated_molecules"] = gen_img
+                if ref_img is not None:
+                    log_dict["eval/reference_molecules"] = ref_img
+
+                if log_dict:
+                    wandb_logger.experiment.log(log_dict, step=global_step)
+
+            except Exception as e:
+                log.debug(f"Could not log molecule images to WandB: {e}")
 
     pl.seed_everything(cfg.seed, workers=True)
 
@@ -341,15 +418,83 @@ def main(cfg: DictConfig) -> None:
                 new_wte = torch.randn(new_vocab_size, hidden_size) * 0.02
                 new_lm_head = torch.randn(new_vocab_size, hidden_size) * 0.02
 
-                # Copy pretrained weights for existing tokens
-                copy_size = min(old_vocab_size, new_vocab_size)
-                new_wte[:copy_size] = state_dict[wte_key][:copy_size]
-                if lm_head_key in state_dict:
-                    new_lm_head[:copy_size] = state_dict[lm_head_key][:copy_size]
+                old_wte = state_dict[wte_key]
+                old_lm_head = state_dict.get(lm_head_key)
+
+                # Semantic embedding mapping for labeled graph tokenizers
+                # Vocab layout: [special (IDX_OFFSET)] [node IDs (max_num_nodes)] [atom types] [bond types]
+                # When max_num_nodes changes, atom/bond type tokens shift positions.
+                # We must copy embeddings by semantic role, not raw index.
+                if (
+                    hasattr(tokenizer, "labeled_graph")
+                    and tokenizer.labeled_graph
+                    and hasattr(tokenizer, "node_idx_offset")
+                    and tokenizer.node_idx_offset > 0
+                ):
+                    from src.data.molecular import NUM_ATOM_TYPES, NUM_BOND_TYPES
+
+                    IDX_OFFSET = tokenizer.IDX_OFFSET
+                    new_node_off = tokenizer.node_idx_offset
+                    new_edge_off = tokenizer.edge_idx_offset
+
+                    # Infer old layout from old vocab size
+                    old_max_nodes = old_vocab_size - IDX_OFFSET - NUM_ATOM_TYPES - NUM_BOND_TYPES
+                    old_node_off = IDX_OFFSET + old_max_nodes
+                    old_edge_off = old_node_off + NUM_ATOM_TYPES
+
+                    log.info(
+                        f"  Semantic embedding mapping (labeled graph):"
+                    )
+                    log.info(
+                        f"    Old layout: nodes@[{IDX_OFFSET},{old_node_off}) "
+                        f"atoms@[{old_node_off},{old_edge_off}) "
+                        f"bonds@[{old_edge_off},{old_vocab_size})"
+                    )
+                    log.info(
+                        f"    New layout: nodes@[{IDX_OFFSET},{new_node_off}) "
+                        f"atoms@[{new_node_off},{new_edge_off}) "
+                        f"bonds@[{new_edge_off},{new_vocab_size})"
+                    )
+
+                    def _copy_range(src, dst, old_start, old_end, new_start, new_end):
+                        n = min(old_end - old_start, new_end - new_start)
+                        dst[new_start : new_start + n] = src[old_start : old_start + n]
+                        return n
+
+                    # 1. Special tokens (same positions)
+                    n = _copy_range(old_wte, new_wte, 0, IDX_OFFSET, 0, IDX_OFFSET)
+                    if old_lm_head is not None:
+                        _copy_range(old_lm_head, new_lm_head, 0, IDX_OFFSET, 0, IDX_OFFSET)
+                    log.info(f"    Copied {n} special token embeddings")
+
+                    # 2. Node IDs (may have different range sizes)
+                    n = _copy_range(old_wte, new_wte, IDX_OFFSET, old_node_off, IDX_OFFSET, new_node_off)
+                    if old_lm_head is not None:
+                        _copy_range(old_lm_head, new_lm_head, IDX_OFFSET, old_node_off, IDX_OFFSET, new_node_off)
+                    log.info(f"    Copied {n} node ID embeddings")
+
+                    # 3. Atom types (same count, different positions)
+                    n = _copy_range(old_wte, new_wte, old_node_off, old_edge_off, new_node_off, new_edge_off)
+                    if old_lm_head is not None:
+                        _copy_range(old_lm_head, new_lm_head, old_node_off, old_edge_off, new_node_off, new_edge_off)
+                    log.info(f"    Copied {n} atom type embeddings")
+
+                    # 4. Bond types (same count, different positions)
+                    n = _copy_range(old_wte, new_wte, old_edge_off, old_vocab_size, new_edge_off, new_vocab_size)
+                    if old_lm_head is not None:
+                        _copy_range(old_lm_head, new_lm_head, old_edge_off, old_vocab_size, new_edge_off, new_vocab_size)
+                    log.info(f"    Copied {n} bond type embeddings")
+
+                else:
+                    # Unlabeled tokenizer or no layout shift: simple positional copy
+                    copy_size = min(old_vocab_size, new_vocab_size)
+                    new_wte[:copy_size] = old_wte[:copy_size]
+                    if old_lm_head is not None:
+                        new_lm_head[:copy_size] = old_lm_head[:copy_size]
+                    log.info(f"  Copied {copy_size} pretrained token embeddings")
 
                 state_dict[wte_key] = new_wte
                 state_dict[lm_head_key] = new_lm_head
-                log.info(f"  Copied {copy_size} pretrained token embeddings")
 
         # Handle position embedding size mismatch
         wpe_key = "model.model.transformer.wpe.weight"

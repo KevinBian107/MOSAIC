@@ -98,6 +98,9 @@ python scripts/train.py \
 python scripts/eval_finetune.py \
     model.checkpoint_path=outputs/coconut_finetune/best.ckpt \
     generation.num_samples=1000
+
+# Compare the results of fine-tuned model
+python scripts/compare_finetune_results.py
 ```
 
 ### Table Comparison
