@@ -278,6 +278,166 @@ def main(cfg: DictConfig) -> None:
         for name, value in cooccur_results.items():
             log.info(f"  {name}: {value:.6f}")
 
+        # Also compute vs MOSES for retention analysis
+        log.info("Computing motif co-occurrence metrics (vs MOSES)...")
+        cooccur_metrics_moses = MotifCooccurrenceMetric(reference_smiles=moses_smiles)
+        cooccur_results_moses = cooccur_metrics_moses(generated_smiles)
+        results["motif_cooccur_mmd_moses"] = cooccur_results_moses.get("motif_cooccur_mmd", 0)
+        log.info(f"  motif_cooccur_mmd (MOSES): {results['motif_cooccur_mmd_moses']:.6f}")
+
+    # Compute structural retention metrics (ring count, scaffold, atom type, functional group distributions)
+    log.info("Computing structural retention metrics...")
+    from collections import Counter
+    from rdkit import Chem
+    from rdkit.Chem import rdMolDescriptors
+    from rdkit.Chem.Scaffolds import MurckoScaffold
+    import numpy as np
+
+    def compute_distribution_kl(gen_counts: Counter, ref_counts: Counter) -> float:
+        """Compute KL divergence between two count distributions."""
+        all_keys = set(gen_counts.keys()) | set(ref_counts.keys())
+        if not all_keys:
+            return 0.0
+
+        # Convert to probability distributions with smoothing
+        total_gen = sum(gen_counts.values()) + len(all_keys)  # Add-1 smoothing
+        total_ref = sum(ref_counts.values()) + len(all_keys)
+
+        kl = 0.0
+        for key in all_keys:
+            p = (gen_counts.get(key, 0) + 1) / total_gen
+            q = (ref_counts.get(key, 0) + 1) / total_ref
+            if p > 0 and q > 0:
+                kl += p * np.log(p / q)
+        return kl
+
+    def get_ring_counts(smiles_list: list[str]) -> Counter:
+        """Get distribution of ring counts."""
+        counts = Counter()
+        for smi in smiles_list:
+            if smi == INVALID:
+                continue
+            mol = Chem.MolFromSmiles(smi)
+            if mol:
+                n_rings = rdMolDescriptors.CalcNumRings(mol)
+                counts[n_rings] += 1
+        return counts
+
+    def get_scaffolds(smiles_list: list[str]) -> set[str]:
+        """Get set of Murcko scaffolds."""
+        scaffolds = set()
+        for smi in smiles_list:
+            if smi == INVALID:
+                continue
+            mol = Chem.MolFromSmiles(smi)
+            if mol:
+                try:
+                    core = MurckoScaffold.GetScaffoldForMol(mol)
+                    scaffolds.add(Chem.MolToSmiles(core))
+                except Exception:
+                    pass
+        return scaffolds
+
+    def get_atom_type_counts(smiles_list: list[str]) -> Counter:
+        """Get distribution of atom types."""
+        counts = Counter()
+        for smi in smiles_list:
+            if smi == INVALID:
+                continue
+            mol = Chem.MolFromSmiles(smi)
+            if mol:
+                for atom in mol.GetAtoms():
+                    counts[atom.GetSymbol()] += 1
+        return counts
+
+    def get_functional_group_counts(smiles_list: list[str]) -> Counter:
+        """Get distribution of functional groups."""
+        # Common functional group SMARTS
+        fg_patterns = {
+            "hydroxyl": "[OX2H]",
+            "carboxyl": "[CX3](=O)[OX2H1]",
+            "carbonyl": "[CX3]=[OX1]",
+            "amine_primary": "[NX3H2]",
+            "amine_secondary": "[NX3H1]([#6])[#6]",
+            "amine_tertiary": "[NX3]([#6])([#6])[#6]",
+            "ether": "[OD2]([#6])[#6]",
+            "ester": "[#6][CX3](=O)[OX2H0][#6]",
+            "amide": "[NX3][CX3](=[OX1])[#6]",
+            "nitro": "[NX3](=[OX1])(=[OX1])",
+            "nitrile": "[NX1]#[CX2]",
+            "halogen": "[F,Cl,Br,I]",
+        }
+        compiled_patterns = {}
+        for name, smarts in fg_patterns.items():
+            pat = Chem.MolFromSmarts(smarts)
+            if pat:
+                compiled_patterns[name] = pat
+
+        counts = Counter()
+        for smi in smiles_list:
+            if smi == INVALID:
+                continue
+            mol = Chem.MolFromSmiles(smi)
+            if mol:
+                for name, pat in compiled_patterns.items():
+                    matches = mol.GetSubstructMatches(pat)
+                    counts[name] += len(matches)
+        return counts
+
+    # Load MOSES reference if not already loaded
+    if "moses_smiles" not in dir():
+        moses_smiles = load_moses_dataset(
+            split="train", max_molecules=cfg.data.n_reference, seed=cfg.seed
+        )
+
+    # 1. Ring Count Distribution KL
+    log.info("  Computing ring count distribution KL...")
+    gen_ring_counts = get_ring_counts(generated_smiles)
+    coconut_ring_counts = get_ring_counts(reference_smiles)
+    moses_ring_counts = get_ring_counts(moses_smiles)
+
+    results["ring_count_kl_coconut"] = compute_distribution_kl(gen_ring_counts, coconut_ring_counts)
+    results["ring_count_kl_moses"] = compute_distribution_kl(gen_ring_counts, moses_ring_counts)
+    log.info(f"    ring_count_kl (COCONUT): {results['ring_count_kl_coconut']:.6f}")
+    log.info(f"    ring_count_kl (MOSES): {results['ring_count_kl_moses']:.6f}")
+
+    # 2. Scaffold Retention Rate
+    log.info("  Computing scaffold retention rate...")
+    gen_scaffolds = get_scaffolds(generated_smiles)
+    moses_scaffolds = get_scaffolds(moses_smiles)
+    coconut_scaffolds = get_scaffolds(reference_smiles)
+
+    if gen_scaffolds:
+        results["scaffold_retention_moses"] = len(gen_scaffolds & moses_scaffolds) / len(gen_scaffolds)
+        results["scaffold_retention_coconut"] = len(gen_scaffolds & coconut_scaffolds) / len(gen_scaffolds)
+    else:
+        results["scaffold_retention_moses"] = 0.0
+        results["scaffold_retention_coconut"] = 0.0
+    log.info(f"    scaffold_retention (MOSES): {results['scaffold_retention_moses']:.6f}")
+    log.info(f"    scaffold_retention (COCONUT): {results['scaffold_retention_coconut']:.6f}")
+
+    # 3. Atom Type Distribution KL
+    log.info("  Computing atom type distribution KL...")
+    gen_atom_counts = get_atom_type_counts(generated_smiles)
+    coconut_atom_counts = get_atom_type_counts(reference_smiles)
+    moses_atom_counts = get_atom_type_counts(moses_smiles)
+
+    results["atom_type_kl_coconut"] = compute_distribution_kl(gen_atom_counts, coconut_atom_counts)
+    results["atom_type_kl_moses"] = compute_distribution_kl(gen_atom_counts, moses_atom_counts)
+    log.info(f"    atom_type_kl (COCONUT): {results['atom_type_kl_coconut']:.6f}")
+    log.info(f"    atom_type_kl (MOSES): {results['atom_type_kl_moses']:.6f}")
+
+    # 4. Functional Group Distribution KL
+    log.info("  Computing functional group distribution KL...")
+    gen_fg_counts = get_functional_group_counts(generated_smiles)
+    coconut_fg_counts = get_functional_group_counts(reference_smiles)
+    moses_fg_counts = get_functional_group_counts(moses_smiles)
+
+    results["func_group_kl_coconut"] = compute_distribution_kl(gen_fg_counts, coconut_fg_counts)
+    results["func_group_kl_moses"] = compute_distribution_kl(gen_fg_counts, moses_fg_counts)
+    log.info(f"    func_group_kl (COCONUT): {results['func_group_kl_coconut']:.6f}")
+    log.info(f"    func_group_kl (MOSES): {results['func_group_kl_moses']:.6f}")
+
     # Save results
     if cfg.output.save_results:
         results_path = output_dir / "evaluation_results.json"
