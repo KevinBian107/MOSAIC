@@ -2,6 +2,56 @@
 
 Utility scripts for running batch operations.
 
+## finetune_benchmarks.sh
+
+Fine-tunes all pretrained models in `outputs/benchmark/` on the COCONUT complex natural products dataset for transfer learning evaluation.
+
+### What it does
+
+1. Finds all `best.ckpt` files in `outputs/benchmark/`
+2. Extracts tokenizer type and coarsening strategy from directory names
+3. Runs `scripts/finetune.py` on each checkpoint with appropriate settings
+4. Saves fine-tuned models to `outputs/finetune/`
+
+### Usage
+
+```bash
+# Run from project root
+./bash_scripts/finetune_benchmarks.sh
+
+# Dry run (show commands without executing)
+./bash_scripts/finetune_benchmarks.sh --dry-run
+
+# Disable WandB logging
+./bash_scripts/finetune_benchmarks.sh --no-wandb
+
+# Custom number of training steps (default: 50000)
+./bash_scripts/finetune_benchmarks.sh --steps=100000
+
+# Show help
+./bash_scripts/finetune_benchmarks.sh --help
+```
+
+### Output
+
+Fine-tuned models are saved to:
+- `outputs/finetune/coconut_{tokenizer}_{coarsening}/best.ckpt` - Best checkpoint
+- `outputs/finetune/coconut_{tokenizer}_{coarsening}/last.ckpt` - Last checkpoint
+- `outputs/finetune/coconut_{tokenizer}_{coarsening}/config.yaml` - Training config
+
+### Prerequisites
+
+Before running, ensure you have prepared the COCONUT dataset:
+
+```bash
+# Download and prepare COCONUT data (~191MB download)
+python scripts/prepare_coconut_data.py
+```
+
+This creates `data/coconut_complex.smi` with ~10,000 complex natural products.
+
+---
+
 ## eval_benchmarks.sh
 
 Evaluates all checkpoints in `outputs/benchmark/` and generates a comparison table.

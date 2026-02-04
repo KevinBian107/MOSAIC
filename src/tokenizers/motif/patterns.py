@@ -20,7 +20,7 @@ CLUSTERING_MOTIFS: dict[str, str] = {
     "imidazole": "c1cnc[nH]1",
     "oxazole": "c1cocn1",
     "thiazole": "c1cscn1",
-    # Fused ring systems
+    # Fused ring systems (Tier 2)
     "naphthalene": "c1ccc2ccccc2c1",
     "indole": "c1ccc2[nH]ccc2c1",
     "quinoline": "c1ccc2ncccc2c1",
@@ -34,4 +34,13 @@ CLUSTERING_MOTIFS: dict[str, str] = {
     # Partially unsaturated
     "cyclohexene": "C1=CCCCC1",
     "cyclopentene": "C1=CCCC1",
+    # Complex polycyclic systems (Tier 3)
+    "carbazole": "c1ccc2c(c1)[nH]c1ccccc12",
+    "phenanthrene": "c1ccc2c(c1)ccc1ccccc21",
+    "anthracene": "c1ccc2cc3ccccc3cc2c1",
+    "pyrene": "c1cc2ccc3cccc4ccc(c1)c2c34",
+    "fluorene": "c1ccc2c(c1)Cc1ccccc1-2",
+    "acridine": "c1ccc2nc3ccccc3cc2c1",
+    "dibenzofuran": "c1ccc2c(c1)oc1ccccc12",
+    "dibenzothiophene": "c1ccc2c(c1)sc1ccccc12",
 }

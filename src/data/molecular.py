@@ -219,6 +219,8 @@ def graph_to_smiles(data: Data) -> Optional[str]:
         for k in range(edge_index.size(1)):
             i = int(edge_index[0, k])
             j = int(edge_index[1, k])
+            if i >= num_nodes or j >= num_nodes:
+                continue  # Skip invalid edge indices
             if i < j and (i, j) not in added_bonds:
                 added_bonds.add((i, j))
 

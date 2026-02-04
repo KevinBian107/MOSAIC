@@ -117,8 +117,15 @@ class TransformerLM(nn.Module):
         size_params = self.MODEL_SIZES[size_name]
         config_cls, model_cls = self.MODEL_CLASSES[arch_name]
 
+        # Set max position embeddings using architecture-specific parameter name
+        if arch_name == "gpt2":
+            position_params = {"n_positions": max_length}
+        else:
+            # LLaMA, GPT-NeoX use max_position_embeddings
+            position_params = {"max_position_embeddings": max_length}
+
         self.model = model_cls(
-            config_cls(**vocab_params, **size_params, **kwargs)
+            config_cls(**vocab_params, **size_params, **position_params, **kwargs)
         )
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
@@ -130,6 +137,20 @@ class TransformerLM(nn.Module):
         Returns:
             Logits tensor [batch_size, seq_len, vocab_size].
         """
+        # Validate token IDs are within vocab bounds
+        vocab_size = len(self.tokenizer)
+        max_token = input_ids.max().item()
+        if max_token >= vocab_size:
+            # Find which sequence has the invalid token
+            invalid_mask = input_ids >= vocab_size
+            batch_idx = invalid_mask.any(dim=1).nonzero()[0].item()
+            seq_idx = invalid_mask[batch_idx].nonzero()[0].item()
+            raise ValueError(
+                f"Token ID {max_token} at position [{batch_idx}, {seq_idx}] "
+                f"exceeds vocab_size {vocab_size}. "
+                f"tokenizer: max_num_nodes={self.tokenizer.max_num_nodes}, "
+                f"IDX_OFFSET={getattr(self.tokenizer, 'IDX_OFFSET', 'N/A')}"
+            )
         return self.model(input_ids=input_ids).logits
 
     @torch.inference_mode()
@@ -225,7 +246,7 @@ class GraphGeneratorModule(pl.LightningModule):
         self.save_hyperparameters(ignore=["tokenizer"])
 
         self.tokenizer = tokenizer
-        self.model = TransformerLM(tokenizer, model_name)
+        self.model = TransformerLM(tokenizer, model_name, max_length=sampling_max_length)
         self.loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer.pad)
 
         self.learning_rate = learning_rate

@@ -47,7 +47,7 @@ sampling:
   batch_size: 32
   top_k: 10
   temperature: 1.0
-  max_length: 2048
+  max_length: 1024  # Sufficient for most molecular datasets
 
 # Logging configuration
 logs:
