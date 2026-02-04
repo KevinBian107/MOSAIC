@@ -61,7 +61,7 @@ METRIC_SECTIONS = [
         ],
     ),
     (
-        "Motif Metrics",
+        "Memory Retention",
         [
             "motif_hist_mean",
             "motif_hist_mean_moses",
@@ -75,10 +75,9 @@ LOWER_IS_BETTER = {
     "motif_mmd",
     "motif_hist_mean",
     "motif_hist_max",
+    "motif_hist_mean_moses",
     "generation_time_per_sample",
 }
-# Note: motif_hist_mean_moses is NOT in LOWER_IS_BETTER
-# Higher = model drifted more from MOSES (better adaptation to COCONUT)
 
 # Display names
 METRIC_DISPLAY_NAMES = {
