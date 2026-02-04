@@ -111,8 +111,15 @@ def main(cfg: DictConfig) -> None:
             seed=cfg.seed,
         )
 
-    # Set max num nodes based on config
+    # Set max num nodes and labeled graph types to match training setup
     tokenizer.set_num_nodes(cfg.data.get("max_atoms", 100))
+    if hasattr(tokenizer, "labeled_graph") and tokenizer.labeled_graph:
+        from src.data.molecular import NUM_ATOM_TYPES, NUM_BOND_TYPES
+
+        tokenizer.set_num_node_and_edge_types(
+            num_node_types=NUM_ATOM_TYPES,
+            num_edge_types=NUM_BOND_TYPES,
+        )
 
     # Load model
     log.info(f"Loading model from {cfg.model.checkpoint_path}")
