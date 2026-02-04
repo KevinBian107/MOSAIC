@@ -146,8 +146,8 @@ echo "$CHECKPOINTS" | while read -r ckpt; do
 
     OUTPUT_NAME="coconut_${SHORT_NAME}"
 
-    # Skip spectral clustering checkpoints if requested
-    if [ "$SKIP_SC" = true ] && [ "$COARSENING" = "spectral" ]; then
+    # Skip spectral clustering checkpoints if requested (only for tokenizers that use coarsening)
+    if [ "$SKIP_SC" = true ] && [ "$COARSENING" = "spectral" ] && supports_coarsening "$TOKENIZER"; then
         echo "========================================"
         echo "[$CURRENT/$TOTAL] SKIPPING: $SHORT_NAME (spectral clustering, --skip-sc)"
         echo ""
