@@ -38,23 +38,11 @@ METRIC_SECTIONS = [
         ],
     ),
     (
-        "Generation Quality",
+        "Transfer Performance",
         [
             "validity",
-            "uniqueness",
-            "novelty",
-        ],
-    ),
-    (
-        "Distribution Matching",
-        [
             "fcd",
             "snn",
-        ],
-    ),
-    (
-        "Structural Similarity",
-        [
             "frag_similarity",
             "scaff_similarity",
             "internal_diversity",
