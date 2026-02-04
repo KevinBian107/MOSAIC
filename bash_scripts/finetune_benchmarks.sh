@@ -59,8 +59,16 @@ for arg in "$@"; do
     esac
 done
 
-# Find all best.ckpt files in benchmark directory
-CHECKPOINTS=$(find "$BENCHMARK_DIR" -name "best.ckpt" -type f 2>/dev/null)
+# Find checkpoints in benchmark directory (prefer best.ckpt, fall back to last.ckpt)
+CHECKPOINTS=""
+for dir in "$BENCHMARK_DIR"/*/; do
+    if [ -f "$dir/best.ckpt" ]; then
+        CHECKPOINTS="${CHECKPOINTS}${dir}best.ckpt"$'\n'
+    elif [ -f "$dir/last.ckpt" ]; then
+        CHECKPOINTS="${CHECKPOINTS}${dir}last.ckpt"$'\n'
+    fi
+done
+CHECKPOINTS=$(echo "$CHECKPOINTS" | sed '/^$/d')
 
 if [ -z "$CHECKPOINTS" ]; then
     echo "Error: No checkpoints found in $BENCHMARK_DIR"
