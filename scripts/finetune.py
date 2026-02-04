@@ -87,12 +87,6 @@ def main(cfg: DictConfig) -> None:
 
     from src.data.datamodule import MolecularDataModule
     from src.data.molecular import graph_to_smiles
-    from src.evaluation.molecular_metrics import MolecularMetrics
-    from src.evaluation.motif_distribution import (
-        MotifCooccurrenceMetric,
-        MotifDistributionMetric,
-        MotifHistogramMetric,
-    )
     from src.models.transformer import GraphGeneratorModule
     from src.tokenizers import (
         HDTCTokenizer,
@@ -152,6 +146,7 @@ def main(cfg: DictConfig) -> None:
 
                 # Suppress RDKit stderr noise from invalid generated molecules
                 from rdkit import RDLogger
+
                 RDLogger.DisableLog("rdApp.*")
 
                 # Convert to SMILES
@@ -166,22 +161,27 @@ def main(cfg: DictConfig) -> None:
                         generated_smiles.append("INVALID")
 
                 # Log validity
-                validity = valid_count / len(generated_graphs) if generated_graphs else 0.0
-                log.info(f"  [Eval] Validity: {valid_count}/{len(generated_graphs)} ({validity:.1%})")
+                validity = (
+                    valid_count / len(generated_graphs) if generated_graphs else 0.0
+                )
+                log.info(
+                    f"  [Eval] Validity: {valid_count}/{len(generated_graphs)} ({validity:.1%})"
+                )
 
                 # Log generated SMILES samples
                 log.info(f"  [Eval] Generated SMILES (sample):")
                 for i, smi in enumerate(generated_smiles[:3]):
-                    log.info(f"    {i+1}. {smi[:80]}...")
+                    log.info(f"    {i + 1}. {smi[:80]}...")
 
                 # Log reference SMILES samples for comparison
                 log.info(f"  [Eval] Reference SMILES (sample):")
                 import random
+
                 ref_sample = random.sample(
                     self.reference_smiles, min(3, len(self.reference_smiles))
                 )
                 for i, smi in enumerate(ref_sample):
-                    log.info(f"    {i+1}. {smi[:80]}...")
+                    log.info(f"    {i + 1}. {smi[:80]}...")
 
                 # Save to file
                 eval_file = self.output_dir / f"eval_step_{global_step}.txt"
@@ -199,11 +199,14 @@ def main(cfg: DictConfig) -> None:
 
                 # Log to trainer loggers if available
                 if trainer.logger:
-                    trainer.logger.log_metrics({
-                        "eval/validity": validity,
-                        "eval/valid_count": valid_count,
-                        "eval/gen_time_per_sample": gen_time,
-                    }, step=global_step)
+                    trainer.logger.log_metrics(
+                        {
+                            "eval/validity": validity,
+                            "eval/valid_count": valid_count,
+                            "eval/gen_time_per_sample": gen_time,
+                        },
+                        step=global_step,
+                    )
 
                 # Log molecule images to WandB
                 self._log_molecule_images(
@@ -438,13 +441,13 @@ def main(cfg: DictConfig) -> None:
                     new_edge_off = tokenizer.edge_idx_offset
 
                     # Infer old layout from old vocab size
-                    old_max_nodes = old_vocab_size - IDX_OFFSET - NUM_ATOM_TYPES - NUM_BOND_TYPES
+                    old_max_nodes = (
+                        old_vocab_size - IDX_OFFSET - NUM_ATOM_TYPES - NUM_BOND_TYPES
+                    )
                     old_node_off = IDX_OFFSET + old_max_nodes
                     old_edge_off = old_node_off + NUM_ATOM_TYPES
 
-                    log.info(
-                        f"  Semantic embedding mapping (labeled graph):"
-                    )
+                    log.info(f"  Semantic embedding mapping (labeled graph):")
                     log.info(
                         f"    Old layout: nodes@[{IDX_OFFSET},{old_node_off}) "
                         f"atoms@[{old_node_off},{old_edge_off}) "
@@ -464,25 +467,69 @@ def main(cfg: DictConfig) -> None:
                     # 1. Special tokens (same positions)
                     n = _copy_range(old_wte, new_wte, 0, IDX_OFFSET, 0, IDX_OFFSET)
                     if old_lm_head is not None:
-                        _copy_range(old_lm_head, new_lm_head, 0, IDX_OFFSET, 0, IDX_OFFSET)
+                        _copy_range(
+                            old_lm_head, new_lm_head, 0, IDX_OFFSET, 0, IDX_OFFSET
+                        )
                     log.info(f"    Copied {n} special token embeddings")
 
                     # 2. Node IDs (may have different range sizes)
-                    n = _copy_range(old_wte, new_wte, IDX_OFFSET, old_node_off, IDX_OFFSET, new_node_off)
+                    n = _copy_range(
+                        old_wte,
+                        new_wte,
+                        IDX_OFFSET,
+                        old_node_off,
+                        IDX_OFFSET,
+                        new_node_off,
+                    )
                     if old_lm_head is not None:
-                        _copy_range(old_lm_head, new_lm_head, IDX_OFFSET, old_node_off, IDX_OFFSET, new_node_off)
+                        _copy_range(
+                            old_lm_head,
+                            new_lm_head,
+                            IDX_OFFSET,
+                            old_node_off,
+                            IDX_OFFSET,
+                            new_node_off,
+                        )
                     log.info(f"    Copied {n} node ID embeddings")
 
                     # 3. Atom types (same count, different positions)
-                    n = _copy_range(old_wte, new_wte, old_node_off, old_edge_off, new_node_off, new_edge_off)
+                    n = _copy_range(
+                        old_wte,
+                        new_wte,
+                        old_node_off,
+                        old_edge_off,
+                        new_node_off,
+                        new_edge_off,
+                    )
                     if old_lm_head is not None:
-                        _copy_range(old_lm_head, new_lm_head, old_node_off, old_edge_off, new_node_off, new_edge_off)
+                        _copy_range(
+                            old_lm_head,
+                            new_lm_head,
+                            old_node_off,
+                            old_edge_off,
+                            new_node_off,
+                            new_edge_off,
+                        )
                     log.info(f"    Copied {n} atom type embeddings")
 
                     # 4. Bond types (same count, different positions)
-                    n = _copy_range(old_wte, new_wte, old_edge_off, old_vocab_size, new_edge_off, new_vocab_size)
+                    n = _copy_range(
+                        old_wte,
+                        new_wte,
+                        old_edge_off,
+                        old_vocab_size,
+                        new_edge_off,
+                        new_vocab_size,
+                    )
                     if old_lm_head is not None:
-                        _copy_range(old_lm_head, new_lm_head, old_edge_off, old_vocab_size, new_edge_off, new_vocab_size)
+                        _copy_range(
+                            old_lm_head,
+                            new_lm_head,
+                            old_edge_off,
+                            old_vocab_size,
+                            new_edge_off,
+                            new_vocab_size,
+                        )
                     log.info(f"    Copied {n} bond type embeddings")
 
                 else:
@@ -608,43 +655,19 @@ def main(cfg: DictConfig) -> None:
     valid_count = sum(1 for s in generated_smiles if s != INVALID)
     log.info(f"Valid molecules: {valid_count}/{len(generated_smiles)}")
 
-    # Compute metrics
-    log.info("Computing metrics...")
-    mol_metrics = MolecularMetrics(reference_smiles=datamodule.train_smiles)
-    results = mol_metrics(generated_smiles)
-    for name, value in results.items():
-        log.info(f"  {name}: {value:.6f}")
-
-    motif_metrics = MotifDistributionMetric(reference_smiles=datamodule.train_smiles)
-    motif_results = motif_metrics(generated_smiles)
-    for name, value in motif_results.items():
-        log.info(f"  {name}: {value:.6f}")
-
-    hist_metrics = MotifHistogramMetric(
-        reference_smiles=datamodule.train_smiles, distance_fn="kl"
-    )
-    hist_results = hist_metrics(generated_smiles)
-    log.info(f"  motif_hist_mean: {hist_results['motif_hist_mean']:.6f}")
-
-    cooccur_metrics = MotifCooccurrenceMetric(reference_smiles=datamodule.train_smiles)
-    cooccur_results = cooccur_metrics(generated_smiles)
-    for name, value in cooccur_results.items():
-        log.info(f"  {name}: {value:.6f}")
-
-    # Log final metrics to WandB
+    # Log final validity and generation time
+    # Full metric computation is handled by the test script (scripts/test.py)
     if wandb_logger is not None:
-        all_metrics = {
-            "final/valid_count": valid_count,
-            "final/validity": valid_count / len(generated_smiles),
-            "final/generation_time_per_sample": gen_time,
-        }
-        all_metrics.update({f"final/{k}": v for k, v in results.items()})
-        all_metrics.update({f"final/{k}": v for k, v in motif_results.items()})
-        all_metrics.update({f"final/motif_hist_mean": hist_results["motif_hist_mean"]})
-        all_metrics.update({f"final/{k}": v for k, v in cooccur_results.items()})
-        wandb_logger.experiment.log(all_metrics)
+        wandb_logger.experiment.log(
+            {
+                "final/valid_count": valid_count,
+                "final/validity": valid_count / max(len(generated_smiles), 1),
+                "final/generation_time_per_sample": gen_time,
+            }
+        )
 
         import wandb
+
         wandb.finish()
         log.info("WandB run finished")
 

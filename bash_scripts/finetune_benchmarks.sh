@@ -20,6 +20,8 @@ OUTPUT_DIR="$PROJECT_ROOT/outputs/finetune"
 MAX_STEPS=50000
 WANDB_ENABLED=true
 DRY_RUN=false
+FORCE=false
+SKIP_SC=false
 
 # Parse arguments
 for arg in "$@"; do
@@ -29,6 +31,12 @@ for arg in "$@"; do
             ;;
         --no-wandb)
             WANDB_ENABLED=false
+            ;;
+        --force)
+            FORCE=true
+            ;;
+        --skip-sc)
+            SKIP_SC=true
             ;;
         --steps=*)
             MAX_STEPS="${arg#*=}"
@@ -40,6 +48,8 @@ for arg in "$@"; do
             echo ""
             echo "Options:"
             echo "  --dry-run      Show what would be run without executing"
+            echo "  --force        Re-run even if output best.ckpt already exists"
+            echo "  --skip-sc      Skip spectral clustering checkpoints"
             echo "  --no-wandb     Disable WandB logging"
             echo "  --steps=N      Set max training steps (default: 50000)"
             echo ""
@@ -135,6 +145,26 @@ echo "$CHECKPOINTS" | while read -r ckpt; do
     SHORT_NAME=$(get_short_name "$ckpt")
 
     OUTPUT_NAME="coconut_${SHORT_NAME}"
+
+    # Skip spectral clustering checkpoints if requested
+    if [ "$SKIP_SC" = true ] && [ "$COARSENING" = "spectral" ]; then
+        echo "========================================"
+        echo "[$CURRENT/$TOTAL] SKIPPING: $SHORT_NAME (spectral clustering, --skip-sc)"
+        echo ""
+        continue
+    fi
+
+    # Skip if already fine-tuned (best.ckpt exists in any timestamped output dir)
+    # Hydra creates dirs like: outputs/finetune/coconut_hdtc_mc_20260203-142530/
+    EXISTING_CKPT=$(find "$OUTPUT_DIR" -path "*/${OUTPUT_NAME}_*/best.ckpt" -type f 2>/dev/null | head -1)
+    if [ "$FORCE" = false ] && [ -n "$EXISTING_CKPT" ]; then
+        echo "========================================"
+        echo "[$CURRENT/$TOTAL] SKIPPING: $SHORT_NAME (already fine-tuned)"
+        echo "  Output exists: $EXISTING_CKPT"
+        echo "  Use --force to re-run"
+        echo ""
+        continue
+    fi
 
     echo "========================================"
     echo "[$CURRENT/$TOTAL] Fine-tuning: $SHORT_NAME"
