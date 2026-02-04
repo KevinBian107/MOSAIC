@@ -35,7 +35,6 @@ METRIC_SECTIONS = [
         [
             "tokenizer",
             "coarsening",
-            "pretrained_from",
         ],
     ),
     (
@@ -64,14 +63,8 @@ METRIC_SECTIONS = [
     (
         "Motif Metrics",
         [
-            "motif_mmd",
             "motif_hist_mean",
-        ],
-    ),
-    (
-        "Performance",
-        [
-            "generation_time_per_sample",
+            "motif_hist_mean_moses",
         ],
     ),
 ]
@@ -84,6 +77,8 @@ LOWER_IS_BETTER = {
     "motif_hist_max",
     "generation_time_per_sample",
 }
+# Note: motif_hist_mean_moses is NOT in LOWER_IS_BETTER
+# Higher = model drifted more from MOSES (better adaptation to COCONUT)
 
 # Display names
 METRIC_DISPLAY_NAMES = {
@@ -99,8 +94,9 @@ METRIC_DISPLAY_NAMES = {
     "scaff_similarity": "Scaff Sim",
     "internal_diversity": "Int Div",
     "motif_mmd": "Motif MMD",
-    "motif_hist_mean": "Hist KL",
+    "motif_hist_mean": "Hist KL (COCONUT)",
     "motif_hist_max": "Hist Max KL",
+    "motif_hist_mean_moses": "Hist KL (MOSES)",
     "generation_time_per_sample": "Gen Time (s)",
     "num_valid": "Valid Count",
     "num_generated": "Generated",
@@ -118,6 +114,7 @@ COARSENING_DISPLAY_NAMES = {
     "spectral": "SC",
     "motif_community": "MC",
     "motif_aware_spectral": "MAS",
+    "mfc": "MFC",
 }
 
 
@@ -154,6 +151,8 @@ def extract_run_info(run_dir: Path) -> dict:
             coarsening = "motif_aware_spectral"
         else:
             coarsening = "spectral"  # Default
+    elif tokenizer == "hdtc":
+        coarsening = "mfc"  # HDTC uses Motif Functional Composition
 
     return {
         "tokenizer": tokenizer,

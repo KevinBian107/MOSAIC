@@ -28,7 +28,7 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.data.coconut_loader import CoconutLoader
-from src.data.molecular import graph_to_smiles
+from src.data.molecular import graph_to_smiles, load_moses_dataset
 from src.evaluation.molecular_metrics import MolecularMetrics
 from src.evaluation.motif_distribution import (
     MotifCooccurrenceMetric,
@@ -243,17 +243,31 @@ def main(cfg: DictConfig) -> None:
         for name, value in motif_results.items():
             log.info(f"  {name}: {value:.6f}")
 
-    # Compute motif histogram metrics
+    # Compute motif histogram metrics (vs COCONUT reference)
     if cfg.metrics.get("motif_histogram", True):
-        log.info("Computing motif histogram metrics...")
+        log.info("Computing motif histogram metrics (vs COCONUT)...")
         hist_metrics = MotifHistogramMetric(
             reference_smiles=reference_smiles, distance_fn="kl"
         )
         hist_results = hist_metrics(generated_smiles)
         results["motif_hist_mean"] = hist_results["motif_hist_mean"]
         results["motif_hist_max"] = hist_results["motif_hist_max"]
-        log.info(f"  motif_hist_mean: {hist_results['motif_hist_mean']:.6f}")
-        log.info(f"  motif_hist_max: {hist_results['motif_hist_max']:.6f}")
+        log.info(f"  motif_hist_mean (COCONUT): {hist_results['motif_hist_mean']:.6f}")
+        log.info(f"  motif_hist_max (COCONUT): {hist_results['motif_hist_max']:.6f}")
+
+        # Also compute vs MOSES reference to measure domain shift
+        log.info("Computing motif histogram metrics (vs MOSES)...")
+        moses_smiles = load_moses_dataset(
+            split="train", max_molecules=cfg.data.n_reference, seed=cfg.seed
+        )
+        hist_metrics_moses = MotifHistogramMetric(
+            reference_smiles=moses_smiles, distance_fn="kl"
+        )
+        hist_results_moses = hist_metrics_moses(generated_smiles)
+        results["motif_hist_mean_moses"] = hist_results_moses["motif_hist_mean"]
+        results["motif_hist_max_moses"] = hist_results_moses["motif_hist_max"]
+        log.info(f"  motif_hist_mean (MOSES): {hist_results_moses['motif_hist_mean']:.6f}")
+        log.info(f"  motif_hist_max (MOSES): {hist_results_moses['motif_hist_max']:.6f}")
 
     # Compute motif co-occurrence metrics
     if cfg.metrics.get("motif_cooccurrence", True):
