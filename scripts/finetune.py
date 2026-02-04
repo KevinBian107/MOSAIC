@@ -436,7 +436,9 @@ def main(cfg: DictConfig) -> None:
                 ):
                     from src.data.molecular import NUM_ATOM_TYPES, NUM_BOND_TYPES
 
-                    IDX_OFFSET = tokenizer.IDX_OFFSET
+                    IDX_OFFSET = getattr(
+                        tokenizer, "IDX_OFFSET", tokenizer.idx_offset
+                    )
                     new_node_off = tokenizer.node_idx_offset
                     new_edge_off = tokenizer.edge_idx_offset
 
