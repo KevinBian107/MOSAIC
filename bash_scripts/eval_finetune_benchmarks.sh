@@ -150,9 +150,11 @@ if [ "$COMPARE_ONLY" = false ]; then
         echo "Tokenizer: $TOKENIZER"
 
         # Build command
+        # Use sampling.max_length=1024 to match coconut fine-tuning config
         CMD="python scripts/eval_finetune.py"
         CMD="$CMD model.checkpoint_path=\"$ckpt\""
         CMD="$CMD tokenizer=$TOKENIZER"
+        CMD="$CMD sampling.max_length=1024"
         CMD="$CMD generation.num_samples=$NUM_SAMPLES"
         CMD="$CMD data.n_reference=$N_REFERENCE"
         CMD="$CMD logs.base_dir=$EVAL_OUTPUT_DIR"

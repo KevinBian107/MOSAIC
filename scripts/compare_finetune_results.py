@@ -35,43 +35,24 @@ METRIC_SECTIONS = [
         [
             "tokenizer",
             "coarsening",
-            "pretrained_from",
         ],
     ),
     (
-        "Generation Quality",
+        "Transfer Performance",
         [
             "validity",
-            "uniqueness",
-            "novelty",
-        ],
-    ),
-    (
-        "Distribution Matching",
-        [
             "fcd",
             "snn",
-        ],
-    ),
-    (
-        "Structural Similarity",
-        [
             "frag_similarity",
             "scaff_similarity",
             "internal_diversity",
         ],
     ),
     (
-        "Motif Metrics",
+        "Memory Retention",
         [
-            "motif_mmd",
             "motif_hist_mean",
-        ],
-    ),
-    (
-        "Performance",
-        [
-            "generation_time_per_sample",
+            "motif_hist_mean_moses",
         ],
     ),
 ]
@@ -82,6 +63,7 @@ LOWER_IS_BETTER = {
     "motif_mmd",
     "motif_hist_mean",
     "motif_hist_max",
+    "motif_hist_mean_moses",
     "generation_time_per_sample",
 }
 
@@ -99,8 +81,9 @@ METRIC_DISPLAY_NAMES = {
     "scaff_similarity": "Scaff Sim",
     "internal_diversity": "Int Div",
     "motif_mmd": "Motif MMD",
-    "motif_hist_mean": "Hist KL",
+    "motif_hist_mean": "Hist KL (COCONUT)",
     "motif_hist_max": "Hist Max KL",
+    "motif_hist_mean_moses": "Hist KL (MOSES)",
     "generation_time_per_sample": "Gen Time (s)",
     "num_valid": "Valid Count",
     "num_generated": "Generated",
@@ -118,6 +101,7 @@ COARSENING_DISPLAY_NAMES = {
     "spectral": "SC",
     "motif_community": "MC",
     "motif_aware_spectral": "MAS",
+    "mfc": "MFC",
 }
 
 
@@ -154,6 +138,8 @@ def extract_run_info(run_dir: Path) -> dict:
             coarsening = "motif_aware_spectral"
         else:
             coarsening = "spectral"  # Default
+    elif tokenizer == "hdtc":
+        coarsening = "mfc"  # HDTC uses Motif Functional Composition
 
     return {
         "tokenizer": tokenizer,
