@@ -49,17 +49,22 @@ METRIC_SECTIONS = [
         ],
     ),
     (
-        "Memory Retention",
+        "Adaptation (COCONUT)",
         [
             "motif_hist_mean",
-            "motif_hist_mean_moses",
             "ring_count_kl_coconut",
-            "ring_count_kl_moses",
             "scaffold_retention_coconut",
-            "scaffold_retention_moses",
             "atom_type_kl_coconut",
-            "atom_type_kl_moses",
             "func_group_kl_coconut",
+        ],
+    ),
+    (
+        "Retention (MOSES)",
+        [
+            "motif_hist_mean_moses",
+            "ring_count_kl_moses",
+            "scaffold_retention_moses",
+            "atom_type_kl_moses",
             "func_group_kl_moses",
         ],
     ),
