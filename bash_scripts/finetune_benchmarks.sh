@@ -92,7 +92,7 @@ get_tokenizer_type() {
         echo "hdtc"
     elif [[ "$dir_name" == *"_hdt_"* ]] || [[ "$dir_name" =~ _hdt[^a-z] ]]; then
         echo "hdt"
-    elif [[ "$dir_name" == *"_sent_"* ]] || [[ "$dir_name" =~ _sent[^a-z] ]]; then
+    elif [[ "$dir_name" == *"_sent_"* ]] || [[ "$dir_name" =~ _sent[^a-z] ]] || [[ "$dir_name" == *"_sent" ]]; then
         echo "sent"
     else
         echo "hdtc"  # Default fallback
