@@ -35,6 +35,7 @@ METRIC_SECTIONS = [
         [
             "tokenizer",
             "coarsening",
+            "training_steps",
         ],
     ),
     (
@@ -49,10 +50,23 @@ METRIC_SECTIONS = [
         ],
     ),
     (
-        "Memory Retention",
+        "Adaptation (COCONUT)",
         [
             "motif_hist_mean",
+            "ring_count_kl_coconut",
+            "scaffold_retention_coconut",
+            "atom_type_kl_coconut",
+            "func_group_kl_coconut",
+        ],
+    ),
+    (
+        "Retention (MOSES)",
+        [
             "motif_hist_mean_moses",
+            "ring_count_kl_moses",
+            "scaffold_retention_moses",
+            "atom_type_kl_moses",
+            "func_group_kl_moses",
         ],
     ),
 ]
@@ -65,12 +79,20 @@ LOWER_IS_BETTER = {
     "motif_hist_max",
     "motif_hist_mean_moses",
     "generation_time_per_sample",
+    "ring_count_kl_coconut",
+    "ring_count_kl_moses",
+    "atom_type_kl_coconut",
+    "atom_type_kl_moses",
+    "func_group_kl_coconut",
+    "func_group_kl_moses",
 }
+# Note: scaffold_retention is higher=better (more scaffolds retained)
 
 # Display names
 METRIC_DISPLAY_NAMES = {
     "tokenizer": "Tokenizer",
     "coarsening": "Coarsening",
+    "training_steps": "Steps",
     "pretrained_from": "Pretrained From",
     "validity": "Validity",
     "uniqueness": "Uniqueness",
@@ -87,6 +109,14 @@ METRIC_DISPLAY_NAMES = {
     "generation_time_per_sample": "Gen Time (s)",
     "num_valid": "Valid Count",
     "num_generated": "Generated",
+    "ring_count_kl_coconut": "Ring KL (COCONUT)",
+    "ring_count_kl_moses": "Ring KL (MOSES)",
+    "scaffold_retention_coconut": "Scaff Ret (COCONUT)",
+    "scaffold_retention_moses": "Scaff Ret (MOSES)",
+    "atom_type_kl_coconut": "Atom KL (COCONUT)",
+    "atom_type_kl_moses": "Atom KL (MOSES)",
+    "func_group_kl_coconut": "FG KL (COCONUT)",
+    "func_group_kl_moses": "FG KL (MOSES)",
 }
 
 TOKENIZER_DISPLAY_NAMES = {
@@ -241,6 +271,10 @@ def format_value(value, metric: str) -> str:
         return TOKENIZER_DISPLAY_NAMES.get(value, str(value).upper())
     if metric == "coarsening":
         return COARSENING_DISPLAY_NAMES.get(value, str(value))
+    if metric == "training_steps":
+        if isinstance(value, (int, float)) and value >= 1000:
+            return f"{value / 1000:.0f}K"
+        return str(int(value)) if isinstance(value, (int, float)) else str(value)
     if isinstance(value, str):
         return value
     if isinstance(value, int):

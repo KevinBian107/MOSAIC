@@ -5,9 +5,13 @@
 # on the COCONUT complex natural products dataset.
 #
 # Usage:
-#   ./bash_scripts/finetune_benchmarks.sh              # Fine-tune all benchmarks
+#   ./bash_scripts/finetune_benchmarks.sh              # Fine-tune all (5000 samples)
+#   ./bash_scripts/finetune_benchmarks.sh --few-shot   # Few-shot mode (200 samples)
+#   ./bash_scripts/finetune_benchmarks.sh --few-shot=500  # Custom few-shot size
 #   ./bash_scripts/finetune_benchmarks.sh --dry-run    # Show what would be run
 #   ./bash_scripts/finetune_benchmarks.sh --help       # Show help
+#
+# Few-shot mode saves to outputs/finetune_fewshot/ instead of outputs/finetune/
 
 set -e  # Exit on error
 
@@ -22,6 +26,8 @@ WANDB_ENABLED=true
 DRY_RUN=false
 FORCE=false
 SKIP_SC=false
+FEW_SHOT=false
+FEW_SHOT_SIZE=200
 
 # Parse arguments
 for arg in "$@"; do
@@ -41,6 +47,13 @@ for arg in "$@"; do
         --steps=*)
             MAX_STEPS="${arg#*=}"
             ;;
+        --few-shot)
+            FEW_SHOT=true
+            ;;
+        --few-shot=*)
+            FEW_SHOT=true
+            FEW_SHOT_SIZE="${arg#*=}"
+            ;;
         --help|-h)
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -52,12 +65,25 @@ for arg in "$@"; do
             echo "  --skip-sc      Skip spectral clustering checkpoints"
             echo "  --no-wandb     Disable WandB logging"
             echo "  --steps=N      Set max training steps (default: 50000)"
+            echo "  --few-shot     Enable few-shot mode with 200 training samples"
+            echo "  --few-shot=N   Enable few-shot mode with N training samples"
             echo ""
-            echo "Results are saved to outputs/finetune/{model_name}/"
+            echo "Output directories:"
+            echo "  Full mode:     outputs/finetune/{model_name}/"
+            echo "  Few-shot mode: outputs/finetune_fewshot/{model_name}/"
             exit 0
             ;;
     esac
 done
+
+# Update output directory for few-shot mode
+if [ "$FEW_SHOT" = true ]; then
+    OUTPUT_DIR="$PROJECT_ROOT/outputs/finetune_fewshot"
+    # Reduce steps for few-shot (less data = faster convergence)
+    if [ "$MAX_STEPS" = "50000" ]; then
+        MAX_STEPS=10000
+    fi
+fi
 
 # Find checkpoints in benchmark directory (prefer best.ckpt, fall back to last.ckpt)
 CHECKPOINTS=""
@@ -80,8 +106,14 @@ echo "Found checkpoints to fine-tune:"
 echo "$CHECKPOINTS" | while read -r ckpt; do echo "  - $ckpt"; done
 echo ""
 echo "Settings:"
+if [ "$FEW_SHOT" = true ]; then
+    echo "  Mode: FEW-SHOT ($FEW_SHOT_SIZE training samples)"
+else
+    echo "  Mode: FULL (5000 training samples)"
+fi
 echo "  Max steps: $MAX_STEPS"
 echo "  WandB: $WANDB_ENABLED"
+echo "  Output: $OUTPUT_DIR"
 echo ""
 
 cd "$PROJECT_ROOT"
@@ -188,6 +220,11 @@ echo "$CHECKPOINTS" | while read -r ckpt; do
     CMD="$CMD logs.run_name=$OUTPUT_NAME"
     CMD="$CMD logs.base_dir=$OUTPUT_DIR"
     CMD="$CMD wandb.enabled=$WANDB_ENABLED"
+
+    # Add few-shot data size if enabled
+    if [ "$FEW_SHOT" = true ]; then
+        CMD="$CMD data.num_train=$FEW_SHOT_SIZE"
+    fi
 
     # Add coarsening args for tokenizers that support it
     if supports_coarsening "$TOKENIZER"; then
