@@ -125,6 +125,10 @@ def main(cfg: DictConfig) -> None:
     log.info(f"Loading model from {cfg.model.checkpoint_path}")
     checkpoint = torch.load(cfg.model.checkpoint_path, map_location="cpu")
 
+    # Extract training steps from checkpoint
+    training_steps = checkpoint.get("global_step", 0)
+    log.info(f"Checkpoint trained for {training_steps} steps")
+
     model = GraphGeneratorModule(
         tokenizer=tokenizer,
         model_name=cfg.model.get("model_name", "gpt2-xs"),
@@ -223,6 +227,7 @@ def main(cfg: DictConfig) -> None:
         "num_valid": len(valid_smiles),
         "validity": len(valid_smiles) / max(len(generated_smiles), 1),
         "generation_time_per_sample": gen_time,
+        "training_steps": training_steps,
     }
 
     # Compute molecular metrics

@@ -35,6 +35,7 @@ METRIC_SECTIONS = [
         [
             "tokenizer",
             "coarsening",
+            "training_steps",
         ],
     ),
     (
@@ -91,6 +92,7 @@ LOWER_IS_BETTER = {
 METRIC_DISPLAY_NAMES = {
     "tokenizer": "Tokenizer",
     "coarsening": "Coarsening",
+    "training_steps": "Steps",
     "pretrained_from": "Pretrained From",
     "validity": "Validity",
     "uniqueness": "Uniqueness",
@@ -269,6 +271,10 @@ def format_value(value, metric: str) -> str:
         return TOKENIZER_DISPLAY_NAMES.get(value, str(value).upper())
     if metric == "coarsening":
         return COARSENING_DISPLAY_NAMES.get(value, str(value))
+    if metric == "training_steps":
+        if isinstance(value, (int, float)) and value >= 1000:
+            return f"{value / 1000:.0f}K"
+        return str(int(value)) if isinstance(value, (int, float)) else str(value)
     if isinstance(value, str):
         return value
     if isinstance(value, int):
