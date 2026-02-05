@@ -436,9 +436,11 @@ def main(cfg: DictConfig) -> None:
                 ):
                     from src.data.molecular import NUM_ATOM_TYPES, NUM_BOND_TYPES
 
-                    IDX_OFFSET = getattr(
-                        tokenizer, "IDX_OFFSET", tokenizer.idx_offset
-                    )
+                    # HDT/HDTC/HSENT use IDX_OFFSET class constant, SENT uses idx_offset
+                    if hasattr(tokenizer, "IDX_OFFSET"):
+                        IDX_OFFSET = tokenizer.IDX_OFFSET
+                    else:
+                        IDX_OFFSET = tokenizer.idx_offset
                     new_node_off = tokenizer.node_idx_offset
                     new_edge_off = tokenizer.edge_idx_offset
 
