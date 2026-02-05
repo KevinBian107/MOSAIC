@@ -11,21 +11,33 @@ Fine-tunes all pretrained models in `outputs/benchmark/` on the COCONUT complex 
 1. Finds all `best.ckpt` files in `outputs/benchmark/`
 2. Extracts tokenizer type and coarsening strategy from directory names
 3. Runs `scripts/finetune.py` on each checkpoint with appropriate settings
-4. Saves fine-tuned models to `outputs/finetune/`
+4. Saves fine-tuned models to `outputs/finetune/` (or `outputs/finetune_fewshot/` in few-shot mode)
 
 ### Usage
 
 ```bash
-# Run from project root
+# Full fine-tuning (5000 training samples, 50000 steps)
 ./bash_scripts/finetune_benchmarks.sh
+
+# Few-shot fine-tuning (200 training samples, 10000 steps)
+./bash_scripts/finetune_benchmarks.sh --few-shot
+
+# Few-shot with custom sample size
+./bash_scripts/finetune_benchmarks.sh --few-shot=500
 
 # Dry run (show commands without executing)
 ./bash_scripts/finetune_benchmarks.sh --dry-run
 
+# Skip already completed checkpoints
+./bash_scripts/finetune_benchmarks.sh --force  # Re-run even if exists
+
+# Skip spectral clustering models
+./bash_scripts/finetune_benchmarks.sh --skip-sc
+
 # Disable WandB logging
 ./bash_scripts/finetune_benchmarks.sh --no-wandb
 
-# Custom number of training steps (default: 50000)
+# Custom number of training steps (default: 50000 full, 10000 few-shot)
 ./bash_scripts/finetune_benchmarks.sh --steps=100000
 
 # Show help
@@ -34,10 +46,23 @@ Fine-tunes all pretrained models in `outputs/benchmark/` on the COCONUT complex 
 
 ### Output
 
-Fine-tuned models are saved to:
-- `outputs/finetune/coconut_{tokenizer}_{coarsening}/best.ckpt` - Best checkpoint
-- `outputs/finetune/coconut_{tokenizer}_{coarsening}/last.ckpt` - Last checkpoint
-- `outputs/finetune/coconut_{tokenizer}_{coarsening}/config.yaml` - Training config
+**Full mode** - Fine-tuned models are saved to:
+- `outputs/finetune/coconut_{tokenizer}_{coarsening}/best.ckpt`
+- `outputs/finetune/coconut_{tokenizer}_{coarsening}/last.ckpt`
+- `outputs/finetune/coconut_{tokenizer}_{coarsening}/config.yaml`
+
+**Few-shot mode** - Fine-tuned models are saved to:
+- `outputs/finetune_fewshot/coconut_{tokenizer}_{coarsening}/best.ckpt`
+- `outputs/finetune_fewshot/coconut_{tokenizer}_{coarsening}/last.ckpt`
+- `outputs/finetune_fewshot/coconut_{tokenizer}_{coarsening}/config.yaml`
+
+### Few-shot Transfer Learning
+
+Few-shot mode tests model retention under data scarcity. With limited fine-tuning data:
+- Flat tokenizers (SENT) tend to overfit and lose pretrained knowledge
+- Hierarchical tokenizers (H-SENT, HDT, HDTC) retain more MOSES patterns
+
+This demonstrates the memory retention benefits of hierarchical representations.
 
 ### Prerequisites
 
@@ -124,3 +149,74 @@ moses_hsent_mas_n100000_20260126/ → tokenizer=hsent, coarsening=motif_aware_sp
 moses_hdtc_n100000_20260126/      → tokenizer=hdtc (no coarsening)
 moses_sent_n100000_20260126/      → tokenizer=sent (no coarsening)
 ```
+
+---
+
+## eval_finetune_benchmarks.sh
+
+Evaluates fine-tuned checkpoints and generates a comparison table showing transfer learning performance.
+
+### What it does
+
+1. Finds all `best.ckpt` files in `outputs/finetune/` (or `outputs/finetune_fewshot/`)
+2. Runs `scripts/eval_finetune.py` on each checkpoint
+3. Computes transfer performance metrics (FCD, SNN, fragment/scaffold similarity)
+4. Computes adaptation metrics (vs COCONUT distribution)
+5. Computes retention metrics (vs MOSES distribution)
+6. Generates comparison table using `scripts/compare_finetune_results.py`
+
+### Usage
+
+```bash
+# Evaluate full fine-tuned models
+./bash_scripts/eval_finetune_benchmarks.sh
+
+# Evaluate few-shot fine-tuned models
+./bash_scripts/eval_finetune_benchmarks.sh --few-shot
+
+# Dry run (show commands without executing)
+./bash_scripts/eval_finetune_benchmarks.sh --dry-run
+
+# Just regenerate comparison table (skip evaluation)
+./bash_scripts/eval_finetune_benchmarks.sh --compare-only
+./bash_scripts/eval_finetune_benchmarks.sh --few-shot --compare-only
+
+# Custom generation settings
+./bash_scripts/eval_finetune_benchmarks.sh --samples=500 --reference=500
+
+# Show help
+./bash_scripts/eval_finetune_benchmarks.sh --help
+```
+
+### Output
+
+**Full mode:**
+- `outputs/eval_finetune/*/evaluation_results.json` - Evaluation metrics
+- `outputs/finetune/comparison.png` - Comparison table image
+
+**Few-shot mode:**
+- `outputs/eval_finetune_fewshot/*/evaluation_results.json` - Evaluation metrics
+- `outputs/finetune_fewshot/comparison.png` - Comparison table image
+
+### Metrics
+
+The comparison table includes:
+
+**Training Info:**
+- Tokenizer type
+- Coarsening strategy
+- Training steps
+
+**Transfer Performance:**
+- Validity, FCD, SNN
+- Fragment similarity, Scaffold similarity
+- Internal diversity
+
+**Adaptation (COCONUT):**
+- Motif histogram KL divergence
+- Ring count KL, Scaffold retention
+- Atom type KL, Functional group KL
+
+**Retention (MOSES):**
+- Same metrics computed against MOSES distribution
+- Lower values = better retention of pretrained knowledge

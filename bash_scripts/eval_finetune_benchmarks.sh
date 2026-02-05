@@ -5,7 +5,8 @@
 # then generates a comparison table using compare_finetune_results.py.
 #
 # Usage:
-#   ./bash_scripts/eval_finetune_benchmarks.sh              # Evaluate all
+#   ./bash_scripts/eval_finetune_benchmarks.sh              # Evaluate full fine-tune
+#   ./bash_scripts/eval_finetune_benchmarks.sh --few-shot   # Evaluate few-shot fine-tune
 #   ./bash_scripts/eval_finetune_benchmarks.sh --dry-run    # Show what would be run
 #   ./bash_scripts/eval_finetune_benchmarks.sh --compare-only  # Just generate table
 #   ./bash_scripts/eval_finetune_benchmarks.sh --help       # Show help
@@ -22,6 +23,7 @@ DRY_RUN=false
 COMPARE_ONLY=false
 NUM_SAMPLES=1000
 N_REFERENCE=1000
+FEW_SHOT=false
 
 # Parse arguments
 for arg in "$@"; do
@@ -38,6 +40,9 @@ for arg in "$@"; do
         --reference=*)
             N_REFERENCE="${arg#*=}"
             ;;
+        --few-shot)
+            FEW_SHOT=true
+            ;;
         --help|-h)
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -46,16 +51,27 @@ for arg in "$@"; do
             echo "Options:"
             echo "  --dry-run       Show what would be run without executing"
             echo "  --compare-only  Skip evaluation, just generate comparison table"
+            echo "  --few-shot      Evaluate few-shot models (from outputs/finetune_fewshot/)"
             echo "  --samples=N     Number of molecules to generate (default: 1000)"
             echo "  --reference=N   Number of reference molecules (default: 1000)"
             echo ""
-            echo "Input:  outputs/finetune/*/best.ckpt"
-            echo "Output: outputs/eval_finetune/*/evaluation_results.json"
-            echo "        outputs/finetune/comparison.png"
+            echo "Input directories:"
+            echo "  Full mode:     outputs/finetune/*/best.ckpt"
+            echo "  Few-shot mode: outputs/finetune_fewshot/*/best.ckpt"
+            echo ""
+            echo "Output directories:"
+            echo "  Full mode:     outputs/eval_finetune/"
+            echo "  Few-shot mode: outputs/eval_finetune_fewshot/"
             exit 0
             ;;
     esac
 done
+
+# Update directories for few-shot mode
+if [ "$FEW_SHOT" = true ]; then
+    FINETUNE_DIR="$PROJECT_ROOT/outputs/finetune_fewshot"
+    EVAL_OUTPUT_DIR="$PROJECT_ROOT/outputs/eval_finetune_fewshot"
+fi
 
 cd "$PROJECT_ROOT"
 
@@ -129,8 +145,15 @@ if [ "$COMPARE_ONLY" = false ]; then
     echo "$CHECKPOINTS" | while read -r ckpt; do echo "  - $ckpt"; done
     echo ""
     echo "Settings:"
+    if [ "$FEW_SHOT" = true ]; then
+        echo "  Mode: FEW-SHOT"
+    else
+        echo "  Mode: FULL"
+    fi
     echo "  Samples to generate: $NUM_SAMPLES"
     echo "  Reference molecules: $N_REFERENCE"
+    echo "  Input dir: $FINETUNE_DIR"
+    echo "  Output dir: $EVAL_OUTPUT_DIR"
     echo ""
 
     # Count total checkpoints
