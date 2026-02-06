@@ -20,13 +20,10 @@ model:
   max_steps: ${trainer.max_steps}
 
 # Data configuration
+# NOTE: dataset_name, data_file, num_train, num_val, num_test come from experiment config
 data:
-  dataset_name: moses  # 'moses' or 'qm9'
   batch_size: 32
   num_workers: 8  # Must be 0 for SENT tokenizer (Cython multiprocessing issue)
-  num_train: 500000  # Use null for full dataset
-  num_val: 1000
-  num_test: 1000
   include_hydrogens: false
   data_root: data
   use_cache: true  # Set to true to use preprocessed cached data
