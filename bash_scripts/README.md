@@ -2,6 +2,80 @@
 
 Utility scripts for running batch operations.
 
+## Workflow
+
+```
+1. train_benchmarks.sh     → Pretrain on MOSES (or COCONUT)
+2. eval_benchmarks.sh      → Evaluate pretrained models
+3. finetune_benchmarks.sh  → Fine-tune on COCONUT (transfer learning)
+4. eval_finetune_benchmarks.sh → Evaluate fine-tuned models
+```
+
+---
+
+## train_benchmarks.sh
+
+Trains all tokenizer variants from scratch on MOSES or COCONUT dataset.
+
+### What it does
+
+1. Trains all tokenizer configurations (SENT, H-SENT+MC, HDT+MC, HDTC)
+2. By default uses motif_community (MC) coarsening (precomputed, faster)
+3. Optionally includes spectral clustering variants with `--all-coarsening`
+4. Saves checkpoints to `outputs/benchmark/` (MOSES) or `outputs/benchmark_coconut/` (COCONUT)
+
+### Usage
+
+```bash
+# Train all tokenizers on MOSES (default, 500K steps)
+./bash_scripts/train_benchmarks.sh
+
+# Train on COCONUT instead (50K steps)
+./bash_scripts/train_benchmarks.sh --coconut
+
+# Include spectral clustering variants (slower)
+./bash_scripts/train_benchmarks.sh --all-coarsening
+
+# Dry run (show commands without executing)
+./bash_scripts/train_benchmarks.sh --dry-run
+
+# Skip already completed models
+./bash_scripts/train_benchmarks.sh --force  # Re-run even if exists
+
+# Custom training steps
+./bash_scripts/train_benchmarks.sh --steps=100000
+
+# Disable WandB logging
+./bash_scripts/train_benchmarks.sh --no-wandb
+
+# Show help
+./bash_scripts/train_benchmarks.sh --help
+```
+
+### Tokenizers trained
+
+**Default (MC coarsening):**
+- `SENT` - Flat sequential tokenizer (baseline)
+- `H-SENT + MC` - Hierarchical SENT with motif community coarsening
+- `HDT + MC` - Hierarchical DFS with motif community coarsening
+- `HDTC` - Compositional (uses functional hierarchy, no coarsening needed)
+
+**With `--all-coarsening`:**
+- `H-SENT + SC` - Hierarchical SENT with spectral clustering
+- `HDT + SC` - Hierarchical DFS with spectral clustering
+
+### Output
+
+**MOSES training:**
+- `outputs/benchmark/moses_{tokenizer}_{coarsening}_{timestamp}/best.ckpt`
+- `outputs/benchmark/moses_{tokenizer}_{coarsening}_{timestamp}/last.ckpt`
+
+**COCONUT training:**
+- `outputs/benchmark_coconut/coconut_{tokenizer}_{coarsening}_{timestamp}/best.ckpt`
+- `outputs/benchmark_coconut/coconut_{tokenizer}_{coarsening}_{timestamp}/last.ckpt`
+
+---
+
 ## finetune_benchmarks.sh
 
 Fine-tunes all pretrained models in `outputs/benchmark/` on the COCONUT complex natural products dataset for transfer learning evaluation.
