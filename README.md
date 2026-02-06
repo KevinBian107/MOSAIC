@@ -28,20 +28,27 @@ conda activate mosaic
 ### Training
 
 ```bash
-# Train with default configuration (uses flat SENT tokenization)
-python scripts/train.py
+# Train on MOSES dataset (default) with HDTC tokenizer
+python scripts/train.py experiment=moses
 
-# Train with hierarchical H-SENT tokenization
-python scripts/train.py tokenizer.type=hdtc
+# Train with different tokenizers
+python scripts/train.py experiment=moses tokenizer=sent    # Flat SENT (baseline)
+python scripts/train.py experiment=moses tokenizer=hsent   # Hierarchical SENT
+python scripts/train.py experiment=moses tokenizer=hdt     # Hierarchical DFS
+python scripts/train.py experiment=moses tokenizer=hdtc    # Compositional (default)
 
 # Train on QM9 dataset
-python scripts/train.py data.dataset_name=qm9
+python scripts/train.py experiment=qm9
+
+# Train on COCONUT dataset (complex natural products)
+python scripts/train.py experiment=coconut
 
 # Train with custom model and settings
 python scripts/train.py \
+    experiment=moses \
     model.model_name=gpt2-s \
     trainer.max_steps=100000 \
-    tokenizer.type=hsent
+    tokenizer=hsent
 ```
 
 ### Evaluation
