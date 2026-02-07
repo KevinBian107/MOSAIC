@@ -327,8 +327,18 @@ class MolecularDataModule(pl.LightningDataModule):
             raise ValueError(f"Unknown dataset: {self.dataset_name}")
 
         # Update tokenizer with max nodes
+        # Add safety margin for hierarchical tokenizers that encode partition metadata
+        # (num_communities, part_ids, etc.) using the same index space
         if self.tokenizer is not None:
-            self.tokenizer.set_num_nodes(self.max_num_nodes)
+            effective_max_nodes = self.max_num_nodes
+            tokenizer_name = type(self.tokenizer).__name__
+            if tokenizer_name in ("HSENTTokenizer", "HDTTokenizer", "HDTCTokenizer"):
+                # Hierarchical tokenizers may need extra headroom for partition IDs
+                effective_max_nodes = int(self.max_num_nodes * 1.5)
+                log.info(
+                    f"Hierarchical tokenizer: max_num_nodes {self.max_num_nodes} -> {effective_max_nodes}"
+                )
+            self.tokenizer.set_num_nodes(effective_max_nodes)
 
             # Configure labeled graph support (AutoGraph format)
             if (
