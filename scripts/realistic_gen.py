@@ -24,6 +24,7 @@ import json
 import logging
 import sys
 from pathlib import Path
+from typing import Optional
 
 import hydra
 import matplotlib.pyplot as plt
@@ -132,15 +133,19 @@ def get_tokenizer(cfg: DictConfig):
 def configure_tokenizer_from_checkpoint(
     tokenizer,
     checkpoint_path: str,
-) -> None:
+) -> Optional[int]:
     """Configure tokenizer vocab size from checkpoint.
 
     Args:
         tokenizer: Tokenizer instance to configure.
         checkpoint_path: Path to model checkpoint.
+
+    Returns:
+        Max position embedding length from checkpoint, or None if not found.
     """
     log.info(f"Extracting vocab size from checkpoint: {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    checkpoint_max_length = None
 
     if "state_dict" in checkpoint:
         wte_key = "model.model.transformer.wte.weight"
@@ -163,7 +168,10 @@ def configure_tokenizer_from_checkpoint(
             ):
                 log.info("Detected labeled checkpoint")
                 tokenizer.labeled_graph = True
-                tokenizer.set_num_nodes(checkpoint_max_num_nodes_labeled)
+                # Force-set max_num_nodes to match checkpoint exactly;
+                # set_num_nodes() only increases and won't shrink a value
+                # inflated by datamodule.setup()
+                tokenizer.max_num_nodes = checkpoint_max_num_nodes_labeled
                 tokenizer.set_num_node_and_edge_types(NUM_ATOM_TYPES, NUM_BOND_TYPES)
                 log.info(
                     f"Set tokenizer: max_num_nodes={checkpoint_max_num_nodes_labeled}, "
@@ -174,7 +182,16 @@ def configure_tokenizer_from_checkpoint(
                 log.info(
                     f"Setting tokenizer max_num_nodes to {checkpoint_max_num_nodes}"
                 )
-                tokenizer.set_num_nodes(checkpoint_max_num_nodes)
+                # Force-set to match checkpoint exactly
+                tokenizer.max_num_nodes = checkpoint_max_num_nodes
+
+        # Extract max position embeddings from checkpoint (GPT-2 wpe)
+        wpe_key = "model.model.transformer.wpe.weight"
+        if wpe_key in checkpoint["state_dict"]:
+            checkpoint_max_length = checkpoint["state_dict"][wpe_key].shape[0]
+            log.info(f"Checkpoint max position embeddings: {checkpoint_max_length}")
+
+    return checkpoint_max_length
 
 
 def filter_by_motif(smiles_list: list[str], motif_smiles: str) -> list[str]:
@@ -233,7 +250,9 @@ def main(cfg: DictConfig) -> None:
     tokenizer_type = cfg.tokenizer.get("type", "sent").lower()
 
     # Configure tokenizer from checkpoint
-    configure_tokenizer_from_checkpoint(tokenizer, cfg.model.checkpoint_path)
+    checkpoint_max_length = configure_tokenizer_from_checkpoint(
+        tokenizer, cfg.model.checkpoint_path
+    )
 
     # Load model
     log.info(f"Loading model from {cfg.model.checkpoint_path}...")
@@ -243,7 +262,7 @@ def main(cfg: DictConfig) -> None:
         sampling_batch_size=cfg.generation.batch_size,
         sampling_top_k=cfg.sampling.top_k,
         sampling_temperature=cfg.sampling.temperature,
-        sampling_max_length=cfg.sampling.max_length,
+        sampling_max_length=checkpoint_max_length or cfg.sampling.max_length,
     )
     model.eval()
 
