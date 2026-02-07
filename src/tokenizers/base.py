@@ -80,7 +80,20 @@ class Tokenizer(ABC):
         Returns:
             1D tensor of token indices.
         """
-        return self.tokenize(data)
+        tokens = self.tokenize(data)
+
+        # Validate tokens are within vocab bounds
+        vocab_size = len(self)
+        max_token = tokens.max().item()
+        if max_token >= vocab_size:
+            invalid_idx = (tokens >= vocab_size).nonzero()[0].item()
+            raise ValueError(
+                f"Token {max_token} at position {invalid_idx} exceeds vocab_size {vocab_size}. "
+                f"Graph has {data.num_nodes} nodes. "
+                f"Tokenizer: {type(self).__name__}, max_num_nodes={getattr(self, 'max_num_nodes', 'N/A')}"
+            )
+
+        return tokens
 
     def __len__(self) -> int:
         """Return vocabulary size.

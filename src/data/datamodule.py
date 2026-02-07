@@ -328,13 +328,16 @@ class MolecularDataModule(pl.LightningDataModule):
 
         # Update tokenizer with max nodes
         # Add safety margin for hierarchical tokenizers that encode partition metadata
-        # (num_communities, part_ids, etc.) using the same index space
+        # (num_communities, part_ids, num_edges, etc.) using the same index space
         if self.tokenizer is not None:
             effective_max_nodes = self.max_num_nodes
             tokenizer_name = type(self.tokenizer).__name__
             if tokenizer_name in ("HSENTTokenizer", "HDTTokenizer", "HDTCTokenizer"):
-                # Hierarchical tokenizers may need extra headroom for partition IDs
-                effective_max_nodes = int(self.max_num_nodes * 1.5)
+                # Hierarchical tokenizers may need extra headroom for:
+                # - partition IDs, community counts, node counts per partition
+                # - bipartite edge counts (can be large for complex molecules)
+                # Use 3x margin to be safe for complex COCONUT molecules
+                effective_max_nodes = int(self.max_num_nodes * 3)
                 log.info(
                     f"Hierarchical tokenizer: max_num_nodes {self.max_num_nodes} -> {effective_max_nodes}"
                 )
