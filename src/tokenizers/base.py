@@ -80,37 +80,7 @@ class Tokenizer(ABC):
         Returns:
             1D tensor of token indices.
         """
-        tokens = self.tokenize(data)
-
-        # Validate tokens are within vocab bounds
-        vocab_size = len(self)
-        max_token = int(tokens.max().item())
-        if max_token >= vocab_size:
-            invalid_mask = tokens >= vocab_size
-            invalid_idx = int(invalid_mask.nonzero()[0].item())
-            invalid_token = int(tokens[invalid_idx].item())
-            print(f"\n{'='*60}")
-            print(f"TOKEN VALIDATION ERROR")
-            print(f"{'='*60}")
-            print(f"Invalid token: {invalid_token} at position {invalid_idx}")
-            print(f"Vocab size: {vocab_size}")
-            print(f"Graph nodes: {data.num_nodes}")
-            print(f"Tokenizer: {type(self).__name__}")
-            print(f"max_num_nodes: {getattr(self, 'max_num_nodes', 'N/A')}")
-            print(f"IDX_OFFSET: {getattr(self, 'IDX_OFFSET', 'N/A')}")
-            print(f"node_idx_offset: {getattr(self, 'node_idx_offset', 'N/A')}")
-            print(f"edge_idx_offset: {getattr(self, 'edge_idx_offset', 'N/A')}")
-            print(f"Token sequence length: {len(tokens)}")
-            print(f"First 20 tokens: {tokens[:20].tolist()}")
-            print(f"Tokens around error: {tokens[max(0,invalid_idx-5):invalid_idx+5].tolist()}")
-            print(f"{'='*60}\n")
-            raise ValueError(
-                f"Token {invalid_token} at position {invalid_idx} exceeds vocab_size {vocab_size}. "
-                f"Graph has {data.num_nodes} nodes. "
-                f"Tokenizer: {type(self).__name__}, max_num_nodes={getattr(self, 'max_num_nodes', 'N/A')}"
-            )
-
-        return tokens
+        return self.tokenize(data)
 
     def __len__(self) -> int:
         """Return vocabulary size.
