@@ -320,6 +320,19 @@ class HDTTokenizer(Tokenizer):
         if self.max_length > 0 and len(tokens) > self.max_length:
             tokens = tokens[: self.max_length - 1] + [self.EOS]
 
+        # Validate tokens are within vocab bounds
+        if self.max_num_nodes is not None:
+            vocab_size = self.vocab_size
+            for i, tok in enumerate(tokens):
+                if tok >= vocab_size:
+                    raise ValueError(
+                        f"HDT Token overflow at position {i}: token={tok} >= vocab_size={vocab_size}. "
+                        f"max_num_nodes={self.max_num_nodes}, IDX_OFFSET={self.IDX_OFFSET}, "
+                        f"node_idx_offset={getattr(self, 'node_idx_offset', 'N/A')}, "
+                        f"edge_idx_offset={getattr(self, 'edge_idx_offset', 'N/A')}, "
+                        f"labeled_graph={self.labeled_graph}"
+                    )
+
         return torch.tensor(tokens, dtype=torch.long)
 
     def _build_full_adjacency(
