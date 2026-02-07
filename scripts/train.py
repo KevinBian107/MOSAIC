@@ -20,6 +20,7 @@ from typing import Optional
 
 import hydra
 import pytorch_lightning as pl
+import torch
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
@@ -29,12 +30,8 @@ from pytorch_lightning.callbacks import Callback
 
 from src.data.datamodule import MolecularDataModule
 from src.data.molecular import graph_to_smiles
-from src.evaluation.molecular_metrics import MolecularMetrics
 from src.evaluation.motif_distribution import (
     MOLECULAR_MOTIFS,
-    MotifCooccurrenceMetric,
-    MotifDistributionMetric,
-    MotifHistogramMetric,
     get_motif_counts,
 )
 from src.models.transformer import GraphGeneratorModule
@@ -130,6 +127,7 @@ def log_generated_molecules_to_wandb(
     """
     try:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         import wandb
@@ -201,11 +199,13 @@ def log_molecules_with_motifs_to_wandb(
             mol = Chem.MolFromSmiles(smiles)
             if mol is not None and len(valid_data) < max_molecules:
                 motifs = get_motif_counts(smiles)
-                valid_data.append({
-                    "smiles": smiles,
-                    "mol": mol,
-                    "motifs": motifs,
-                })
+                valid_data.append(
+                    {
+                        "smiles": smiles,
+                        "mol": mol,
+                        "motifs": motifs,
+                    }
+                )
 
         if not valid_data:
             return
@@ -254,7 +254,9 @@ def log_molecules_with_motifs_to_wandb(
             highlightAtomColors=highlight_atom_colors_list,
         )
 
-        wandb_logger.experiment.log({f"{prefix}/molecules_with_motifs": wandb.Image(img)})
+        wandb_logger.experiment.log(
+            {f"{prefix}/molecules_with_motifs": wandb.Image(img)}
+        )
 
         # --- 2. Create WandB Table with Metadata ---
         columns = ["smiles", "num_atoms", "num_motifs", "motif_list"]
@@ -264,12 +266,14 @@ def log_molecules_with_motifs_to_wandb(
             mol = d["mol"]
             motifs = d["motifs"]
 
-            table_data.append([
-                d["smiles"],
-                mol.GetNumAtoms(),
-                sum(motifs.values()),
-                ", ".join(f"{k}({v})" for k, v in motifs.items()),
-            ])
+            table_data.append(
+                [
+                    d["smiles"],
+                    mol.GetNumAtoms(),
+                    sum(motifs.values()),
+                    ", ".join(f"{k}({v})" for k, v in motifs.items()),
+                ]
+            )
 
         table = wandb.Table(columns=columns, data=table_data)
         wandb_logger.experiment.log({f"{prefix}/molecule_details": table})
@@ -300,6 +304,7 @@ def _log_motif_color_legend(
     """
     try:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.patches as mpatches
         import matplotlib.pyplot as plt
@@ -394,7 +399,9 @@ class TokenizationVisualizationCallback(Callback):
         _logged: Whether the visualization has been logged.
     """
 
-    def __init__(self, datamodule, tokenizer, seed: int = 42, num_examples: int = 3) -> None:
+    def __init__(
+        self, datamodule, tokenizer, seed: int = 42, num_examples: int = 3
+    ) -> None:
         """Initialize the callback.
 
         Args:
@@ -443,7 +450,9 @@ class TokenizationVisualizationCallback(Callback):
                 not hasattr(self.datamodule, "train_smiles")
                 or len(self.datamodule.train_smiles) == 0
             ):
-                log.warning("No training SMILES available for tokenization visualization")
+                log.warning(
+                    "No training SMILES available for tokenization visualization"
+                )
                 return
 
             tokenizer_type = type(self.tokenizer).__name__
@@ -487,7 +496,9 @@ class TokenizationVisualizationCallback(Callback):
 
                 # Create figure
                 fig = plt.figure(figsize=(16, 8))
-                gs = GridSpec(2, 2, figure=fig, height_ratios=[2, 1], hspace=0.3, wspace=0.3)
+                gs = GridSpec(
+                    2, 2, figure=fig, height_ratios=[2, 1], hspace=0.3, wspace=0.3
+                )
 
                 # Panel 1: Molecule with motifs
                 ax1 = fig.add_subplot(gs[0, 0])
@@ -499,7 +510,9 @@ class TokenizationVisualizationCallback(Callback):
 
                 if tokenizer_type in ("HSENTTokenizer", "HDTTokenizer"):
                     hg = self.tokenizer.coarsener.build_hierarchy(data)
-                    log.info(f"Tokenization viz [{idx}]: {hg.num_communities} communities, {len(tokens)} tokens")
+                    log.info(
+                        f"Tokenization viz [{idx}]: {hg.num_communities} communities, {len(tokens)} tokens"
+                    )
                     _plot_hierarchical_structure(ax2, data, hg, tokenizer_type, pos)
                 else:
                     log.info(f"Tokenization viz [{idx}]: {len(tokens)} tokens")
@@ -519,7 +532,9 @@ class TokenizationVisualizationCallback(Callback):
                 )
 
                 plt.tight_layout()
-                wandb_logger.experiment.log({f"tokenization/example_{idx}": wandb.Image(fig)})
+                wandb_logger.experiment.log(
+                    {f"tokenization/example_{idx}": wandb.Image(fig)}
+                )
                 plt.close(fig)
 
             log.info(f"Logged {num_to_log} tokenization examples to WandB")
@@ -631,14 +646,23 @@ def _plot_molecule_with_motifs(
         )
         ax.add_patch(circle)
         ax.text(
-            x, y, str(node), ha="center", va="center", fontsize=8, fontweight="bold", zorder=4
+            x,
+            y,
+            str(node),
+            ha="center",
+            va="center",
+            fontsize=8,
+            fontweight="bold",
+            zorder=4,
         )
 
     # Legend
     legend_patches = []
     for motif_name in motifs.keys():
         if motif_name in motif_colors:
-            patch = mpatches.Patch(color=motif_colors[motif_name], label=motif_name.capitalize())
+            patch = mpatches.Patch(
+                color=motif_colors[motif_name], label=motif_name.capitalize()
+            )
             legend_patches.append(patch)
     if legend_patches:
         ax.legend(handles=legend_patches, loc="upper left", fontsize=7, framealpha=0.9)
@@ -780,7 +804,9 @@ def _plot_sent_walk(
                 order += 1
 
     # Draw nodes with visit order
-    colors = plt.cm.viridis([i / max(1, len(visit_order)) for i in range(len(visit_order))])
+    colors = plt.cm.viridis(
+        [i / max(1, len(visit_order)) for i in range(len(visit_order))]
+    )
     for node in range(data.num_nodes):
         x, y = pos[node]
         if node in visit_order:
@@ -793,7 +819,14 @@ def _plot_sent_walk(
         ax.add_patch(circle)
         label = str(visit_order.get(node, "?"))
         ax.text(
-            x, y, label, ha="center", va="center", fontsize=7, fontweight="bold", zorder=4
+            x,
+            y,
+            label,
+            ha="center",
+            va="center",
+            fontsize=7,
+            fontweight="bold",
+            zorder=4,
         )
 
     ax.set_title("SENT: Walk Order", fontsize=11, fontweight="bold")
@@ -887,22 +920,25 @@ def _plot_token_sequence(
         bbox=dict(boxstyle="round,pad=0.3", facecolor="#f8f9fa", edgecolor="#dee2e6"),
     )
 
-    ax.set_title(f"Token Sequence ({len(tokens)} tokens)", fontsize=10, fontweight="bold")
+    ax.set_title(
+        f"Token Sequence ({len(tokens)} tokens)", fontsize=10, fontweight="bold"
+    )
     ax.axis("off")
 
 
 class IntermediateEvaluationCallback(Callback):
-    """Callback to run generation and log metrics during training.
+    """Callback to run generation and log visualizations during training.
 
     Triggers every `eval_every_n_val` validation epochs to:
     1. Generate sample molecules
-    2. Compute molecular metrics
-    3. Compute motif metrics (including histogram and co-occurrence)
-    4. Log molecules with color-coded motif highlights to WandB
+    2. Log validity fraction and generation time
+    3. Log molecules with color-coded motif highlights to WandB
+
+    Heavy metric computation (MolecularMetrics, MotifDistribution, etc.)
+    is deferred to the test script.
 
     Attributes:
         tokenizer: Tokenizer for decoding generated tokens.
-        reference_smiles: Training set SMILES for metric computation.
         eval_every_n_val: Run evaluation every N validation epochs.
         num_samples: Number of molecules to generate.
         max_logged_molecules: Maximum molecules to visualize.
@@ -912,7 +948,6 @@ class IntermediateEvaluationCallback(Callback):
     def __init__(
         self,
         tokenizer,
-        reference_smiles: list[str],
         eval_every_n_val: int = 5,
         num_samples: int = 50,
         max_logged_molecules: int = 12,
@@ -922,7 +957,6 @@ class IntermediateEvaluationCallback(Callback):
 
         Args:
             tokenizer: Tokenizer for decoding generated tokens.
-            reference_smiles: Reference SMILES (typically training set).
             eval_every_n_val: Run evaluation every N validation epochs.
             num_samples: Number of molecules to generate per evaluation.
             max_logged_molecules: Maximum molecules to visualize in WandB.
@@ -930,31 +964,12 @@ class IntermediateEvaluationCallback(Callback):
         """
         super().__init__()
         self.tokenizer = tokenizer
-        self.reference_smiles = reference_smiles
         self.eval_every_n_val = eval_every_n_val
         self.num_samples = num_samples
         self.max_logged_molecules = max_logged_molecules
         self.wandb_logger = wandb_logger
 
         self._val_epoch_count = 0
-
-        # Metric evaluators (lazily initialized)
-        self._mol_metrics: Optional[MolecularMetrics] = None
-        self._motif_metrics: Optional[MotifDistributionMetric] = None
-        self._hist_metrics: Optional[MotifHistogramMetric] = None
-        self._cooccur_metrics: Optional[MotifCooccurrenceMetric] = None
-
-    def _lazy_init_metrics(self) -> None:
-        """Lazily initialize metric evaluators on first use."""
-        if self._mol_metrics is not None:
-            return
-
-        self._mol_metrics = MolecularMetrics(self.reference_smiles)
-        self._motif_metrics = MotifDistributionMetric(self.reference_smiles)
-        self._hist_metrics = MotifHistogramMetric(
-            self.reference_smiles, distance_fn="kl"
-        )
-        self._cooccur_metrics = MotifCooccurrenceMetric(self.reference_smiles)
 
     def on_validation_epoch_end(self, trainer, pl_module) -> None:
         """Run intermediate evaluation after validation epoch.
@@ -972,8 +987,6 @@ class IntermediateEvaluationCallback(Callback):
         # Skip if no WandB logger
         if self.wandb_logger is None:
             return
-
-        self._lazy_init_metrics()
 
         log.info(
             f"Running intermediate evaluation (val epoch {self._val_epoch_count})..."
@@ -995,26 +1008,16 @@ class IntermediateEvaluationCallback(Callback):
         valid_count = sum(1 for s in generated_smiles if s != INVALID)
         log.info(f"  Generated {valid_count}/{len(generated_smiles)} valid molecules")
 
-        # Compute metrics
-        mol_results = self._mol_metrics(generated_smiles)
-        motif_results = self._motif_metrics(generated_smiles)
-        hist_results = self._hist_metrics(generated_smiles)
-        cooccur_results = self._cooccur_metrics(generated_smiles)
-
-        # Combine all metrics with intermediate prefix
+        # Log validity and generation time
         step = trainer.global_step
-        all_metrics = {
-            **{f"intermediate/{k}": v for k, v in mol_results.items()},
-            **{f"intermediate/{k}": v for k, v in motif_results.items()},
-            "intermediate/motif_hist_mean": hist_results["motif_hist_mean"],
-            "intermediate/motif_hist_max": hist_results["motif_hist_max"],
-            **{f"intermediate/{k}": v for k, v in cooccur_results.items()},
-            "intermediate/generation_time": gen_time,
-            "intermediate/valid_fraction": valid_count / max(len(generated_smiles), 1),
-        }
-
-        # Log metrics
-        self.wandb_logger.experiment.log(all_metrics, step=step)
+        self.wandb_logger.experiment.log(
+            {
+                "intermediate/generation_time": gen_time,
+                "intermediate/valid_fraction": valid_count
+                / max(len(generated_smiles), 1),
+            },
+            step=step,
+        )
 
         # Log molecule visualizations with motif highlighting
         log_molecules_with_motifs_to_wandb(
@@ -1024,7 +1027,7 @@ class IntermediateEvaluationCallback(Callback):
             max_molecules=self.max_logged_molecules,
         )
 
-        log.info(f"  Logged intermediate metrics at step {step}")
+        log.info(f"  Logged intermediate evaluation at step {step}")
 
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="train")
@@ -1074,7 +1077,9 @@ def main(cfg: DictConfig) -> None:
     tokenizer_type = cfg.tokenizer.get("type", "sent").lower()
     if tokenizer_type == "hdt":
         coarsening_strategy = cfg.tokenizer.get("coarsening_strategy", "spectral")
-        log.info(f"Using hierarchical HDT tokenizer with {coarsening_strategy} coarsening")
+        log.info(
+            f"Using hierarchical HDT tokenizer with {coarsening_strategy} coarsening"
+        )
         if coarsening_strategy in ("motif_aware_spectral", "motif_community"):
             log.info(f"  motif_alpha: {cfg.tokenizer.get('motif_alpha', 1.0)}")
         log.info(f"  node_order: {cfg.tokenizer.get('node_order', 'BFS')}")
@@ -1106,7 +1111,9 @@ def main(cfg: DictConfig) -> None:
         )
     elif tokenizer_type == "hsent":
         coarsening_strategy = cfg.tokenizer.get("coarsening_strategy", "spectral")
-        log.info(f"Using hierarchical H-SENT tokenizer with {coarsening_strategy} coarsening")
+        log.info(
+            f"Using hierarchical H-SENT tokenizer with {coarsening_strategy} coarsening"
+        )
         if coarsening_strategy in ("motif_aware_spectral", "motif_community"):
             log.info(f"  motif_alpha: {cfg.tokenizer.get('motif_alpha', 1.0)}")
         log.info(f"  node_order: {cfg.tokenizer.get('node_order', 'BFS')}")
@@ -1146,6 +1153,11 @@ def main(cfg: DictConfig) -> None:
         data_root=cfg.data.get("data_root", "data"),
         use_cache=cfg.data.get("use_cache", False),
         cache_dir=cfg.data.get("cache_dir", "data/cache"),
+        # COCONUT-specific parameters
+        data_file=cfg.data.get("data_file"),
+        min_atoms=cfg.data.get("min_atoms", 20),
+        max_atoms=cfg.data.get("max_atoms", 100),
+        min_rings=cfg.data.get("min_rings", 3),
     )
 
     datamodule.setup()
@@ -1180,6 +1192,26 @@ def main(cfg: DictConfig) -> None:
         sampling_num_samples=cfg.sampling.num_samples,
         sampling_batch_size=cfg.sampling.batch_size,
     )
+
+    # Load pretrained weights if specified (for transfer learning / fine-tuning)
+    pretrained_path = cfg.model.get("pretrained_path")
+    if pretrained_path:
+        log.info(f"Loading pretrained weights from {pretrained_path}")
+        pretrained = torch.load(pretrained_path, map_location="cpu")
+        # Handle both Lightning checkpoint format and raw state dict
+        if "state_dict" in pretrained:
+            state_dict = pretrained["state_dict"]
+        else:
+            state_dict = pretrained
+        # Load with strict=False to allow for vocab size differences
+        missing, unexpected = model.load_state_dict(state_dict, strict=False)
+        if missing:
+            log.warning(f"Missing keys when loading pretrained weights: {missing}")
+        if unexpected:
+            log.warning(
+                f"Unexpected keys when loading pretrained weights: {unexpected}"
+            )
+        log.info("Pretrained weights loaded successfully")
 
     loggers = []
     loggers.append(pl.loggers.CSVLogger(cfg.logs.path, name="csv_logs"))
@@ -1216,7 +1248,6 @@ def main(cfg: DictConfig) -> None:
     if wandb_logger is not None and eval_every_n_val > 0:
         eval_callback = IntermediateEvaluationCallback(
             tokenizer=tokenizer,
-            reference_smiles=datamodule.train_smiles,
             eval_every_n_val=eval_every_n_val,
             num_samples=cfg.wandb.get("eval_num_samples", 50),
             max_logged_molecules=cfg.wandb.get("max_logged_molecules", 12),
@@ -1266,14 +1297,14 @@ def main(cfg: DictConfig) -> None:
         generated_smiles.append(smiles if smiles else INVALID_SMILES_SENTINEL)
 
     valid_count = sum(1 for s in generated_smiles if s != INVALID_SMILES_SENTINEL)
-    log.info(f"Successfully converted {valid_count}/{len(generated_smiles)} graphs to SMILES")
+    log.info(
+        f"Successfully converted {valid_count}/{len(generated_smiles)} graphs to SMILES"
+    )
 
     if wandb_logger is not None and cfg.wandb.log_graphs:
         log.info("Logging generated molecules to WandB...")
         # Simple molecule grid
-        log_generated_molecules_to_wandb(
-            wandb_logger, generated_smiles, prefix="final"
-        )
+        log_generated_molecules_to_wandb(wandb_logger, generated_smiles, prefix="final")
         # Enhanced visualization with color-coded motif highlighting
         log_molecules_with_motifs_to_wandb(
             wandb_logger,
@@ -1282,47 +1313,19 @@ def main(cfg: DictConfig) -> None:
             max_molecules=cfg.wandb.get("max_logged_molecules", 12),
         )
 
-    log.info("Computing molecular metrics...")
-    mol_metrics = MolecularMetrics(reference_smiles=datamodule.train_smiles)
-    metrics = mol_metrics(generated_smiles)
-    for name, value in metrics.items():
-        log.info(f"  {name}: {value:.6f}")
-
-    log.info("Computing motif distribution metrics...")
-    motif_metrics = MotifDistributionMetric(reference_smiles=datamodule.train_smiles)
-    motif_results = motif_metrics(generated_smiles)
-    for name, value in motif_results.items():
-        log.info(f"  {name}: {value:.6f}")
-
-    log.info("Computing motif histogram distribution metrics...")
-    hist_metrics = MotifHistogramMetric(
-        reference_smiles=datamodule.train_smiles,
-        distance_fn="kl",
+    # Log final validity and generation time
+    # Full metric computation is handled by the test script (scripts/test.py)
+    log_final_metrics_to_wandb(
+        wandb_logger,
+        {
+            "valid_fraction": valid_count / max(len(generated_smiles), 1),
+            "generation_time": gen_time,
+        },
     )
-    hist_results = hist_metrics(generated_smiles)
-    log.info(f"  motif_hist_mean: {hist_results['motif_hist_mean']:.6f}")
-    log.info(f"  motif_hist_max: {hist_results['motif_hist_max']:.6f}")
-
-    log.info("Computing motif co-occurrence metrics...")
-    cooccur_metrics = MotifCooccurrenceMetric(
-        reference_smiles=datamodule.train_smiles,
-    )
-    cooccur_results = cooccur_metrics(generated_smiles)
-    for name, value in cooccur_results.items():
-        log.info(f"  {name}: {value:.6f}")
-
-    all_metrics = {
-        **metrics,
-        **motif_results,
-        "motif_hist_mean": hist_results["motif_hist_mean"],
-        "motif_hist_max": hist_results["motif_hist_max"],
-        **cooccur_results,
-        "generation_time": gen_time,
-    }
-    log_final_metrics_to_wandb(wandb_logger, all_metrics)
 
     if wandb_logger is not None:
         import wandb
+
         wandb.finish()
         log.info("WandB run finished")
 

@@ -793,7 +793,11 @@ class HSENTTokenizer(Tokenizer):
 
                     # Read atom type if labeled graph
                     if self.labeled_graph:
-                        if idx < len(tokens) and tokens[idx] >= self.node_idx_offset:
+                        if (
+                            idx < len(tokens)
+                            and tokens[idx] >= self.node_idx_offset
+                            and tokens[idx] < self.edge_idx_offset
+                        ):
                             atom_token = tokens[idx]
                             atom_type = atom_token - self.node_idx_offset
                             # Store atom type using GLOBAL index

@@ -68,13 +68,15 @@ cd ~/MOSAIC
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `data.dataset_name` | `moses` | `moses`, `qm9`, `zinc250k` |
+| `experiment` | `moses` | Dataset config: `moses`, `qm9`, `coconut` |
 | `data.batch_size` | `32` | Training batch size |
 | `data.num_workers` | `4` | DataLoader workers |
-| `data.num_train` | `10000` | Training samples (-1 for all) |
-| `data.num_val` | `1000` | Validation samples |
-| `data.num_test` | `1000` | Test samples |
+| `data.num_train` | (from experiment) | Training samples (override with CLI) |
+| `data.num_val` | (from experiment) | Validation samples |
+| `data.num_test` | (from experiment) | Test samples |
 | `data.use_cache` | `false` | Cache tokenized data |
+
+**Note**: Dataset name, data file, and sample counts are set by the experiment config. Use `experiment=moses`, `experiment=qm9`, or `experiment=coconut`.
 
 ### Tokenizer Parameters
 
@@ -118,10 +120,13 @@ cd ~/MOSAIC
 
 ## Training Examples
 
+**Important**: Always specify an experiment config (`experiment=moses`, `experiment=coconut`, or `experiment=qm9`) to set the dataset.
+
 ### Quick Test Run
 
 ```bash
 python scripts/train.py \
+    experiment=moses \
     model.model_name=gpt2-xxs \
     data.num_train=1000 \
     trainer.max_steps=100 \
@@ -132,6 +137,7 @@ python scripts/train.py \
 
 ```bash
 python scripts/train.py \
+    experiment=moses \
     tokenizer=sent \
     model.model_name=gpt2-xs \
     trainer.max_steps=500000 \
@@ -143,6 +149,7 @@ python scripts/train.py \
 
 ```bash
 python scripts/train.py \
+    experiment=moses \
     tokenizer=hsent \
     model.model_name=gpt2-xs \
     data.use_cache=true \
@@ -155,6 +162,7 @@ python scripts/train.py \
 
 ```bash
 python scripts/train.py \
+    experiment=moses \
     tokenizer=hdt \
     model.model_name=gpt2-xs \
     data.use_cache=true \
@@ -163,14 +171,17 @@ python scripts/train.py \
     wandb.project=mosaic-hdt
 ```
 
-### Using Experiment Configs
+### Dataset Experiments
 
 ```bash
-# QM9 experiment
+# MOSES - Drug-like molecules (1.6M)
+python scripts/train.py experiment=moses
+
+# QM9 - Small organic molecules (134K)
 python scripts/train.py experiment=qm9
 
-# MOSES experiment
-python scripts/train.py experiment=moses
+# COCONUT - Complex natural products (5K filtered)
+python scripts/train.py experiment=coconut
 ```
 
 ---

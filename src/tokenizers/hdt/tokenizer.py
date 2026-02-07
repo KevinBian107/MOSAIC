@@ -762,11 +762,12 @@ class HDTTokenizer(Tokenizer):
 
             elif tok >= self.IDX_OFFSET:
                 # Atom token - check if this is a node ID or atom type
-                # Node IDs are in range [IDX_OFFSET, IDX_OFFSET + max_num_nodes)
-                # Atom types are in range [node_idx_offset, edge_idx_offset)
-                if self.labeled_graph and tok >= self.node_idx_offset:
-                    # This is an atom type token - should not happen here
-                    # Skip it and continue
+                # Order: check edge_idx_offset first (largest), then node_idx_offset
+                if self.labeled_graph and tok >= self.edge_idx_offset:
+                    # Bond type token in wrong place - skip
+                    idx += 1
+                elif self.labeled_graph and tok >= self.node_idx_offset:
+                    # Atom type token in wrong place - skip
                     idx += 1
                 else:
                     # This is a node ID
@@ -777,7 +778,11 @@ class HDTTokenizer(Tokenizer):
 
                     # Read atom type if labeled graph
                     if self.labeled_graph:
-                        if idx < len(tokens) and tokens[idx] >= self.node_idx_offset:
+                        if (
+                            idx < len(tokens)
+                            and tokens[idx] >= self.node_idx_offset
+                            and tokens[idx] < self.edge_idx_offset
+                        ):
                             atom_token = tokens[idx]
                             atom_type = atom_token - self.node_idx_offset
                             node_features_dict[global_idx] = atom_type
@@ -788,13 +793,19 @@ class HDTTokenizer(Tokenizer):
                 idx += 1
                 while idx < len(tokens) and tokens[idx] != self.REDGE:
                     if tokens[idx] >= self.IDX_OFFSET:
-                        # Check if this is a target node ID or bond type
+                        # Check if this is a target node ID or feature token
+                        # Order: check edge_idx_offset first (largest)
                         if (
+                            self.labeled_graph
+                            and tokens[idx] >= self.edge_idx_offset
+                        ):
+                            # Bond type for the previous target - already processed
+                            idx += 1
+                        elif (
                             self.labeled_graph
                             and tokens[idx] >= self.node_idx_offset
                         ):
-                            # This is a bond type for the previous target
-                            # Skip it as we already processed it
+                            # Atom type in wrong place - skip
                             idx += 1
                         else:
                             # This is a target node ID

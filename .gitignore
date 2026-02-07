@@ -65,7 +65,7 @@ wandb/
 
 # Data
 /data/
-datasets/
+/datasets/
 *.pt
 *.pth
 *.ckpt

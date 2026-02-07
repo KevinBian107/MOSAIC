@@ -7,7 +7,6 @@ with tokenization support for training graph generation models.
 import hashlib
 import json
 import logging
-from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -162,11 +161,15 @@ class MolecularDataModule(pl.LightningDataModule):
         data_root: str = "data",
         use_cache: bool = False,
         cache_dir: str = "data/cache",
+        data_file: Optional[str] = None,
+        min_atoms: int = 20,
+        max_atoms: int = 100,
+        min_rings: int = 3,
     ) -> None:
         """Initialize the data module.
 
         Args:
-            dataset_name: Name of dataset to use ('moses' or 'qm9').
+            dataset_name: Name of dataset to use ('moses', 'qm9', or 'coconut').
             tokenizer: Graph tokenizer instance.
             batch_size: Batch size for dataloaders.
             num_workers: Number of dataloader workers.
@@ -178,6 +181,10 @@ class MolecularDataModule(pl.LightningDataModule):
             data_root: Root directory for data storage.
             use_cache: Whether to use cached pre-tokenized data.
             cache_dir: Directory containing cached data files.
+            data_file: Path to data file (for coconut dataset).
+            min_atoms: Minimum atoms filter (for coconut dataset).
+            max_atoms: Maximum atoms filter (for coconut dataset).
+            min_rings: Minimum rings filter (for coconut dataset).
         """
         super().__init__()
 
@@ -193,6 +200,10 @@ class MolecularDataModule(pl.LightningDataModule):
         self.data_root = data_root
         self.use_cache = use_cache
         self.cache_dir = Path(cache_dir)
+        self.data_file = data_file
+        self.min_atoms = min_atoms
+        self.max_atoms = max_atoms
+        self.min_rings = min_rings
 
         self.train_dataset: Optional[Dataset] = None
         self.val_dataset: Optional[Dataset] = None
@@ -314,6 +325,8 @@ class MolecularDataModule(pl.LightningDataModule):
             self._setup_moses(stage)
         elif self.dataset_name == "qm9":
             self._setup_qm9(stage)
+        elif self.dataset_name == "coconut":
+            self._setup_coconut(stage)
         else:
             raise ValueError(f"Unknown dataset: {self.dataset_name}")
 
@@ -322,8 +335,12 @@ class MolecularDataModule(pl.LightningDataModule):
             self.tokenizer.set_num_nodes(self.max_num_nodes)
 
             # Configure labeled graph support (AutoGraph format)
-            if hasattr(self.tokenizer, 'labeled_graph') and self.tokenizer.labeled_graph:
+            if (
+                hasattr(self.tokenizer, "labeled_graph")
+                and self.tokenizer.labeled_graph
+            ):
                 from src.data.molecular import NUM_ATOM_TYPES, NUM_BOND_TYPES
+
                 self.tokenizer.set_num_node_and_edge_types(
                     num_node_types=NUM_ATOM_TYPES,
                     num_edge_types=NUM_BOND_TYPES,
@@ -362,7 +379,9 @@ class MolecularDataModule(pl.LightningDataModule):
 
             # Try to load cached validation data
             val_size = (
-                self.num_val if self.num_val else min(10000, len(self.train_smiles) // 10)
+                self.num_val
+                if self.num_val
+                else min(10000, len(self.train_smiles) // 10)
             )
             cached_val = self._try_load_cache("val", val_size)
 
@@ -434,9 +453,11 @@ class MolecularDataModule(pl.LightningDataModule):
         from torch_geometric.datasets import QM9
         import numpy as np
 
-        labeled = (self.tokenizer is not None and
-                  hasattr(self.tokenizer, 'labeled_graph') and
-                  self.tokenizer.labeled_graph)
+        labeled = (
+            self.tokenizer is not None
+            and hasattr(self.tokenizer, "labeled_graph")
+            and self.tokenizer.labeled_graph
+        )
 
         # Load full QM9 dataset
         full_dataset = QM9(root=f"{self.data_root}/qm9")
@@ -450,16 +471,16 @@ class MolecularDataModule(pl.LightningDataModule):
         val_size = int(0.1 * num_molecules)
 
         train_indices = indices[:train_size]
-        val_indices = indices[train_size:train_size + val_size]
-        test_indices = indices[train_size + val_size:]
+        val_indices = indices[train_size : train_size + val_size]
+        test_indices = indices[train_size + val_size :]
 
         # Apply size limits
         if self.num_train:
-            train_indices = train_indices[:self.num_train]
+            train_indices = train_indices[: self.num_train]
         if self.num_val:
-            val_indices = val_indices[:self.num_val]
+            val_indices = val_indices[: self.num_val]
         if self.num_test:
-            test_indices = test_indices[:self.num_test]
+            test_indices = test_indices[: self.num_test]
 
         # Extract SMILES and create datasets
         def get_smiles_subset(indices):
@@ -493,15 +514,126 @@ class MolecularDataModule(pl.LightningDataModule):
             )
             self.val_smiles = val_mol.smiles_list
             self.max_num_nodes = max(self.max_num_nodes, val_mol.max_num_nodes)
-            self.val_dataset = MolecularGraphDataset(
-                val_mol, transform=self.tokenizer
-            )
+            self.val_dataset = MolecularGraphDataset(val_mol, transform=self.tokenizer)
 
         if stage == "test" or stage is None:
             test_smiles = get_smiles_subset(test_indices)
             test_mol = MolecularDataset(
                 test_smiles,
                 dataset_name="qm9_test",
+                include_hydrogens=self.include_hydrogens,
+                labeled=labeled,
+            )
+            self.test_smiles = test_mol.smiles_list
+            self.max_num_nodes = max(self.max_num_nodes, test_mol.max_num_nodes)
+            self.test_dataset = MolecularGraphDataset(
+                test_mol, transform=self.tokenizer
+            )
+
+    def _setup_coconut(self, stage: Optional[str] = None) -> None:
+        """Set up COCONUT dataset for fine-tuning.
+
+        Loads complex natural products from COCONUT and creates train/val/test
+        splits for transfer learning experiments.
+        """
+        import numpy as np
+
+        from src.data.coconut_loader import CoconutLoader
+
+        labeled = (
+            self.tokenizer is not None
+            and hasattr(self.tokenizer, "labeled_graph")
+            and self.tokenizer.labeled_graph
+        )
+
+        # Determine data file path
+        data_file = self.data_file or "data/coconut_complex.smi"
+
+        # Load all molecules that pass filtering
+        loader = CoconutLoader(
+            min_atoms=self.min_atoms,
+            max_atoms=self.max_atoms,
+            min_rings=self.min_rings,
+            data_file=data_file,
+        )
+
+        # Calculate total samples needed
+        total_train = self.num_train or 5000
+        total_val = self.num_val or 500
+        total_test = self.num_test or 500
+        total_needed = total_train + total_val + total_test
+
+        log.info(f"Loading COCONUT molecules from {data_file}")
+        all_smiles = loader.load_smiles(n_samples=total_needed, seed=self.seed)
+        log.info(f"Loaded {len(all_smiles)} molecules passing complexity filters")
+
+        if len(all_smiles) < total_needed:
+            log.warning(
+                f"Only {len(all_smiles)} molecules available, adjusting split sizes"
+            )
+            # Adjust proportionally
+            ratio = len(all_smiles) / total_needed
+            total_train = int(total_train * ratio)
+            total_val = int(total_val * ratio)
+            total_test = len(all_smiles) - total_train - total_val
+
+        # Split into train/val/test
+        rng = np.random.RandomState(self.seed)
+        indices = rng.permutation(len(all_smiles))
+
+        train_smiles = [all_smiles[i] for i in indices[:total_train]]
+        val_smiles = [
+            all_smiles[i] for i in indices[total_train : total_train + total_val]
+        ]
+        test_smiles = [
+            all_smiles[i]
+            for i in indices[
+                total_train + total_val : total_train + total_val + total_test
+            ]
+        ]
+
+        log.info(
+            f"Split sizes: train={len(train_smiles)}, val={len(val_smiles)}, test={len(test_smiles)}"
+        )
+
+        if stage == "fit" or stage is None:
+            train_mol = MolecularDataset(
+                train_smiles,
+                dataset_name="coconut_train",
+                include_hydrogens=self.include_hydrogens,
+                labeled=labeled,
+            )
+            self.train_smiles = train_mol.smiles_list
+            self.max_num_nodes = max(self.max_num_nodes, train_mol.max_num_nodes)
+            self.train_dataset = MolecularGraphDataset(
+                train_mol, transform=self.tokenizer
+            )
+
+            val_mol = MolecularDataset(
+                val_smiles,
+                dataset_name="coconut_val",
+                include_hydrogens=self.include_hydrogens,
+                labeled=labeled,
+            )
+            self.val_smiles = val_mol.smiles_list
+            self.max_num_nodes = max(self.max_num_nodes, val_mol.max_num_nodes)
+            self.val_dataset = MolecularGraphDataset(val_mol, transform=self.tokenizer)
+
+        if stage == "test" or stage is None:
+            # Load train SMILES for metrics even in test mode
+            if stage == "test" and len(self.train_smiles) == 0:
+                train_mol = MolecularDataset(
+                    train_smiles,
+                    dataset_name="coconut_train",
+                    include_hydrogens=self.include_hydrogens,
+                    labeled=labeled,
+                )
+                self.train_smiles = train_mol.smiles_list
+                self.max_num_nodes = max(self.max_num_nodes, train_mol.max_num_nodes)
+
+            test_mol = MolecularDataset(
+                test_smiles,
+                dataset_name="coconut_test",
                 include_hydrogens=self.include_hydrogens,
                 labeled=labeled,
             )

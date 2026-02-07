@@ -28,20 +28,27 @@ conda activate mosaic
 ### Training
 
 ```bash
-# Train with default configuration (uses flat SENT tokenization)
-python scripts/train.py
+# Train on MOSES dataset (default) with HDTC tokenizer
+python scripts/train.py experiment=moses
 
-# Train with hierarchical H-SENT tokenization
-python scripts/train.py tokenizer.type=hdtc
+# Train with different tokenizers
+python scripts/train.py experiment=moses tokenizer=sent    # Flat SENT (baseline)
+python scripts/train.py experiment=moses tokenizer=hsent   # Hierarchical SENT
+python scripts/train.py experiment=moses tokenizer=hdt     # Hierarchical DFS
+python scripts/train.py experiment=moses tokenizer=hdtc    # Compositional (default)
 
 # Train on QM9 dataset
-python scripts/train.py data.dataset_name=qm9
+python scripts/train.py experiment=qm9
+
+# Train on COCONUT dataset (complex natural products)
+python scripts/train.py experiment=coconut
 
 # Train with custom model and settings
 python scripts/train.py \
+    experiment=moses \
     model.model_name=gpt2-s \
     trainer.max_steps=100000 \
-    tokenizer.type=hsent
+    tokenizer=hsent
 ```
 
 ### Evaluation
@@ -66,6 +73,41 @@ python scripts/realistic_gen.py \
 # Custom number of samples
 python scripts/realistic_gen.py \
     generation.num_samples=500
+```
+
+### Transfer Learning / Fine-tuning
+
+Fine-tune a pretrained model on COCONUT complex natural products to evaluate transfer learning capabilities.
+
+```bash
+# First, prepare the complex molecule dataset (one-time setup)
+# Downloads and filters COCONUT natural products (~191MB download)
+python scripts/prepare_coconut_data.py
+
+# Custom filtering thresholds
+python scripts/prepare_coconut_data.py \
+    --n-molecules 10000 \
+    --min-atoms 25 \
+    --min-rings 3
+
+# Fine-tune from MOSES checkpoint
+python scripts/finetune.py \
+    model.pretrained_path=outputs/benchmark/moses_hdtc_n500000_20260129-171812/best.ckpt \
+    experiment=coconut \
+    trainer.max_steps=50000
+
+# Or use train.py directly with COCONUT experiment
+python scripts/train.py \
+    experiment=coconut \
+    model.pretrained_path=outputs/moses_hdtc/best.ckpt
+
+# Evaluate fine-tuned model
+python scripts/eval_finetune.py \
+    model.checkpoint_path=outputs/coconut_finetune/best.ckpt \
+    generation.num_samples=1000
+
+# Compare the results of fine-tuned model
+python scripts/compare_finetune_results.py
 ```
 
 ### Table Comparison
@@ -95,16 +137,17 @@ pytest tests/ -v
 ```
 MOSAIC/
 ├── src/
-│   ├── data/           # Data loading, generation, and motif detection
-│   ├── tokenizers/     # Graph tokenization (SENT, H-SENT, HDT)
-│   │   └── hierarchical/   # Hierarchical tokenization module
-│   ├── models/         # Transformer models
-│   ├── evaluation/     # Standard and motif metrics
-│   └── realistic_gen/  # Generation quality analysis
-├── configs/            # Hydra configuration
-├── scripts/            # Training, evaluation, and visualization scripts
-├── tests/              # Test suite
-└── docs/               # Documentation
+│   ├── data/              # Data loading, generation, and motif detection
+│   ├── tokenizers/        # Graph tokenization (SENT, H-SENT, HDT, HDTC)
+│   │   ├── coarsening/    # Coarsening strategies (spectral, motif-aware)
+│   │   └── motif/         # Motif detection and patterns
+│   ├── models/            # Transformer models
+│   ├── evaluation/        # Standard and motif metrics
+│   └── realistic_gen/     # Generation quality analysis
+├── configs/               # Hydra configuration
+├── scripts/               # Training, evaluation, and visualization scripts
+├── tests/                 # Test suite
+└── docs/                  # Documentation
 ```
 
 ## Documentation
