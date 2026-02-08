@@ -249,24 +249,8 @@ def main(cfg: DictConfig) -> None:
     tokenizer = get_tokenizer(cfg)
     tokenizer_type = cfg.tokenizer.get("type", "sent").lower()
 
-    # Configure tokenizer from checkpoint
-    checkpoint_max_length = configure_tokenizer_from_checkpoint(
-        tokenizer, cfg.model.checkpoint_path
-    )
-
-    # Load model
-    log.info(f"Loading model from {cfg.model.checkpoint_path}...")
-    model = GraphGeneratorModule.load_from_checkpoint(
-        cfg.model.checkpoint_path,
-        tokenizer=tokenizer,
-        sampling_batch_size=cfg.generation.batch_size,
-        sampling_top_k=cfg.sampling.top_k,
-        sampling_temperature=cfg.sampling.temperature,
-        sampling_max_length=checkpoint_max_length or cfg.sampling.max_length,
-    )
-    model.eval()
-
-    # Load training data for comparison
+    # Load training data for comparison (before model loading so
+    # datamodule.setup() doesn't mutate the tokenizer after the model is built)
     log.info("Loading training data for comparison...")
     datamodule = MolecularDataModule(
         dataset_name=cfg.data.dataset_name,
@@ -283,6 +267,24 @@ def main(cfg: DictConfig) -> None:
     datamodule.setup(stage="fit")
     train_smiles = datamodule.train_smiles
     log.info(f"Loaded {len(train_smiles)} training SMILES")
+
+    # Configure tokenizer from checkpoint (force-corrects max_num_nodes
+    # after any inflation by datamodule.setup())
+    checkpoint_max_length = configure_tokenizer_from_checkpoint(
+        tokenizer, cfg.model.checkpoint_path
+    )
+
+    # Load model
+    log.info(f"Loading model from {cfg.model.checkpoint_path}...")
+    model = GraphGeneratorModule.load_from_checkpoint(
+        cfg.model.checkpoint_path,
+        tokenizer=tokenizer,
+        sampling_batch_size=cfg.generation.batch_size,
+        sampling_top_k=cfg.sampling.top_k,
+        sampling_temperature=cfg.sampling.temperature,
+        sampling_max_length=checkpoint_max_length or cfg.sampling.max_length,
+    )
+    model.eval()
 
     # Generate molecules
     num_samples = cfg.generation.num_samples
