@@ -5,7 +5,8 @@
 # in outputs/benchmark/, then generates a comparison table.
 #
 # Usage:
-#   ./bash_scripts/eval_benchmarks.sh              # Evaluate all benchmarks
+#   ./bash_scripts/eval_benchmarks.sh              # Evaluate MOSES benchmarks
+#   ./bash_scripts/eval_benchmarks.sh --coconut    # Evaluate COCONUT benchmarks
 #   ./bash_scripts/eval_benchmarks.sh --test-only  # Skip realistic_gen
 #   ./bash_scripts/eval_benchmarks.sh --gen-only   # Skip test, only realistic_gen
 
@@ -13,7 +14,13 @@ set -e  # Exit on error
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Default settings
+DATASET="moses"
 BENCHMARK_DIR="$PROJECT_ROOT/outputs/benchmark"
+TEST_OUTPUT_DIR="outputs/test"
+REALISTIC_GEN_OUTPUT_DIR="outputs/realistic_gen"
+COMPARISON_OUTPUT="outputs/test/comparison.png"
 
 # Parse arguments
 RUN_TEST=true
@@ -27,15 +34,25 @@ for arg in "$@"; do
         --gen-only)
             RUN_TEST=false
             ;;
+        --coconut)
+            DATASET="coconut"
+            BENCHMARK_DIR="$PROJECT_ROOT/outputs/benchmark_coconut"
+            TEST_OUTPUT_DIR="outputs/test_coconut"
+            REALISTIC_GEN_OUTPUT_DIR="outputs/realistic_gen_coconut"
+            COMPARISON_OUTPUT="outputs/test_coconut/comparison.png"
+            ;;
         --help|-h)
-            echo "Usage: $0 [--test-only] [--gen-only]"
+            echo "Usage: $0 [--test-only] [--gen-only] [--coconut]"
             echo ""
             echo "Options:"
             echo "  --test-only   Only run test.py (skip realistic_gen.py)"
             echo "  --gen-only    Only run realistic_gen.py (skip test.py)"
+            echo "  --coconut     Evaluate COCONUT benchmarks (from outputs/benchmark_coconut/)"
             echo ""
-            echo "Results are saved to outputs/test/ and outputs/realistic_gen/"
-            echo "Comparison table is saved to outputs/test/comparison.png"
+            echo "Results are saved to:"
+            echo "  MOSES:   outputs/test/ and outputs/realistic_gen/"
+            echo "  COCONUT: outputs/test_coconut/ and outputs/realistic_gen_coconut/"
+            echo "Comparison tables are saved to outputs/test[_coconut]/comparison.png"
             exit 0
             ;;
     esac
@@ -50,6 +67,9 @@ if [ -z "$CHECKPOINTS" ]; then
     exit 1
 fi
 
+echo "Dataset: $DATASET"
+echo "Benchmark dir: $BENCHMARK_DIR"
+echo ""
 echo "Found checkpoints:"
 echo "$CHECKPOINTS" | while read -r ckpt; do echo "  - $ckpt"; done
 echo ""
@@ -57,7 +77,7 @@ echo ""
 cd "$PROJECT_ROOT"
 
 # Extract tokenizer type from checkpoint path
-# Directory names follow pattern: moses_{tokenizer}_{variant}_... or moses_{tokenizer}_n{count}_...
+# Directory names follow pattern: {dataset}_{tokenizer}_{variant}_... or {dataset}_{tokenizer}_n{count}_...
 get_tokenizer_type() {
     local ckpt_path="$1"
     local dir_name=$(basename "$(dirname "$ckpt_path")")
@@ -79,7 +99,7 @@ get_tokenizer_type() {
 }
 
 # Extract coarsening strategy from checkpoint path
-# Directory names follow pattern: moses_{tokenizer}_{coarsening}_...
+# Directory names follow pattern: {dataset}_{tokenizer}_{coarsening}_...
 # mc = motif_community, sc = spectral, mas = motif_aware_spectral
 get_coarsening_strategy() {
     local ckpt_path="$1"
@@ -129,12 +149,12 @@ echo "$CHECKPOINTS" | while read -r ckpt; do
 
     if [ "$RUN_TEST" = true ]; then
         echo "[1/2] Running test.py..."
-        python scripts/test.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER $COARSENING_ARGS
+        python scripts/test.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.base_dir=$TEST_OUTPUT_DIR $COARSENING_ARGS
     fi
 
     if [ "$RUN_GEN" = true ]; then
         echo "[2/2] Running realistic_gen.py..."
-        python scripts/realistic_gen.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER $COARSENING_ARGS
+        python scripts/realistic_gen.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.base_dir=$REALISTIC_GEN_OUTPUT_DIR $COARSENING_ARGS
     fi
 
     echo ""
@@ -144,10 +164,10 @@ done
 echo "========================================"
 echo "Generating comparison table..."
 echo "========================================"
-python scripts/compare_results.py
+python scripts/compare_results.py --test-dir "$TEST_OUTPUT_DIR" --realistic-gen-dir "$REALISTIC_GEN_OUTPUT_DIR" --output "$COMPARISON_OUTPUT"
 
 echo ""
 echo "Done! Results saved to:"
-echo "  - Test results:      outputs/test/"
-echo "  - Realistic gen:     outputs/realistic_gen/"
-echo "  - Comparison table:  outputs/test/comparison.png"
+echo "  - Test results:      $TEST_OUTPUT_DIR/"
+echo "  - Realistic gen:     $REALISTIC_GEN_OUTPUT_DIR/"
+echo "  - Comparison table:  $COMPARISON_OUTPUT"

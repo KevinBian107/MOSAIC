@@ -5,6 +5,7 @@ AutoGraph/
 scratch/
 tmp/
 figures/
+.claude/
 
 # Python
 __pycache__/

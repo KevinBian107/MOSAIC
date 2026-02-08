@@ -208,6 +208,7 @@ def main(cfg: DictConfig) -> None:
         use_autograph = is_autograph_checkpoint(cfg.model.checkpoint_path)
 
     # For MOSAIC checkpoints, extract vocab size and update tokenizer
+    checkpoint_max_length = None
     if not use_autograph:
         log.info(f"Extracting vocab size from checkpoint: {cfg.model.checkpoint_path}")
         checkpoint = torch.load(
@@ -242,7 +243,10 @@ def main(cfg: DictConfig) -> None:
                     # This is likely a labeled graph model
                     log.info("Detected labeled checkpoint")
                     tokenizer.labeled_graph = True
-                    tokenizer.set_num_nodes(checkpoint_max_num_nodes_labeled)
+                    # Force-set max_num_nodes to match checkpoint exactly;
+                    # set_num_nodes() only increases and won't shrink a value
+                    # inflated by datamodule.setup()
+                    tokenizer.max_num_nodes = checkpoint_max_num_nodes_labeled
                     tokenizer.set_num_node_and_edge_types(
                         num_node_types=NUM_ATOM_TYPES,
                         num_edge_types=NUM_BOND_TYPES,
@@ -256,7 +260,14 @@ def main(cfg: DictConfig) -> None:
                     log.info(
                         f"Setting tokenizer max_num_nodes to {checkpoint_max_num_nodes}"
                     )
-                    tokenizer.set_num_nodes(checkpoint_max_num_nodes)
+                    # Force-set to match checkpoint exactly
+                    tokenizer.max_num_nodes = checkpoint_max_num_nodes
+
+            # Extract max position embeddings from checkpoint (GPT-2 wpe)
+            wpe_key = "model.model.transformer.wpe.weight"
+            if wpe_key in checkpoint["state_dict"]:
+                checkpoint_max_length = checkpoint["state_dict"][wpe_key].shape[0]
+                log.info(f"Checkpoint max position embeddings: {checkpoint_max_length}")
 
     if use_autograph:
         log.info(f"Detected AutoGraph checkpoint at {cfg.model.checkpoint_path}")
@@ -273,10 +284,12 @@ def main(cfg: DictConfig) -> None:
         )
     else:
         log.info(f"Loading MOSAIC model from {cfg.model.checkpoint_path}...")
+        load_kwargs: dict = {"tokenizer": tokenizer, "weights_only": False}
+        if checkpoint_max_length is not None:
+            load_kwargs["sampling_max_length"] = checkpoint_max_length
         model = GraphGeneratorModule.load_from_checkpoint(
             cfg.model.checkpoint_path,
-            tokenizer=tokenizer,
-            weights_only=False,
+            **load_kwargs,
         )
     model.eval()
 
