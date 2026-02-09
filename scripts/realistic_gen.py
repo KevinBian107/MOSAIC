@@ -78,6 +78,7 @@ def get_tokenizer(cfg: DictConfig):
             truncation_length=cfg.tokenizer.truncation_length,
             node_order=cfg.tokenizer.get("node_order", "BFS"),
             min_community_size=cfg.tokenizer.get("min_community_size", 4),
+            coarsening_strategy=cfg.tokenizer.get("coarsening_strategy", None),
             labeled_graph=cfg.tokenizer.get("labeled_graph", True),
             seed=cfg.seed,
         )
@@ -96,6 +97,7 @@ def get_tokenizer(cfg: DictConfig):
             truncation_length=cfg.tokenizer.truncation_length,
             node_order=cfg.tokenizer.get("node_order", "BFS"),
             min_community_size=cfg.tokenizer.get("min_community_size", 4),
+            coarsening_strategy=cfg.tokenizer.get("coarsening_strategy", None),
             motif_aware=motif_aware,
             motif_alpha=cfg.tokenizer.get("motif_alpha", 1.0),
             normalize_by_motif_size=cfg.tokenizer.get("normalize_by_motif_size", False),
@@ -157,26 +159,38 @@ def configure_tokenizer_from_checkpoint(
                 tokenizer, "IDX_OFFSET", 6
             )
 
-            # Try labeled first
-            checkpoint_max_num_nodes_labeled = (
-                checkpoint_vocab_size - idx_offset - NUM_ATOM_TYPES - NUM_BOND_TYPES
-            )
+            is_labeled = getattr(tokenizer, "labeled_graph", False)
 
-            if (
-                checkpoint_max_num_nodes_labeled > 0
-                and checkpoint_max_num_nodes_labeled <= 100
-            ):
-                log.info("Detected labeled checkpoint")
-                tokenizer.labeled_graph = True
-                # Force-set max_num_nodes to match checkpoint exactly;
-                # set_num_nodes() only increases and won't shrink a value
-                # inflated by datamodule.setup()
-                tokenizer.max_num_nodes = checkpoint_max_num_nodes_labeled
-                tokenizer.set_num_node_and_edge_types(NUM_ATOM_TYPES, NUM_BOND_TYPES)
-                log.info(
-                    f"Set tokenizer: max_num_nodes={checkpoint_max_num_nodes_labeled}, "
-                    f"labeled_graph=True"
+            if is_labeled:
+                checkpoint_max_num_nodes = (
+                    checkpoint_vocab_size - idx_offset - NUM_ATOM_TYPES - NUM_BOND_TYPES
                 )
+                if checkpoint_max_num_nodes <= 0:
+                    log.warning(
+                        f"Labeled formula gives non-positive max_num_nodes "
+                        f"({checkpoint_max_num_nodes}), falling back to unlabeled"
+                    )
+                    is_labeled = False
+                    tokenizer.labeled_graph = False
+                    checkpoint_max_num_nodes = checkpoint_vocab_size - idx_offset
+
+                if is_labeled:
+                    # Force-set max_num_nodes to match checkpoint exactly;
+                    # set_num_nodes() only increases and won't shrink a value
+                    # inflated by datamodule.setup()
+                    tokenizer.max_num_nodes = checkpoint_max_num_nodes
+                    tokenizer.set_num_node_and_edge_types(
+                        NUM_ATOM_TYPES, NUM_BOND_TYPES
+                    )
+                    log.info(
+                        f"Set tokenizer: max_num_nodes={checkpoint_max_num_nodes}, "
+                        f"labeled_graph=True"
+                    )
+                else:
+                    tokenizer.max_num_nodes = checkpoint_max_num_nodes
+                    log.info(
+                        f"Setting tokenizer max_num_nodes to {checkpoint_max_num_nodes}"
+                    )
             else:
                 checkpoint_max_num_nodes = checkpoint_vocab_size - idx_offset
                 log.info(
@@ -263,6 +277,10 @@ def main(cfg: DictConfig) -> None:
         include_hydrogens=cfg.data.get("include_hydrogens", False),
         seed=cfg.seed,
         data_root=cfg.data.get("data_root", "data"),
+        data_file=cfg.data.get("data_file", None),
+        min_atoms=cfg.data.get("min_atoms", 20),
+        max_atoms=cfg.data.get("max_atoms", 100),
+        min_rings=cfg.data.get("min_rings", 3),
     )
     datamodule.setup(stage="fit")
     train_smiles = datamodule.train_smiles
