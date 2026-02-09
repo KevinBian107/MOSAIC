@@ -16,9 +16,8 @@ model:
   # outputs/train/moses_hsent_n50000_20260122-093526/best.ckpt
   # outputs/train/moses_sent_n1000000_20260123-140906/best.ckpt
 
-# Data configuration (for training SMILES reference)
+# Data configuration (dataset_name comes from experiment config)
 data:
-  dataset_name: moses
   batch_size: 32
   num_workers: 0
   num_train: 10000  # Max training samples for analysis
