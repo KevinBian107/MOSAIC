@@ -1300,6 +1300,14 @@ def main(cfg: DictConfig) -> None:
     log.info("Starting training...")
     trainer.fit(model, datamodule, ckpt_path=ckpt_path)
 
+    # Explicitly save last.ckpt with final model weights.
+    # PL 2.x only updates last.ckpt when best.ckpt also updates (i.e., when
+    # val loss improves). If val loss plateaus early, last.ckpt gets stuck at
+    # the best checkpoint step instead of the final training step.
+    last_ckpt_path = os.path.join(cfg.logs.path, "last.ckpt")
+    trainer.save_checkpoint(last_ckpt_path)
+    log.info(f"Saved final checkpoint to {last_ckpt_path} (step {trainer.global_step})")
+
     log.info("Running evaluation on test set...")
     trainer.test(model, datamodule)
 
