@@ -860,6 +860,22 @@ def _plot_token_sequence(
             tokenizer.REDGE: "]",
         }
         idx_offset = tokenizer.IDX_OFFSET
+    elif tokenizer_type == "HDTCTokenizer":
+        token_names = {
+            tokenizer.SOS: "[SOS]",
+            tokenizer.EOS: "[EOS]",
+            tokenizer.PAD: "[PAD]",
+            tokenizer.COMM_START: "{",
+            tokenizer.COMM_END: "}",
+            tokenizer.LEDGE: "[",
+            tokenizer.REDGE: "]",
+            tokenizer.SUPER_START: "<S",
+            tokenizer.SUPER_END: "S>",
+            tokenizer.TYPE_RING: "R",
+            tokenizer.TYPE_FUNC: "F",
+            tokenizer.TYPE_SINGLETON: "1",
+        }
+        idx_offset = tokenizer.IDX_OFFSET
     elif tokenizer_type == "HSENTTokenizer":
         token_names = {
             tokenizer.SOS: "[SOS]",
@@ -1179,6 +1195,12 @@ def main(cfg: DictConfig) -> None:
     log.info(f"Steps per epoch: {steps_per_epoch:,}")
     log.info(f"Validation check interval: {val_check_interval:,} steps")
 
+    # Ensure model position embeddings can handle any sequence the tokenizer produces
+    model_max_length = max(
+        cfg.sampling.max_length,
+        cfg.tokenizer.get("truncation_length", cfg.sampling.max_length),
+    )
+
     model = GraphGeneratorModule(
         tokenizer=tokenizer,
         model_name=cfg.model.model_name,
@@ -1188,7 +1210,7 @@ def main(cfg: DictConfig) -> None:
         max_steps=cfg.model.max_steps,
         sampling_top_k=cfg.sampling.top_k,
         sampling_temperature=cfg.sampling.temperature,
-        sampling_max_length=cfg.sampling.max_length,
+        sampling_max_length=model_max_length,
         sampling_num_samples=cfg.sampling.num_samples,
         sampling_batch_size=cfg.sampling.batch_size,
     )

@@ -330,7 +330,7 @@ class MolecularDataModule(pl.LightningDataModule):
         else:
             raise ValueError(f"Unknown dataset: {self.dataset_name}")
 
-        # Update tokenizer with max nodes
+        # Update tokenizer with max nodes from dataset
         if self.tokenizer is not None:
             self.tokenizer.set_num_nodes(self.max_num_nodes)
 

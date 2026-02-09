@@ -138,19 +138,36 @@ class TransformerLM(nn.Module):
             Logits tensor [batch_size, seq_len, vocab_size].
         """
         # Validate token IDs are within vocab bounds
-        vocab_size = len(self.tokenizer)
+        tokenizer_vocab_size = len(self.tokenizer)
+
+        # Get actual model embedding size
+        if hasattr(self.model, 'transformer'):
+            # GPT-2 style
+            model_vocab_size = self.model.transformer.wte.weight.shape[0]
+        elif hasattr(self.model, 'model') and hasattr(self.model.model, 'embed_tokens'):
+            # LLaMA style
+            model_vocab_size = self.model.model.embed_tokens.weight.shape[0]
+        else:
+            model_vocab_size = tokenizer_vocab_size  # Fallback
+
         max_token = input_ids.max().item()
-        if max_token >= vocab_size:
-            # Find which sequence has the invalid token
-            invalid_mask = input_ids >= vocab_size
-            batch_idx = invalid_mask.any(dim=1).nonzero()[0].item()
-            seq_idx = invalid_mask[batch_idx].nonzero()[0].item()
+
+        # Check against BOTH tokenizer and model vocab sizes
+        if max_token >= model_vocab_size:
             raise ValueError(
-                f"Token ID {max_token} at position [{batch_idx}, {seq_idx}] "
-                f"exceeds vocab_size {vocab_size}. "
-                f"tokenizer: max_num_nodes={self.tokenizer.max_num_nodes}, "
+                f"Token ID {max_token} exceeds MODEL embedding size {model_vocab_size}. "
+                f"tokenizer_vocab_size={tokenizer_vocab_size}, "
+                f"MISMATCH={tokenizer_vocab_size != model_vocab_size}, "
+                f"tokenizer.max_num_nodes={self.tokenizer.max_num_nodes}, "
                 f"IDX_OFFSET={getattr(self.tokenizer, 'IDX_OFFSET', 'N/A')}"
             )
+
+        if tokenizer_vocab_size != model_vocab_size:
+            raise ValueError(
+                f"VOCAB SIZE MISMATCH: tokenizer={tokenizer_vocab_size}, model={model_vocab_size}. "
+                f"This usually means set_num_nodes() was called AFTER model creation."
+            )
+
         return self.model(input_ids=input_ids).logits
 
     @torch.inference_mode()

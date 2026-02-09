@@ -153,11 +153,11 @@ This creates `data/coconut_complex.smi` with ~10,000 complex natural products.
 
 ## eval_benchmarks.sh
 
-Evaluates all checkpoints in `outputs/benchmark/` and generates a comparison table.
+Evaluates all checkpoints in `outputs/benchmark/` (or `outputs/benchmark_coconut/`) and generates a comparison table.
 
 ### What it does
 
-1. Finds all `best.ckpt` files in `outputs/benchmark/`
+1. Finds all `last.ckpt` files in the benchmark directory
 2. Runs `scripts/test.py` on each checkpoint (computes validity, uniqueness, novelty, FCD, PGD, etc.)
 3. Runs `scripts/realistic_gen.py` on each checkpoint (computes motif rate, substitution patterns, etc.)
 4. Runs `scripts/compare_results.py` to generate a comparison table PNG
@@ -165,8 +165,11 @@ Evaluates all checkpoints in `outputs/benchmark/` and generates a comparison tab
 ### Usage
 
 ```bash
-# Run from project root
+# Evaluate MOSES benchmarks (default)
 ./bash_scripts/eval_benchmarks.sh
+
+# Evaluate COCONUT benchmarks
+./bash_scripts/eval_benchmarks.sh --coconut
 
 # Only run test.py (skip realistic generation analysis)
 ./bash_scripts/eval_benchmarks.sh --test-only
@@ -180,10 +183,15 @@ Evaluates all checkpoints in `outputs/benchmark/` and generates a comparison tab
 
 ### Output
 
-Results are saved to:
+**MOSES (default):**
 - `outputs/test/{run_name}/results.json` - Test metrics
 - `outputs/realistic_gen/{run_name}/results.json` - Realistic generation metrics
 - `outputs/test/comparison.png` - Comparison table image
+
+**COCONUT (`--coconut`):**
+- `outputs/test_coconut/{run_name}/results.json` - Test metrics
+- `outputs/realistic_gen_coconut/{run_name}/results.json` - Realistic generation metrics
+- `outputs/test_coconut/comparison.png` - Comparison table image
 
 ### Adding checkpoints
 
@@ -202,7 +210,7 @@ outputs/benchmark/
 
 The script automatically extracts tokenizer type and coarsening strategy from directory names.
 
-**Directory name pattern:** `moses_{tokenizer}_{coarsening}_{other}_...`
+**Directory name pattern:** `{dataset}_{tokenizer}_{coarsening}_{other}_...`
 
 **Tokenizer types:**
 - `hsent` - Hierarchical SENT (supports coarsening)
