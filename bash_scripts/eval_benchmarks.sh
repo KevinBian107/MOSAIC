@@ -100,7 +100,7 @@ get_tokenizer_type() {
 
 # Extract coarsening strategy from checkpoint path
 # Directory names follow pattern: {dataset}_{tokenizer}_{coarsening}_...
-# mc = motif_community, sc = spectral, mas = motif_aware_spectral
+# mc = motif_community, sc = spectral, hac = hac, mas = motif_aware_spectral
 get_coarsening_strategy() {
     local ckpt_path="$1"
     local dir_name=$(basename "$(dirname "$ckpt_path")")
@@ -111,6 +111,8 @@ get_coarsening_strategy() {
         echo "motif_community"
     elif [[ "$dir_name" == *"_sc_"* ]] || [[ "$dir_name" =~ _sc[^a-z] ]]; then
         echo "spectral"
+    elif [[ "$dir_name" == *"_hac_"* ]] || [[ "$dir_name" =~ _hac[^a-z] ]]; then
+        echo "hac"
     elif [[ "$dir_name" == *"_mas_"* ]] || [[ "$dir_name" =~ _mas[^a-z] ]]; then
         echo "motif_aware_spectral"
     else
