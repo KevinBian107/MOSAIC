@@ -20,6 +20,7 @@ from torch_geometric.data import Data
 
 from src.tokenizers.base import BatchConverter, Tokenizer
 from src.tokenizers.coarsening import (
+    HACCoarsening,
     MotifAwareCoarsening,
     MotifCommunityCoarsening,
     SimpleSpectralCoarsening,
@@ -106,7 +107,7 @@ class HSENTTokenizer(Tokenizer):
 
     # Type alias for coarsening strategy
     CoarseningStrategyType = Literal[
-        "spectral", "motif_aware_spectral", "motif_community"
+        "spectral", "motif_aware_spectral", "motif_community", "hac"
     ]
 
     def __init__(
@@ -126,6 +127,8 @@ class HSENTTokenizer(Tokenizer):
         motif_patterns: Optional[dict[str, str]] = None,
         normalize_by_motif_size: bool = False,
         labeled_graph: bool = False,
+        hac_linkage: str = "ward",
+        hac_feature_type: str = "adjacency",
     ) -> None:
         """Initialize the H-SENT tokenizer.
 
@@ -145,6 +148,7 @@ class HSENTTokenizer(Tokenizer):
                   Uses n_init=10, k=[0.7,1.3] for 25x speedup with equivalent quality
                 - "motif_aware_spectral": Spectral clustering with motif preservation
                 - "motif_community": Direct motif-based community assignment
+                - "hac": Hierarchical agglomerative clustering with connectivity constraint
                 - "simple_spectral": DEPRECATED - Single-level spectral (no hierarchy)
             motif_aware: DEPRECATED. Use coarsening_strategy="motif_aware_spectral".
             motif_alpha: Weight for motif affinity matrix (only used with
@@ -152,6 +156,10 @@ class HSENTTokenizer(Tokenizer):
             motif_patterns: Custom SMARTS patterns for motif detection.
             normalize_by_motif_size: Normalize motif contributions by 1/motif_size.
             labeled_graph: Whether to encode node/edge features (atom/bond types).
+            hac_linkage: Linkage criterion for HAC. Options: ward, complete,
+                average, single. Only used with coarsening_strategy="hac".
+            hac_feature_type: Node feature type for HAC. Options: adjacency.
+                Only used with coarsening_strategy="hac".
         """
         self.node_order = node_order
         self.max_length = max_length
@@ -195,6 +203,15 @@ class HSENTTokenizer(Tokenizer):
         elif coarsening_strategy == "motif_community":
             self.coarsener = MotifCommunityCoarsening(
                 motif_patterns=motif_patterns,
+                min_community_size=min_community_size,
+                seed=seed,
+            )
+        elif coarsening_strategy == "hac":
+            self.coarsener = HACCoarsening(
+                linkage=hac_linkage,
+                feature_type=hac_feature_type,
+                k_min_factor=k_min_factor,
+                k_max_factor=k_max_factor,
                 min_community_size=min_community_size,
                 seed=seed,
             )

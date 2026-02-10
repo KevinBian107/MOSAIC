@@ -2,17 +2,19 @@
 # Automatically run parallel chunked preprocessing in screen sessions
 #
 # Usage:
-#   ./scripts/preprocess/run_parallel_chunks.sh <tokenizer> [num_chunks] [output_dir]
+#   ./scripts/preprocess/run_parallel_chunks.sh <tokenizer> [num_chunks] [output_dir] [coarsening_strategy]
 #
 # Example:
 #   ./scripts/preprocess/run_parallel_chunks.sh hsent 8 data/cache
-#   ./scripts/preprocess/run_parallel_chunks.sh hdt 16 /path/to/cache
+#   ./scripts/preprocess/run_parallel_chunks.sh hsent 8 data/cache hac
+#   ./scripts/preprocess/run_parallel_chunks.sh hdt 16 /path/to/cache spectral
 
 set -e  # Exit on error
 
 TOKENIZER=$1
 NUM_CHUNKS=${2:-8}
 OUTPUT_DIR=${3:-data/cache}
+COARSENING=${4:-spectral}
 TOTAL_SAMPLES=500000
 
 if [ -z "$TOKENIZER" ]; then
@@ -43,6 +45,7 @@ echo "=========================================="
 echo "PARALLEL CHUNKED PREPROCESSING"
 echo "=========================================="
 echo "Tokenizer: $TOKENIZER"
+echo "Coarsening: $COARSENING"
 echo "Total samples: $TOTAL_SAMPLES"
 echo "Number of chunks: $NUM_CHUNKS"
 echo "Chunk size: $CHUNK_SIZE"
@@ -65,8 +68,8 @@ for ((i=0; i<NUM_CHUNKS; i++)); do
         END=$TOTAL_SAMPLES
     fi
 
-    SCREEN_NAME="preprocess_${TOKENIZER}_chunk${i}"
-    OUTPUT_FILE="$OUTPUT_DIR/${TOKENIZER}_chunk_${START}_${END}.pt"
+    SCREEN_NAME="preprocess_${TOKENIZER}_${COARSENING}_chunk${i}"
+    OUTPUT_FILE="$OUTPUT_DIR/${TOKENIZER}_${COARSENING}_chunk_${START}_${END}.pt"
 
     echo "Starting chunk $i in screen '$SCREEN_NAME'"
     echo "  Range: [$START:$END]"
@@ -75,7 +78,8 @@ for ((i=0; i<NUM_CHUNKS; i++)); do
     # Create screen session and run preprocessing
     screen -dmS "$SCREEN_NAME" bash -c "
         cd '$PROJECT_ROOT'
-        source /home/andrew/miniconda3/bin/activate mosaic
+        source \"\$(conda info --base)/etc/profile.d/conda.sh\"
+        conda activate mosaic
 
         echo '=========================================='
         echo 'Chunk $i: Processing [$START:$END]'
@@ -83,6 +87,7 @@ for ((i=0; i<NUM_CHUNKS; i++)); do
 
         python scripts/preprocess/preprocess_chunk.py \
             --tokenizer $TOKENIZER \
+            --coarsening-strategy $COARSENING \
             --start $START \
             --end $END \
             --output '$OUTPUT_FILE'
@@ -113,21 +118,22 @@ echo "=========================================="
 echo ""
 echo "Screen sessions created:"
 for ((i=0; i<NUM_CHUNKS; i++)); do
-    echo "  - preprocess_${TOKENIZER}_chunk${i}"
+    echo "  - preprocess_${TOKENIZER}_${COARSENING}_chunk${i}"
 done
 echo ""
 echo "Useful commands:"
 echo "  screen -ls                           # List all screen sessions"
-echo "  screen -r preprocess_${TOKENIZER}_chunk0  # Attach to chunk 0"
-echo "  screen -X -S preprocess_${TOKENIZER}_chunk0 quit  # Kill chunk 0"
+echo "  screen -r preprocess_${TOKENIZER}_${COARSENING}_chunk0  # Attach to chunk 0"
+echo "  screen -X -S preprocess_${TOKENIZER}_${COARSENING}_chunk0 quit  # Kill chunk 0"
 echo "  pkill -f 'preprocess_chunk.py'       # Kill all preprocessing (emergency)"
 echo ""
 echo "Monitor progress:"
-echo "  watch -n 5 'ls -lh $OUTPUT_DIR/${TOKENIZER}_chunk_*.pt | wc -l'"
+echo "  watch -n 5 'ls -lh $OUTPUT_DIR/${TOKENIZER}_${COARSENING}_chunk_*.pt | wc -l'"
 echo ""
 echo "After all chunks complete, combine them:"
 echo "  python scripts/preprocess/combine_chunks.py \\"
 echo "      --tokenizer $TOKENIZER \\"
+echo "      --coarsening-strategy $COARSENING \\"
 echo "      --chunk_dir $OUTPUT_DIR \\"
 echo "      --split train \\"
 echo "      --dataset moses"

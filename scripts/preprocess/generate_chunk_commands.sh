@@ -4,11 +4,13 @@
 
 TOKENIZER=$1
 NUM_CHUNKS=${2:-8}
+COARSENING=${3:-spectral}
 TOTAL_SAMPLES=500000
 
 if [ -z "$TOKENIZER" ]; then
-    echo "Usage: $0 <tokenizer> [num_chunks]"
+    echo "Usage: $0 <tokenizer> [num_chunks] [coarsening_strategy]"
     echo "Example: $0 hsent 8"
+    echo "Example: $0 hsent 8 hac"
     exit 1
 fi
 
@@ -18,6 +20,7 @@ echo "=========================================="
 echo "PARALLEL CHUNKED PREPROCESSING"
 echo "=========================================="
 echo "Tokenizer: $TOKENIZER"
+echo "Coarsening: $COARSENING"
 echo "Total samples: $TOTAL_SAMPLES"
 echo "Number of chunks: $NUM_CHUNKS"
 echo "Chunk size: $CHUNK_SIZE"
@@ -39,9 +42,10 @@ for ((i=0; i<NUM_CHUNKS; i++)); do
     echo "# Terminal $((i+1)): Chunk $i"
     echo "python scripts/preprocess/preprocess_chunk.py \\"
     echo "    --tokenizer $TOKENIZER \\"
+    echo "    --coarsening-strategy $COARSENING \\"
     echo "    --start $START \\"
     echo "    --end $END \\"
-    echo "    --output data/cache/${TOKENIZER}_chunk_${START}_${END}.pt"
+    echo "    --output data/cache/${TOKENIZER}_${COARSENING}_chunk_${START}_${END}.pt"
     echo ""
 done
 
@@ -51,6 +55,7 @@ echo "=========================================="
 echo ""
 echo "python scripts/preprocess/combine_chunks.py \\"
 echo "    --tokenizer $TOKENIZER \\"
+echo "    --coarsening-strategy $COARSENING \\"
 echo "    --chunk_dir data/cache \\"
 echo "    --split train \\"
 echo "    --dataset moses"
