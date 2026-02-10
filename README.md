@@ -1,4 +1,4 @@
-# MOSAIC: MOtif-aware Structural Abstraction for graph tokenIzation and Composition
+# Beyond Flat Walks: Compositional Abstraction for Autoregressive Molecular Generation
 
 This project explores a simple idea: instead of asking generative models to recover motif-level structure implicitly, we encode motifs directly into the representation used for graph generation, independent of the sequence transformer's processing. We are interesting in constructing a representation in the form of flat tokens.
 
