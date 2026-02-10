@@ -219,7 +219,13 @@ class HierarchicalGraph:
             all_edges.extend(part.get_all_edges_global())
 
         # Collect inter-partition edges (off-diagonal blocks)
+        part_id_set = {p.part_id for p in self.partitions}
         for bipart in self.bipartites:
+            if (
+                bipart.left_part_id not in part_id_set
+                or bipart.right_part_id not in part_id_set
+            ):
+                continue
             left_part = self.get_partition(bipart.left_part_id)
             right_part = self.get_partition(bipart.right_part_id)
 
@@ -228,6 +234,11 @@ class HierarchicalGraph:
                 for e in range(ei.shape[1]):
                     left_local = int(ei[0, e])
                     right_local = int(ei[1, e])
+                    if (
+                        left_local >= left_part.num_nodes
+                        or right_local >= right_part.num_nodes
+                    ):
+                        continue
                     global_left = left_part.local_to_global(left_local)
                     global_right = right_part.local_to_global(right_local)
                     # Add both directions for undirected graphs

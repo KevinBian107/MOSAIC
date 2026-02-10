@@ -105,7 +105,9 @@ class HSENTTokenizer(Tokenizer):
     pad: int = 2
 
     # Type alias for coarsening strategy
-    CoarseningStrategyType = Literal["spectral", "motif_aware_spectral", "motif_community"]
+    CoarseningStrategyType = Literal[
+        "spectral", "motif_aware_spectral", "motif_community"
+    ]
 
     def __init__(
         self,
@@ -323,7 +325,9 @@ class HSENTTokenizer(Tokenizer):
 
         return torch.tensor(tokens, dtype=torch.long)
 
-    def _tokenize_partition(self, part: Partition, root_hg: Optional[HierarchicalGraph] = None) -> list[int]:
+    def _tokenize_partition(
+        self, part: Partition, root_hg: Optional[HierarchicalGraph] = None
+    ) -> list[int]:
         """Encode a partition using SENT-style walk with back-edges.
 
         If the partition has a child hierarchy, recursively encode it.
@@ -356,7 +360,9 @@ class HSENTTokenizer(Tokenizer):
         # If partition has child hierarchy, recursively encode it
         if part.child_hierarchy is not None:
             # Encode child's structure (without SOS/EOS)
-            child_tokens = self._tokenize_child_hierarchy(part.child_hierarchy, root_hg=root_hg)
+            child_tokens = self._tokenize_child_hierarchy(
+                part.child_hierarchy, root_hg=root_hg
+            )
             tokens.extend(child_tokens)
         else:
             # Leaf partition: encode with SENT-style back-edges
@@ -365,7 +371,9 @@ class HSENTTokenizer(Tokenizer):
         tokens.append(self.RCOM)
         return tokens
 
-    def _tokenize_child_hierarchy(self, hg: HierarchicalGraph, root_hg: Optional[HierarchicalGraph] = None) -> list[int]:
+    def _tokenize_child_hierarchy(
+        self, hg: HierarchicalGraph, root_hg: Optional[HierarchicalGraph] = None
+    ) -> list[int]:
         """Encode a nested hierarchy (without SOS/EOS).
 
         Args:
@@ -390,7 +398,9 @@ class HSENTTokenizer(Tokenizer):
 
         return tokens
 
-    def _tokenize_partition_sent(self, part: Partition, root_hg: Optional[HierarchicalGraph] = None) -> list[int]:
+    def _tokenize_partition_sent(
+        self, part: Partition, root_hg: Optional[HierarchicalGraph] = None
+    ) -> list[int]:
         """Encode partition edges using SENT-style back-edges.
 
         For labeled graphs, interleaves atom and bond type tokens:
@@ -437,9 +447,7 @@ class HSENTTokenizer(Tokenizer):
 
             # Find back-edges to previously visited neighbors
             back_edges = sorted(
-                order_to_idx[n]
-                for n in adj[node]
-                if n in visited and n != node
+                order_to_idx[n] for n in adj[node] if n in visited and n != node
             )
 
             if back_edges:
@@ -454,7 +462,9 @@ class HSENTTokenizer(Tokenizer):
                         # Get global indices for edge lookup
                         src_global = part.global_node_indices[node]
                         dst_global = part.global_node_indices[target_node]
-                        bond_type = self._get_edge_feature_global(root_hg, src_global, dst_global)
+                        bond_type = self._get_edge_feature_global(
+                            root_hg, src_global, dst_global
+                        )
                         bond_token = self.edge_idx_offset + bond_type
                         tokens.append(bond_token)
 
@@ -589,7 +599,11 @@ class HSENTTokenizer(Tokenizer):
         global_node_offset = 0
         while idx < len(tokens_list) and tokens_list[idx] == self.LCOM:
             part, idx = self._parse_partition(
-                tokens_list, idx + 1, global_node_offset, node_features_dict, edge_features_dict
+                tokens_list,
+                idx + 1,
+                global_node_offset,
+                node_features_dict,
+                edge_features_dict,
             )
             if part is not None:
                 partitions.append(part)
@@ -605,21 +619,32 @@ class HSENTTokenizer(Tokenizer):
                 # Add bipartite edge features to global edge_features_dict
                 if self.labeled_graph and bipart.edge_features is not None:
                     # Get the partitions to convert local to global indices
-                    left_part = partitions[bipart.left_part_id]
-                    right_part = partitions[bipart.right_part_id]
+                    if bipart.left_part_id < len(
+                        partitions
+                    ) and bipart.right_part_id < len(partitions):
+                        left_part = partitions[bipart.left_part_id]
+                        right_part = partitions[bipart.right_part_id]
 
-                    # Add each bipartite edge's bond type to the global dict
-                    ei = bipart.edge_index.numpy()
-                    for e in range(ei.shape[1]):
-                        left_local = int(ei[0, e])
-                        right_local = int(ei[1, e])
-                        left_global = left_part.local_to_global(left_local)
-                        right_global = right_part.local_to_global(right_local)
-                        bond_type = int(bipart.edge_features[e])
+                        # Add each bipartite edge's bond type to the global dict
+                        ei = bipart.edge_index.numpy()
+                        for e in range(ei.shape[1]):
+                            left_local = int(ei[0, e])
+                            right_local = int(ei[1, e])
+                            if (
+                                left_local < left_part.num_nodes
+                                and right_local < right_part.num_nodes
+                            ):
+                                left_global = left_part.local_to_global(left_local)
+                                right_global = right_part.local_to_global(right_local)
+                                bond_type = int(bipart.edge_features[e])
 
-                        # Add both directions (undirected graph)
-                        edge_features_dict[(left_global, right_global)] = bond_type
-                        edge_features_dict[(right_global, left_global)] = bond_type
+                                # Add both directions (undirected graph)
+                                edge_features_dict[(left_global, right_global)] = (
+                                    bond_type
+                                )
+                                edge_features_dict[(right_global, left_global)] = (
+                                    bond_type
+                                )
 
         # Reconstruct community assignment
         community_assignment = self._build_community_assignment(partitions)
@@ -695,7 +720,9 @@ class HSENTTokenizer(Tokenizer):
 
         # If no global indices found, use fallback (sequential from offset)
         if not global_indices:
-            global_indices = list(range(global_node_offset, global_node_offset + num_nodes))
+            global_indices = list(
+                range(global_node_offset, global_node_offset + num_nodes)
+            )
 
         # Check if this is a nested hierarchy or leaf partition
         # Nested if we see a number followed by LCOM
@@ -707,7 +734,11 @@ class HSENTTokenizer(Tokenizer):
             if lookahead < len(tokens) and tokens[lookahead] == self.LCOM:
                 # Nested hierarchy
                 child_hierarchy, idx = self._parse_child_hierarchy(
-                    tokens, idx, global_node_offset, node_features_dict, edge_features_dict
+                    tokens,
+                    idx,
+                    global_node_offset,
+                    node_features_dict,
+                    edge_features_dict,
                 )
                 # Find RCOM
                 while idx < len(tokens) and tokens[idx] != self.RCOM:
@@ -751,18 +782,13 @@ class HSENTTokenizer(Tokenizer):
                 # Add back-edges: edges from current node to previously visited nodes
                 if node_sequence:
                     current_node_local = node_sequence[-1]
-                    current_node_global = global_indices[current_node_local]
-                    for back_pos in bracket_nodes:
-                        if back_pos < len(node_sequence):
-                            back_node_local = node_sequence[back_pos]
-                            back_node_global = global_indices[back_node_local]
-                            # Edge between current node and back node (in LOCAL indices)
-                            edges.append((current_node_local, back_node_local))
-                            edges.append((back_node_local, current_node_local))
-                            # Store edge features in GLOBAL indices
-                            if self.labeled_graph and edge_features_dict is not None:
-                                # The bond type was already read in the bracket, stored in bracket_bonds
-                                pass  # Will be filled when parsing bracket nodes
+                    if current_node_local < len(global_indices):
+                        for back_pos in bracket_nodes:
+                            if back_pos < len(node_sequence):
+                                back_node_local = node_sequence[back_pos]
+                                if back_node_local < len(global_indices):
+                                    edges.append((current_node_local, back_node_local))
+                                    edges.append((back_node_local, current_node_local))
                 idx += 1
             elif tok >= self.IDX_OFFSET:
                 val = tok - self.IDX_OFFSET
@@ -780,11 +806,20 @@ class HSENTTokenizer(Tokenizer):
                             # Store the bond type for this back-edge
                             if node_sequence and val < len(node_sequence):
                                 current_node_local = node_sequence[-1]
-                                back_node_local = node_sequence[val]  # FIX: val is position, not node ID
-                                current_node_global = global_indices[current_node_local]
-                                back_node_global = global_indices[back_node_local]
-                                edge_features_dict[(current_node_global, back_node_global)] = bond_type
-                                edge_features_dict[(back_node_global, current_node_global)] = bond_type
+                                back_node_local = node_sequence[val]
+                                if current_node_local < len(
+                                    global_indices
+                                ) and back_node_local < len(global_indices):
+                                    current_node_global = global_indices[
+                                        current_node_local
+                                    ]
+                                    back_node_global = global_indices[back_node_local]
+                                    edge_features_dict[
+                                        (current_node_global, back_node_global)
+                                    ] = bond_type
+                                    edge_features_dict[
+                                        (back_node_global, current_node_global)
+                                    ] = bond_type
                             idx += 1
                 else:
                     # This is a node in the sequence
@@ -801,8 +836,9 @@ class HSENTTokenizer(Tokenizer):
                             atom_token = tokens[idx]
                             atom_type = atom_token - self.node_idx_offset
                             # Store atom type using GLOBAL index
-                            global_idx = global_indices[val]
-                            node_features_dict[global_idx] = atom_type
+                            if val < len(global_indices):
+                                global_idx = global_indices[val]
+                                node_features_dict[global_idx] = atom_type
                             idx += 1
             else:
                 idx += 1
@@ -965,9 +1001,7 @@ class HSENTTokenizer(Tokenizer):
 
         return Bipartite(left_id, right_id, edge_index, edge_features), idx
 
-    def _build_community_assignment(
-        self, partitions: list[Partition]
-    ) -> list[int]:
+    def _build_community_assignment(self, partitions: list[Partition]) -> list[int]:
         """Build community assignment from partitions.
 
         Args:

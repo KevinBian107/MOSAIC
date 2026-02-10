@@ -1,0 +1,70 @@
+# Generation Demo Configuration
+#
+# Generates animated GIFs showing step-by-step autoregressive molecule generation
+# for different tokenization schemes.
+#
+# Usage:
+#   python scripts/visualization/generation_demo.py
+#   python scripts/visualization/generation_demo.py generation.num_samples=5
+#   python scripts/visualization/generation_demo.py animation.fps=3
+
+seed: 42
+
+# Models to visualize (each generates its own GIF + optional comparison)
+models:
+  - name: coconut_hdtc
+    checkpoint_path: outputs/benchmark_coconut/coconut_hdtc_20260208-041135/last.ckpt
+    tokenizer_type: hdtc
+    labeled_graph: true
+
+  - name: coconut_hdt
+    checkpoint_path: outputs/benchmark_coconut/coconut_hdt_mc_20260206-200056/last.ckpt
+    tokenizer_type: hdt
+    labeled_graph: true
+    coarsening_strategy: mc
+
+  - name: coconut_hsent
+    checkpoint_path: outputs/benchmark_coconut/coconut_hsent_mc_20260207-215857/last.ckpt
+    tokenizer_type: hsent
+    labeled_graph: true
+    coarsening_strategy: mc
+
+  - name: coconut_sent
+    checkpoint_path: outputs/benchmark_coconut/coconut_sent_20260207-200702/last.ckpt
+    tokenizer_type: sent
+    labeled_graph: true
+
+# Generation settings
+generation:
+  num_samples: 1
+  top_k: 10
+  temperature: 1.0
+  max_length: 512
+
+# Animation settings
+animation:
+  fps: 2
+  max_frames: 150
+  figsize: [10, 12]
+  show_tokens: true
+  side_panel_width: 4
+
+# Motif detection settings
+motif:
+  enabled: true
+  include_rings: true
+  show_labels: true
+  show_gallery: true
+  gallery_max_items: 8
+
+# Output settings
+output:
+  dir: outputs/generation_demo
+  create_comparison: true
+  comparison_max_width: 600
+  # Which model names to include in the side-by-side comparison GIF.
+  # Defaults to the three hierarchical tokenizers.
+  comparison_models:
+    - coconut_hsent
+    - coconut_hdt
+    - coconut_hdtc

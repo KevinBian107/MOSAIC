@@ -1,4 +1,4 @@
-# MOSAIC: MOtif-aware Structural Abstraction for graph tokenIzation and Composition
+# Beyond Flat Walks: Compositional Abstraction for Autoregressive Molecular Generation
 
 This project explores a simple idea: instead of asking generative models to recover motif-level structure implicitly, we encode motifs directly into the representation used for graph generation, independent of the sequence transformer's processing. We are interesting in constructing a representation in the form of flat tokens.
 
@@ -12,8 +12,8 @@ For generating graphs using tokens with hierarchical insights, we need 3 things:
 
 3. **Flatten the generated H-graph**: Reconstruct the flat graph from tokens via bipartite edge union for H-SENT, or union of back edges for HDT.
 
-![HDT](/docs/figure/hdt_sample.gif)
-> HDT generation of novel molecules
+![HDT](/docs/figure/demo.gif)
+> H-Graph model generation of novel molecules in the coconut dataset.
 
 ## Quick Start
 

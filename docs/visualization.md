@@ -74,11 +74,38 @@ python scripts/visualization/visualize_motif_m_matrix.py --name cholesterol --no
 
 ### Generation Demo
 
-Visualize step-by-step molecule generation with animated comparisons:
+Visualize step-by-step molecule generation with animated GIFs. Uses Hydra
+configuration (`configs/generation_demo.yaml`) with per-model entries for
+checkpoint path, tokenizer type, and labeled graph settings.
+
+Each tokenizer type has a specialized visualizer:
+
+| Tokenizer | Side Panel | Features |
+|-----------|-----------|----------|
+| **SENT** | None | Random walk phase tracking |
+| **H-SENT** | Block diagram | Partition fill bars, bipartite arrows |
+| **HDT** | Abstract tree | Community hierarchy, current-community highlight |
+| **HDTC** | Typed abstract tree | R/F/S type labels, type-based coloring |
+
+All tokenizers support motif detection (ring and functional group highlighting)
+via `FunctionalGroupDetector`, with progressive reveal as atoms/edges appear.
 
 ```bash
-# Generate animation comparing tokenization schemes
-python scripts/visualization/generation_demo.py --name cholesterol --output cholesterol_gen.gif
+# Default: generate with models listed in configs/generation_demo.yaml
+python scripts/visualization/generation_demo.py
+
+# Override generation settings
+python scripts/visualization/generation_demo.py generation.num_samples=5 animation.fps=3
+
+# Change output directory
+python scripts/visualization/generation_demo.py output.dir=outputs/my_demo
+
+# Disable motif highlighting
+python scripts/visualization/generation_demo.py motif.enabled=false
+
+# Single model override (HDTC example)
+python scripts/visualization/generation_demo.py \
+    'models=[{name: my_hdtc, checkpoint_path: outputs/train/hdtc/best.ckpt, tokenizer_type: hdtc, labeled_graph: true}]'
 ```
 
 ## References

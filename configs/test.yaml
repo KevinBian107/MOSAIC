@@ -17,9 +17,8 @@ model:
   # outputs/train/moses_sent_n1000000_20260123-140906/best.ckpt
   is_autograph: false  # Set to true for AutoGraph checkpoints (auto-detected if false)
 
-# Data configuration
+# Data configuration (dataset_name comes from experiment config)
 data:
-  dataset_name: moses  # 'moses' or 'qm9'
   batch_size: 32
   num_workers: 0
   num_train: 100  # Used for reference in metrics
