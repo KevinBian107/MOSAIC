@@ -211,6 +211,11 @@ for tok_config in "${TOKENIZERS[@]}"; do
     # Add coarsening for hierarchical tokenizers
     if [ -n "$COARSENING_FULL" ] && supports_coarsening "$TOKENIZER"; then
         CMD="$CMD tokenizer.coarsening_strategy=$COARSENING_FULL"
+
+        # Use precomputed cache for SC and HAC (if available)
+        if [ "$COARSENING" = "sc" ] || [ "$COARSENING" = "hac" ]; then
+            CMD="$CMD data.use_cache=true"
+        fi
     fi
 
     if [ "$DRY_RUN" = true ]; then
