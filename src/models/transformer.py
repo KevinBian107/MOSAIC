@@ -4,6 +4,7 @@ This module provides HuggingFace transformer wrappers for training graph
 generation models using next-token prediction.
 """
 
+import logging
 from timeit import default_timer as timer
 from typing import Any, Optional
 
@@ -11,9 +12,12 @@ import pytorch_lightning as pl
 import torch
 import transformers
 from torch import nn
+from torch_geometric.data import Data
 from tqdm import tqdm
 
 from src.tokenizers.base import Tokenizer
+
+log = logging.getLogger(__name__)
 
 
 class TransformerLM(nn.Module):
@@ -203,6 +207,7 @@ class TransformerLM(nn.Module):
         )
 
         results = []
+        decode_failures = 0
         for i in range(batch_size):
             if return_tokens:
                 results.append(generated[i])
@@ -210,8 +215,20 @@ class TransformerLM(nn.Module):
                 try:
                     results.append(self.tokenizer.decode(generated[i]))
                 except Exception:
-                    # Skip invalid sequences (will be counted as invalid in metrics)
-                    pass
+                    decode_failures += 1
+                    # Return empty graph so failed decodes are counted as
+                    # invalid in downstream metrics (not silently dropped)
+                    results.append(
+                        Data(
+                            edge_index=torch.zeros(2, 0, dtype=torch.long),
+                            num_nodes=0,
+                        )
+                    )
+
+        if decode_failures > 0:
+            log.warning(
+                f"Decode failed for {decode_failures}/{batch_size} sequences"
+            )
 
         return results
 

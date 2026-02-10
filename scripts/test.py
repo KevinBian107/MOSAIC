@@ -136,6 +136,7 @@ def main(cfg: DictConfig) -> None:
             truncation_length=cfg.tokenizer.truncation_length,
             node_order=cfg.tokenizer.get("node_order", "BFS"),
             min_community_size=cfg.tokenizer.get("min_community_size", 4),
+            coarsening_strategy=cfg.tokenizer.get("coarsening_strategy", None),
             motif_aware=motif_aware,
             motif_alpha=cfg.tokenizer.get("motif_alpha", 1.0),
             normalize_by_motif_size=cfg.tokenizer.get("normalize_by_motif_size", False),
@@ -157,6 +158,7 @@ def main(cfg: DictConfig) -> None:
             truncation_length=cfg.tokenizer.truncation_length,
             node_order=cfg.tokenizer.get("node_order", "BFS"),
             min_community_size=cfg.tokenizer.get("min_community_size", 4),
+            coarsening_strategy=cfg.tokenizer.get("coarsening_strategy", None),
             motif_aware=motif_aware,
             motif_alpha=cfg.tokenizer.get("motif_alpha", 1.0),
             normalize_by_motif_size=cfg.tokenizer.get("normalize_by_motif_size", False),
@@ -182,6 +184,7 @@ def main(cfg: DictConfig) -> None:
             max_length=cfg.tokenizer.max_length,
             truncation_length=cfg.tokenizer.truncation_length,
             undirected=cfg.tokenizer.get("undirected", True),
+            labeled_graph=cfg.tokenizer.get("labeled_graph", False),
             seed=cfg.seed,
         )
 
@@ -198,6 +201,10 @@ def main(cfg: DictConfig) -> None:
         data_root=cfg.data.get("data_root", "data"),
         use_cache=cfg.data.get("use_cache", False),
         cache_dir=cfg.data.get("cache_dir", "data/cache"),
+        data_file=cfg.data.get("data_file", None),
+        min_atoms=cfg.data.get("min_atoms", 20),
+        max_atoms=cfg.data.get("max_atoms", 100),
+        min_rings=cfg.data.get("min_rings", 3),
     )
 
     datamodule.setup(stage="test")
@@ -221,9 +228,9 @@ def main(cfg: DictConfig) -> None:
                 checkpoint_vocab_size = checkpoint["state_dict"][wte_key].shape[0]
                 log.info(f"Checkpoint vocab size: {checkpoint_vocab_size}")
 
-                # Detect if this is a labeled graph model
-                # Unlabeled: vocab_size = idx_offset (6) + max_num_nodes
-                # Labeled: vocab_size = idx_offset (6) + max_num_nodes + num_node_types + num_edge_types
+                # Determine vocab layout from tokenizer's labeled_graph setting
+                # Unlabeled: vocab_size = idx_offset + max_num_nodes
+                # Labeled: vocab_size = idx_offset + max_num_nodes + num_node_types + num_edge_types
                 from src.data.molecular import NUM_ATOM_TYPES, NUM_BOND_TYPES
 
                 # Get idx_offset (handle both lowercase and uppercase)
@@ -231,29 +238,41 @@ def main(cfg: DictConfig) -> None:
                     tokenizer, "IDX_OFFSET", 6
                 )
 
-                # Try labeled first
-                checkpoint_max_num_nodes_labeled = (
-                    checkpoint_vocab_size - idx_offset - NUM_ATOM_TYPES - NUM_BOND_TYPES
-                )
+                is_labeled = getattr(tokenizer, "labeled_graph", False)
 
-                if (
-                    checkpoint_max_num_nodes_labeled > 0
-                    and checkpoint_max_num_nodes_labeled <= 100
-                ):
-                    # This is likely a labeled graph model
-                    log.info("Detected labeled checkpoint")
-                    tokenizer.labeled_graph = True
-                    # Force-set max_num_nodes to match checkpoint exactly;
-                    # set_num_nodes() only increases and won't shrink a value
-                    # inflated by datamodule.setup()
-                    tokenizer.max_num_nodes = checkpoint_max_num_nodes_labeled
-                    tokenizer.set_num_node_and_edge_types(
-                        num_node_types=NUM_ATOM_TYPES,
-                        num_edge_types=NUM_BOND_TYPES,
+                if is_labeled:
+                    checkpoint_max_num_nodes = (
+                        checkpoint_vocab_size
+                        - idx_offset
+                        - NUM_ATOM_TYPES
+                        - NUM_BOND_TYPES
                     )
-                    log.info(
-                        f"Set tokenizer: max_num_nodes={checkpoint_max_num_nodes_labeled}, labeled_graph=True"
-                    )
+                    if checkpoint_max_num_nodes <= 0:
+                        log.warning(
+                            f"Labeled formula gives non-positive max_num_nodes "
+                            f"({checkpoint_max_num_nodes}), falling back to unlabeled"
+                        )
+                        is_labeled = False
+                        tokenizer.labeled_graph = False
+                        checkpoint_max_num_nodes = checkpoint_vocab_size - idx_offset
+
+                    if is_labeled:
+                        # Force-set max_num_nodes to match checkpoint exactly;
+                        # set_num_nodes() only increases and won't shrink a value
+                        # inflated by datamodule.setup()
+                        tokenizer.max_num_nodes = checkpoint_max_num_nodes
+                        tokenizer.set_num_node_and_edge_types(
+                            num_node_types=NUM_ATOM_TYPES,
+                            num_edge_types=NUM_BOND_TYPES,
+                        )
+                        log.info(
+                            f"Set tokenizer: max_num_nodes={checkpoint_max_num_nodes}, labeled_graph=True"
+                        )
+                    else:
+                        tokenizer.max_num_nodes = checkpoint_max_num_nodes
+                        log.info(
+                            f"Setting tokenizer max_num_nodes to {checkpoint_max_num_nodes}"
+                        )
                 else:
                     # Unlabeled model
                     checkpoint_max_num_nodes = checkpoint_vocab_size - idx_offset
