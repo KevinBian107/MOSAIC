@@ -2,8 +2,10 @@
 # Precompute tokenized cache for MOSES or COCONUT dataset.
 #
 # This script runs parallel chunked preprocessing for hierarchical tokenizers
-# (H-SENT, HDT) with all coarsening variants (SC, HAC, MC). Precomputed cache
-# files speed up training startup by skipping on-the-fly tokenization.
+# (H-SENT, HDT) with SC and HAC coarsening. Precomputed cache files speed up
+# training startup by skipping on-the-fly tokenization.
+# Note: Only SC and HAC benefit from precomputation. Other coarsening methods
+# (MC, MAS) are fast enough to run on-the-fly during training.
 #
 # Usage:
 #   ./bash_scripts/precompute_benchmarks.sh              # Precompute MOSES (default)
@@ -27,7 +29,6 @@ OUTPUT_DIR="$PROJECT_ROOT/data/cache"
 NUM_CHUNKS=8
 DRY_RUN=false
 FORCE=false
-SKIP_SC_HAC=false
 COARSENING_FILTER="all"
 TOKENIZER_FILTER="all"
 
@@ -53,9 +54,6 @@ for arg in "$@"; do
         --all)
             RUN_ALL=true
             ;;
-        --skip-sc-hac)
-            SKIP_SC_HAC=true
-            ;;
         --coarsening=*)
             COARSENING_FILTER="${arg#*=}"
             ;;
@@ -78,8 +76,7 @@ for arg in "$@"; do
             echo "  --force              Re-run even if cache files exist"
             echo "  --coconut            Precompute COCONUT instead of MOSES"
             echo "  --all                Precompute both MOSES and COCONUT"
-            echo "  --skip-sc-hac        Only precompute MC variants"
-            echo "  --coarsening=STRATEGY  Filter coarsening: sc, hac, mc, or all (default: all)"
+            echo "  --coarsening=STRATEGY  Filter coarsening: sc, hac, or all (default: all)"
             echo "  --tokenizer=TYPE     Filter tokenizer: hsent, hdt, or all (default: all)"
             echo "  --chunks=N           Number of parallel chunks (default: 8)"
             echo "  --output-dir=PATH    Cache directory (default: data/cache)"
@@ -88,11 +85,12 @@ for arg in "$@"; do
             echo "  MOSES:   ${MOSES_SAMPLES} training samples (parallel screen sessions)"
             echo "  COCONUT: ${COCONUT_SAMPLES} training samples (runs directly, ~4 min)"
             echo ""
-            echo "Tokenizer/coarsening combos (default: all 6):"
-            echo "  hsent:sc  hsent:hac  hsent:mc"
-            echo "  hdt:sc    hdt:hac    hdt:mc"
+            echo "Tokenizer/coarsening combos (default: all 4):"
+            echo "  hsent:sc  hsent:hac"
+            echo "  hdt:sc    hdt:hac"
             echo ""
-            echo "With --skip-sc-hac: only hsent:mc and hdt:mc"
+            echo "Note: Only SC and HAC need precomputation. Other coarsening"
+            echo "methods (MC, MAS) are fast enough to tokenize on-the-fly."
             echo ""
             echo "After precomputing, use in training with:"
             echo "  data.use_cache=true"
@@ -107,10 +105,8 @@ cd "$PROJECT_ROOT"
 get_coarsening_name() {
     local coarse="$1"
     case $coarse in
-        mc) echo "motif_community" ;;
         sc) echo "spectral" ;;
         hac) echo "hac" ;;
-        mas) echo "motif_aware_spectral" ;;
         *) echo "" ;;
     esac
 }
@@ -134,12 +130,10 @@ build_combos() {
         tokenizers=("$TOKENIZER_FILTER")
     fi
 
-    # Determine which coarsening strategies
+    # Determine which coarsening strategies (only SC and HAC need precomputation)
     local coarsenings=()
-    if [ "$SKIP_SC_HAC" = true ]; then
-        coarsenings=("mc")
-    elif [ "$COARSENING_FILTER" = "all" ]; then
-        coarsenings=("sc" "hac" "mc")
+    if [ "$COARSENING_FILTER" = "all" ]; then
+        coarsenings=("sc" "hac")
     else
         coarsenings=("$COARSENING_FILTER")
     fi

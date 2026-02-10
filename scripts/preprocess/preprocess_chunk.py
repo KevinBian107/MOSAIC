@@ -1,11 +1,10 @@
 #!/usr/bin/env python
 """Preprocess a specific chunk of the dataset for parallel processing.
 
-Supports MOSES and COCONUT datasets with multiple coarsening strategies:
-- spectral: Optimized spectral clustering (25x speedup, default)
+Supports MOSES and COCONUT datasets with coarsening strategies that benefit
+from precomputation:
+- spectral: Optimized spectral clustering (default)
 - hac: Hierarchical agglomerative clustering with connectivity constraint
-- motif_community: Direct motif-based community assignment
-- motif_aware_spectral: Spectral clustering with motif preservation
 
 Usage:
     # MOSES (default)
@@ -81,7 +80,7 @@ def main():
     )
     parser.add_argument(
         "--coarsening-strategy",
-        choices=["spectral", "hac", "motif_community", "motif_aware_spectral"],
+        choices=["spectral", "hac"],
         default="spectral",
         help="Coarsening strategy (default: spectral)",
     )
@@ -210,8 +209,10 @@ def main():
         log.info(f"  n_init: {tokenizer.coarsener.n_init}")
     if hasattr(tokenizer.coarsener, "linkage"):
         log.info(f"  linkage: {tokenizer.coarsener.linkage}")
-    log.info(f"  k_min_factor: {tokenizer.coarsener.k_min_factor}")
-    log.info(f"  k_max_factor: {tokenizer.coarsener.k_max_factor}")
+    if hasattr(tokenizer.coarsener, "k_min_factor"):
+        log.info(f"  k_min_factor: {tokenizer.coarsener.k_min_factor}")
+    if hasattr(tokenizer.coarsener, "k_max_factor"):
+        log.info(f"  k_max_factor: {tokenizer.coarsener.k_max_factor}")
 
     # Tokenize chunk with timing
     log.info(f"Tokenizing chunk [{args.start}:{args.end}]...")

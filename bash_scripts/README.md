@@ -16,7 +16,9 @@ Utility scripts for running batch operations.
 
 ## precompute_benchmarks.sh
 
-Precomputes tokenized cache files for hierarchical tokenizers (H-SENT, HDT) with all coarsening strategies. This is **optional** but speeds up training startup significantly for large datasets.
+Precomputes tokenized cache files for hierarchical tokenizers (H-SENT, HDT) with SC and HAC coarsening. This is **optional** but speeds up training startup significantly for large datasets.
+
+Only SC (spectral clustering) and HAC (hierarchical agglomerative clustering) benefit from precomputation. Other coarsening methods (MC, MAS) are fast enough to tokenize on-the-fly during training.
 
 ### What it does
 
@@ -32,14 +34,11 @@ Precomputes tokenized cache files for hierarchical tokenizers (H-SENT, HDT) with
 # Precompute all combos for MOSES (default, uses screen sessions)
 ./bash_scripts/precompute_benchmarks.sh
 
-# Precompute all combos for COCONUT (runs directly, ~24 min total)
+# Precompute all combos for COCONUT (runs directly, ~16 min total)
 ./bash_scripts/precompute_benchmarks.sh --coconut
 
 # Precompute both MOSES and COCONUT
 ./bash_scripts/precompute_benchmarks.sh --all
-
-# Only MC variants (skip SC and HAC)
-./bash_scripts/precompute_benchmarks.sh --skip-sc-hac
 
 # Single tokenizer + coarsening combo
 ./bash_scripts/precompute_benchmarks.sh --tokenizer=hsent --coarsening=sc
@@ -60,19 +59,18 @@ Precomputes tokenized cache files for hierarchical tokenizers (H-SENT, HDT) with
 |--------|-------------|
 | `--coconut` | Precompute COCONUT instead of MOSES |
 | `--all` | Precompute both MOSES and COCONUT |
-| `--coarsening=STRATEGY` | Filter: `sc`, `hac`, `mc`, or `all` (default: `all`) |
+| `--coarsening=STRATEGY` | Filter: `sc`, `hac`, or `all` (default: `all`) |
 | `--tokenizer=TYPE` | Filter: `hsent`, `hdt`, or `all` (default: `all`) |
 | `--chunks=N` | Number of parallel chunks for MOSES (default: 8) |
 | `--output-dir=PATH` | Cache directory (default: `data/cache`) |
-| `--skip-sc-hac` | Only precompute MC variants |
 | `--dry-run` | Show commands without executing |
 | `--force` | Re-run even if cache files exist |
 
-### Combos precomputed (default: all 6)
+### Combos precomputed (default: all 4)
 
 ```
-hsent:sc   hsent:hac   hsent:mc
-hdt:sc     hdt:hac     hdt:mc
+hsent:sc   hsent:hac
+hdt:sc     hdt:hac
 ```
 
 ### Output

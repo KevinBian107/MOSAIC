@@ -48,12 +48,7 @@ def main():
     parser.add_argument("--dataset", type=str, default="moses", help="Dataset name")
     parser.add_argument(
         "--coarsening-strategy",
-        choices=[
-            "spectral",
-            "hac",
-            "motif_community",
-            "motif_aware_spectral",
-        ],
+        choices=["spectral", "hac"],
         default="spectral",
         help="Coarsening strategy used in chunks (default: spectral)",
     )
