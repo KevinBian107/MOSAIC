@@ -530,11 +530,104 @@ class MolecularDataModule(pl.LightningDataModule):
                 test_mol, transform=self.tokenizer
             )
 
+    def _tokenize_and_cache(
+        self, split: str, smiles_list: list[str]
+    ) -> CachedTokenDataset:
+        """Tokenize molecules and save as cache file.
+
+        One-time cost per split. On subsequent runs the cache is loaded
+        directly by ``_try_load_cache``.
+
+        Args:
+            split: Dataset split name (e.g. "val", "test").
+            smiles_list: SMILES strings to tokenize.
+
+        Returns:
+            CachedTokenDataset loaded from the newly created cache file.
+        """
+        from tqdm import tqdm
+
+        from src.data.molecular import NUM_ATOM_TYPES, NUM_BOND_TYPES
+
+        labeled = (
+            self.tokenizer is not None
+            and hasattr(self.tokenizer, "labeled_graph")
+            and self.tokenizer.labeled_graph
+        )
+
+        log.info(f"Computing and caching {split} data ({len(smiles_list)} samples)...")
+
+        mol_dataset = MolecularDataset(
+            smiles_list,
+            dataset_name=f"{self.dataset_name}_{split}",
+            include_hydrogens=self.include_hydrogens,
+            labeled=labeled,
+        )
+
+        # Configure tokenizer for this dataset
+        self.tokenizer.set_num_nodes(mol_dataset.max_num_nodes)
+        if labeled:
+            self.tokenizer.set_num_node_and_edge_types(
+                num_node_types=NUM_ATOM_TYPES,
+                num_edge_types=NUM_BOND_TYPES,
+            )
+
+        # Tokenize all samples
+        tokens: list[torch.Tensor] = []
+        valid_smiles: list[str] = []
+        for i in tqdm(range(len(mol_dataset)), desc=f"Tokenizing {split}"):
+            graph = mol_dataset[i]
+            token = self.tokenizer(graph)
+            tokens.append(token)
+            valid_smiles.append(mol_dataset.smiles_list[i])
+
+        # Build cache data in the same format as combine_chunks.py
+        tokenizer_config = self._get_tokenizer_config()
+        cache_data = {
+            "tokens": tokens,
+            "smiles": valid_smiles,
+            "vocab_size": self.tokenizer.vocab_size,
+            "max_num_nodes": mol_dataset.max_num_nodes,
+            "tokenizer_type": getattr(self.tokenizer, "tokenizer_type", "unknown"),
+            "tokenizer_config": tokenizer_config,
+            "dataset_name": self.dataset_name,
+            "split": split,
+            "num_samples": len(tokens),
+            "labeled": labeled,
+        }
+
+        # Save cache file
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_filename = get_cache_filename(
+            self.dataset_name,
+            split,
+            getattr(self.tokenizer, "tokenizer_type", "unknown"),
+            len(tokens),
+            tokenizer_config,
+        )
+        cache_path = self.cache_dir / cache_filename
+        torch.save(cache_data, cache_path)
+        log.info(f"Cached {len(tokens)} {split} samples to {cache_path}")
+
+        # Update max_num_nodes
+        self.max_num_nodes = max(self.max_num_nodes, mol_dataset.max_num_nodes)
+
+        return CachedTokenDataset(str(cache_path))
+
     def _setup_coconut(self, stage: Optional[str] = None) -> None:
         """Set up COCONUT dataset for fine-tuning.
 
         Loads complex natural products from COCONUT and creates train/val/test
         splits for transfer learning experiments.
+
+        When ``use_cache=True`` molecules are loaded in file order (no shuffle)
+        and split sequentially so that indices match the precompute scripts::
+
+            train: [0 : num_train]
+            val:   [num_train : num_train + num_val]
+            test:  [num_train + num_val : num_train + num_val + num_test]
+
+        When ``use_cache=False`` the original shuffled splitting is used.
         """
         import numpy as np
 
@@ -563,65 +656,76 @@ class MolecularDataModule(pl.LightningDataModule):
         total_test = self.num_test or 500
         total_needed = total_train + total_val + total_test
 
-        log.info(f"Loading COCONUT molecules from {data_file}")
-        all_smiles = loader.load_smiles(n_samples=total_needed, seed=self.seed)
-        log.info(f"Loaded {len(all_smiles)} molecules passing complexity filters")
-
-        if len(all_smiles) < total_needed:
-            log.warning(
-                f"Only {len(all_smiles)} molecules available, adjusting split sizes"
+        if self.use_cache:
+            # Cache mode: load ALL molecules in file order (no shuffle) so
+            # that sequential slicing matches precompute_chunk.py indices.
+            log.info(
+                f"Loading COCONUT molecules from {data_file} "
+                "(cache mode: sequential ordering)"
             )
-            # Adjust proportionally
-            ratio = len(all_smiles) / total_needed
-            total_train = int(total_train * ratio)
-            total_val = int(total_val * ratio)
-            total_test = len(all_smiles) - total_train - total_val
+            all_smiles = loader.load_smiles()  # no n_samples → no shuffle
+            log.info(f"Loaded {len(all_smiles)} molecules passing complexity filters")
 
-        # Split into train/val/test
-        rng = np.random.RandomState(self.seed)
-        indices = rng.permutation(len(all_smiles))
+            if len(all_smiles) < total_needed:
+                log.warning(
+                    f"Only {len(all_smiles)} molecules available, adjusting split sizes"
+                )
+                ratio = len(all_smiles) / total_needed
+                total_train = int(total_train * ratio)
+                total_val = int(total_val * ratio)
+                total_test = len(all_smiles) - total_train - total_val
 
-        train_smiles = [all_smiles[i] for i in indices[:total_train]]
-        val_smiles = [
-            all_smiles[i] for i in indices[total_train : total_train + total_val]
-        ]
-        test_smiles = [
-            all_smiles[i]
-            for i in indices[
+            # Sequential split matching precompute script ordering
+            train_smiles = all_smiles[:total_train]
+            val_smiles = all_smiles[total_train : total_train + total_val]
+            test_smiles = all_smiles[
                 total_train + total_val : total_train + total_val + total_test
             ]
-        ]
+        else:
+            # Non-cache mode: shuffle for diversity
+            log.info(f"Loading COCONUT molecules from {data_file}")
+            all_smiles = loader.load_smiles(n_samples=total_needed, seed=self.seed)
+            log.info(f"Loaded {len(all_smiles)} molecules passing complexity filters")
+
+            if len(all_smiles) < total_needed:
+                log.warning(
+                    f"Only {len(all_smiles)} molecules available, adjusting split sizes"
+                )
+                ratio = len(all_smiles) / total_needed
+                total_train = int(total_train * ratio)
+                total_val = int(total_val * ratio)
+                total_test = len(all_smiles) - total_train - total_val
+
+            rng = np.random.RandomState(self.seed)
+            indices = rng.permutation(len(all_smiles))
+
+            train_smiles = [all_smiles[i] for i in indices[:total_train]]
+            val_smiles = [
+                all_smiles[i] for i in indices[total_train : total_train + total_val]
+            ]
+            test_smiles = [
+                all_smiles[i]
+                for i in indices[
+                    total_train + total_val : total_train + total_val + total_test
+                ]
+            ]
 
         log.info(
-            f"Split sizes: train={len(train_smiles)}, val={len(val_smiles)}, test={len(test_smiles)}"
+            f"Split sizes: train={len(train_smiles)}, "
+            f"val={len(val_smiles)}, test={len(test_smiles)}"
         )
 
         if stage == "fit" or stage is None:
-            train_mol = MolecularDataset(
-                train_smiles,
-                dataset_name="coconut_train",
-                include_hydrogens=self.include_hydrogens,
-                labeled=labeled,
-            )
-            self.train_smiles = train_mol.smiles_list
-            self.max_num_nodes = max(self.max_num_nodes, train_mol.max_num_nodes)
-            self.train_dataset = MolecularGraphDataset(
-                train_mol, transform=self.tokenizer
-            )
+            # Try to load cached training data
+            cached_train = self._try_load_cache("train", total_train)
 
-            val_mol = MolecularDataset(
-                val_smiles,
-                dataset_name="coconut_val",
-                include_hydrogens=self.include_hydrogens,
-                labeled=labeled,
-            )
-            self.val_smiles = val_mol.smiles_list
-            self.max_num_nodes = max(self.max_num_nodes, val_mol.max_num_nodes)
-            self.val_dataset = MolecularGraphDataset(val_mol, transform=self.tokenizer)
-
-        if stage == "test" or stage is None:
-            # Load train SMILES for metrics even in test mode
-            if stage == "test" and len(self.train_smiles) == 0:
+            if cached_train is not None:
+                log.info("Using cached training data")
+                self.train_dataset = cached_train
+                self.train_smiles = cached_train.smiles_list
+            else:
+                # Fall back to on-the-fly tokenization
+                log.info("Loading training data (on-the-fly tokenization)")
                 train_mol = MolecularDataset(
                     train_smiles,
                     dataset_name="coconut_train",
@@ -630,18 +734,82 @@ class MolecularDataModule(pl.LightningDataModule):
                 )
                 self.train_smiles = train_mol.smiles_list
                 self.max_num_nodes = max(self.max_num_nodes, train_mol.max_num_nodes)
+                self.train_dataset = MolecularGraphDataset(
+                    train_mol, transform=self.tokenizer
+                )
 
-            test_mol = MolecularDataset(
-                test_smiles,
-                dataset_name="coconut_test",
-                include_hydrogens=self.include_hydrogens,
-                labeled=labeled,
-            )
-            self.test_smiles = test_mol.smiles_list
-            self.max_num_nodes = max(self.max_num_nodes, test_mol.max_num_nodes)
-            self.test_dataset = MolecularGraphDataset(
-                test_mol, transform=self.tokenizer
-            )
+            # Try to load cached validation data
+            cached_val = self._try_load_cache("val", total_val)
+
+            if cached_val is not None:
+                log.info("Using cached validation data")
+                self.val_dataset = cached_val
+                self.val_smiles = cached_val.smiles_list
+            elif self.use_cache and self.tokenizer is not None:
+                # Auto-compute and cache val for subsequent runs
+                self.val_dataset = self._tokenize_and_cache("val", val_smiles)
+                self.val_smiles = self.val_dataset.smiles_list
+            else:
+                # Fall back to on-the-fly tokenization
+                log.info("Loading validation data (on-the-fly tokenization)")
+                val_mol = MolecularDataset(
+                    val_smiles,
+                    dataset_name="coconut_val",
+                    include_hydrogens=self.include_hydrogens,
+                    labeled=labeled,
+                )
+                self.val_smiles = val_mol.smiles_list
+                self.max_num_nodes = max(self.max_num_nodes, val_mol.max_num_nodes)
+                self.val_dataset = MolecularGraphDataset(
+                    val_mol, transform=self.tokenizer
+                )
+
+        if stage == "test" or stage is None:
+            # Load train SMILES for metrics even in test mode
+            if stage == "test" and len(self.train_smiles) == 0:
+                cached_train = self._try_load_cache("train", total_train)
+                if cached_train is not None:
+                    self.train_smiles = cached_train.smiles_list
+                    self.max_num_nodes = max(
+                        self.max_num_nodes, cached_train.max_num_nodes
+                    )
+                else:
+                    train_mol = MolecularDataset(
+                        train_smiles,
+                        dataset_name="coconut_train",
+                        include_hydrogens=self.include_hydrogens,
+                        labeled=labeled,
+                    )
+                    self.train_smiles = train_mol.smiles_list
+                    self.max_num_nodes = max(
+                        self.max_num_nodes, train_mol.max_num_nodes
+                    )
+
+            # Try to load cached test data
+            cached_test = self._try_load_cache("test", total_test)
+
+            if cached_test is not None:
+                log.info("Using cached test data")
+                self.test_dataset = cached_test
+                self.test_smiles = cached_test.smiles_list
+            elif self.use_cache and self.tokenizer is not None:
+                # Auto-compute and cache test for subsequent runs
+                self.test_dataset = self._tokenize_and_cache("test", test_smiles)
+                self.test_smiles = self.test_dataset.smiles_list
+            else:
+                # Fall back to on-the-fly tokenization
+                log.info("Loading test data (on-the-fly tokenization)")
+                test_mol = MolecularDataset(
+                    test_smiles,
+                    dataset_name="coconut_test",
+                    include_hydrogens=self.include_hydrogens,
+                    labeled=labeled,
+                )
+                self.test_smiles = test_mol.smiles_list
+                self.max_num_nodes = max(self.max_num_nodes, test_mol.max_num_nodes)
+                self.test_dataset = MolecularGraphDataset(
+                    test_mol, transform=self.tokenizer
+                )
 
     def _collate_fn(self, batch: list) -> torch.Tensor:
         """Collate function for batching tokenized graphs.

@@ -211,6 +211,16 @@ for tok_config in "${TOKENIZERS[@]}"; do
     # Add coarsening for hierarchical tokenizers
     if [ -n "$COARSENING_FULL" ] && supports_coarsening "$TOKENIZER"; then
         CMD="$CMD tokenizer.coarsening_strategy=$COARSENING_FULL"
+
+        # Use precomputed cache for SC and HAC if cache files exist
+        if [ "$COARSENING" = "sc" ] || [ "$COARSENING" = "hac" ]; then
+            CACHE_DIR="$PROJECT_ROOT/data/cache"
+            CACHE_EXISTS=$(find "$CACHE_DIR" -name "${DATASET}_train_${TOKENIZER}_*.pt" -type f 2>/dev/null | head -1)
+            if [ -n "$CACHE_EXISTS" ]; then
+                CMD="$CMD data.use_cache=true"
+                echo "  Using precomputed cache"
+            fi
+        fi
     fi
 
     if [ "$DRY_RUN" = true ]; then

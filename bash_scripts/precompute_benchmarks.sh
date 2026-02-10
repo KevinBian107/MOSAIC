@@ -15,7 +15,7 @@
 #   ./bash_scripts/precompute_benchmarks.sh --help       # Show help
 #
 # Output:
-#   data/cache/{dataset}_train_{tokenizer}_{num_samples}_{hash}.pt
+#   data/cache/{dataset}_{split}_{tokenizer}_{num_samples}_{hash}.pt
 
 set -e  # Exit on error
 
@@ -35,6 +35,7 @@ TOKENIZER_FILTER="all"
 # Dataset sample counts (from configs/experiment/*.yaml)
 MOSES_SAMPLES=1000000
 COCONUT_SAMPLES=5000
+COCONUT_VAL_SAMPLES=500
 
 # Small dataset threshold — below this, run directly (no screen sessions)
 SMALL_DATASET_THRESHOLD=10000
@@ -83,7 +84,7 @@ for arg in "$@"; do
             echo ""
             echo "Datasets:"
             echo "  MOSES:   ${MOSES_SAMPLES} training samples (parallel screen sessions)"
-            echo "  COCONUT: ${COCONUT_SAMPLES} training samples (runs directly, ~4 min)"
+            echo "  COCONUT: ${COCONUT_SAMPLES} train + ${COCONUT_VAL_SAMPLES} val samples (runs directly)"
             echo ""
             echo "Tokenizer/coarsening combos (default: all 4):"
             echo "  hsent:sc  hsent:hac"
@@ -158,6 +159,12 @@ run_dataset() {
         total_samples=$COCONUT_SAMPLES
     fi
 
+    # Determine val samples for this dataset
+    local val_samples=0
+    if [ "$dataset" = "coconut" ]; then
+        val_samples=$COCONUT_VAL_SAMPLES
+    fi
+
     local combos
     read -ra combos <<< "$(build_combos)"
 
@@ -167,7 +174,10 @@ run_dataset() {
     echo ""
     echo "Settings:"
     echo "  Dataset: $dataset"
-    echo "  Total samples: $total_samples"
+    echo "  Train samples: $total_samples"
+    if [ $val_samples -gt 0 ]; then
+        echo "  Val samples: $val_samples"
+    fi
     echo "  Chunks: $NUM_CHUNKS"
     echo "  Output: $OUTPUT_DIR"
     echo "  Force: $FORCE"
@@ -193,30 +203,24 @@ run_dataset() {
         echo "[$combo_count/$total_combos] ${dataset}: ${TOKENIZER} + ${COARSENING_FULL}"
         echo "========================================"
 
-        # Check if combined cache file already exists
-        # Cache files follow: {dataset}_train_{tokenizer}_{num_samples}_{hash}.pt
-        existing_cache=""
-        for f in $(find "$OUTPUT_DIR" -name "${dataset}_train_${TOKENIZER}_${total_samples}_*.pt" -type f 2>/dev/null); do
-            # Verify the coarsening strategy matches by checking the file
-            match=$(python -c "
+        # Helper: check if a combined cache file exists for a given split/size
+        check_cache() {
+            local check_split="$1"
+            local check_size="$2"
+            for f in $(find "$OUTPUT_DIR" -name "${dataset}_${check_split}_${TOKENIZER}_${check_size}_*.pt" -type f 2>/dev/null); do
+                match=$(python -c "
 import torch
 d = torch.load('$f', weights_only=False)
 cfg = d.get('tokenizer_config', {})
 if cfg.get('coarsening_strategy') == '$COARSENING_FULL':
     print('$f')
 " 2>/dev/null || true)
-            if [ -n "$match" ]; then
-                existing_cache="$match"
-                break
-            fi
-        done
-
-        if [ "$FORCE" = false ] && [ -n "$existing_cache" ]; then
-            echo "  SKIP: Cache already exists: $existing_cache"
-            echo "  Use --force to re-run"
-            echo ""
-            continue
-        fi
+                if [ -n "$match" ]; then
+                    echo "$match"
+                    return
+                fi
+            done
+        }
 
         # Build dataset-specific args for preprocess_chunk.py
         local dataset_args="--dataset $dataset"
@@ -227,49 +231,113 @@ if cfg.get('coarsening_strategy') == '$COARSENING_FULL':
 
         if [ $total_samples -le $SMALL_DATASET_THRESHOLD ]; then
             # Small dataset: run directly (no screen sessions needed)
-            echo "  Mode: direct (small dataset, $total_samples samples)"
+            echo "  Mode: direct (small dataset)"
             echo ""
 
-            local output_file="$OUTPUT_DIR/${TOKENIZER}_${COARSENING_FULL}_chunk_0_${total_samples}.pt"
+            # --- Train split ---
+            local existing_train
+            existing_train=$(check_cache "train" "$total_samples")
 
-            local cmd="python scripts/preprocess/preprocess_chunk.py"
-            cmd="$cmd --tokenizer $TOKENIZER"
-            cmd="$cmd $dataset_args"
-            cmd="$cmd --coarsening-strategy $COARSENING_FULL"
-            cmd="$cmd --start 0"
-            cmd="$cmd --end $total_samples"
-            cmd="$cmd --output $output_file"
-
-            if [ "$DRY_RUN" = true ]; then
-                echo "  [DRY RUN] Would execute:"
-                echo "    $cmd"
+            if [ "$FORCE" = false ] && [ -n "$existing_train" ]; then
+                echo "  SKIP train: cache exists: $existing_train"
             else
-                echo "  Running preprocessing..."
-                eval $cmd
-            fi
+                local output_file="$OUTPUT_DIR/${TOKENIZER}_${COARSENING_FULL}_chunk_0_${total_samples}.pt"
 
-            # Auto-combine (single chunk)
-            local combine_cmd="python scripts/preprocess/combine_chunks.py"
-            combine_cmd="$combine_cmd --tokenizer $TOKENIZER"
-            combine_cmd="$combine_cmd --coarsening-strategy $COARSENING_FULL"
-            combine_cmd="$combine_cmd --chunk_dir $OUTPUT_DIR"
-            combine_cmd="$combine_cmd --split train"
-            combine_cmd="$combine_cmd --dataset $dataset"
+                local cmd="python scripts/preprocess/preprocess_chunk.py"
+                cmd="$cmd --tokenizer $TOKENIZER"
+                cmd="$cmd $dataset_args"
+                cmd="$cmd --coarsening-strategy $COARSENING_FULL"
+                cmd="$cmd --start 0"
+                cmd="$cmd --end $total_samples"
+                cmd="$cmd --output $output_file"
 
-            if [ "$DRY_RUN" = true ]; then
-                echo "    $combine_cmd"
-            else
-                echo "  Combining chunks..."
-                eval $combine_cmd
+                if [ "$DRY_RUN" = true ]; then
+                    echo "  [DRY RUN] Train precompute:"
+                    echo "    $cmd"
+                else
+                    echo "  Running train preprocessing..."
+                    eval $cmd
+                fi
 
-                # Clean up chunk file after combining
-                rm -f "$output_file"
-                echo "  Cleaned up chunk file"
+                local combine_cmd="python scripts/preprocess/combine_chunks.py"
+                combine_cmd="$combine_cmd --tokenizer $TOKENIZER"
+                combine_cmd="$combine_cmd --coarsening-strategy $COARSENING_FULL"
+                combine_cmd="$combine_cmd --chunk_dir $OUTPUT_DIR"
+                combine_cmd="$combine_cmd --split train"
+                combine_cmd="$combine_cmd --dataset $dataset"
+
+                if [ "$DRY_RUN" = true ]; then
+                    echo "    $combine_cmd"
+                else
+                    echo "  Combining train chunks..."
+                    eval $combine_cmd
+
+                    rm -f "$output_file"
+                    echo "  Cleaned up train chunk file"
+                fi
             fi
             echo ""
+
+            # --- Val split ---
+            if [ $val_samples -gt 0 ]; then
+                local existing_val
+                existing_val=$(check_cache "val" "$val_samples")
+
+                if [ "$FORCE" = false ] && [ -n "$existing_val" ]; then
+                    echo "  SKIP val: cache exists: $existing_val"
+                else
+                    local val_start=$total_samples
+                    local val_end=$((total_samples + val_samples))
+                    local val_output_file="$OUTPUT_DIR/${TOKENIZER}_${COARSENING_FULL}_chunk_${val_start}_${val_end}.pt"
+
+                    local val_cmd="python scripts/preprocess/preprocess_chunk.py"
+                    val_cmd="$val_cmd --tokenizer $TOKENIZER"
+                    val_cmd="$val_cmd $dataset_args"
+                    val_cmd="$val_cmd --coarsening-strategy $COARSENING_FULL"
+                    val_cmd="$val_cmd --start $val_start"
+                    val_cmd="$val_cmd --end $val_end"
+                    val_cmd="$val_cmd --output $val_output_file"
+
+                    if [ "$DRY_RUN" = true ]; then
+                        echo "  [DRY RUN] Val precompute:"
+                        echo "    $val_cmd"
+                    else
+                        echo "  Running val preprocessing..."
+                        eval $val_cmd
+                    fi
+
+                    local val_combine_cmd="python scripts/preprocess/combine_chunks.py"
+                    val_combine_cmd="$val_combine_cmd --tokenizer $TOKENIZER"
+                    val_combine_cmd="$val_combine_cmd --coarsening-strategy $COARSENING_FULL"
+                    val_combine_cmd="$val_combine_cmd --chunk_dir $OUTPUT_DIR"
+                    val_combine_cmd="$val_combine_cmd --split val"
+                    val_combine_cmd="$val_combine_cmd --dataset $dataset"
+
+                    if [ "$DRY_RUN" = true ]; then
+                        echo "    $val_combine_cmd"
+                    else
+                        echo "  Combining val chunks..."
+                        eval $val_combine_cmd
+
+                        rm -f "$val_output_file"
+                        echo "  Cleaned up val chunk file"
+                    fi
+                fi
+                echo ""
+            fi
 
         else
             # Large dataset: launch parallel screen sessions
+            local existing_train
+            existing_train=$(check_cache "train" "$total_samples")
+
+            if [ "$FORCE" = false ] && [ -n "$existing_train" ]; then
+                echo "  SKIP train: cache exists: $existing_train"
+                echo "  Use --force to re-run"
+                echo ""
+                continue
+            fi
+
             if ! command -v screen &> /dev/null; then
                 echo "  ERROR: 'screen' is not installed (needed for parallel chunks)"
                 echo "  Install with: sudo apt-get install screen"
