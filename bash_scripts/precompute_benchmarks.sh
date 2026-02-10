@@ -201,18 +201,21 @@ run_dataset() {
 
         # Check if combined cache file already exists
         # Cache files follow: {dataset}_train_{tokenizer}_{num_samples}_{hash}.pt
-        existing_cache=$(find "$OUTPUT_DIR" -name "${dataset}_train_${TOKENIZER}_${total_samples}_*.pt" -type f 2>/dev/null | while read -r f; do
+        existing_cache=""
+        for f in $(find "$OUTPUT_DIR" -name "${dataset}_train_${TOKENIZER}_${total_samples}_*.pt" -type f 2>/dev/null); do
             # Verify the coarsening strategy matches by checking the file
-            python -c "
-import torch, sys
+            match=$(python -c "
+import torch
 d = torch.load('$f', weights_only=False)
 cfg = d.get('tokenizer_config', {})
 if cfg.get('coarsening_strategy') == '$COARSENING_FULL':
     print('$f')
-    sys.exit(0)
-sys.exit(1)
-" 2>/dev/null && break
-        done)
+" 2>/dev/null || true)
+            if [ -n "$match" ]; then
+                existing_cache="$match"
+                break
+            fi
+        done
 
         if [ "$FORCE" = false ] && [ -n "$existing_cache" ]; then
             echo "  SKIP: Cache already exists: $existing_cache"
