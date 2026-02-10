@@ -25,7 +25,7 @@ MAX_STEPS=50000
 WANDB_ENABLED=true
 DRY_RUN=false
 FORCE=false
-SKIP_SC=false
+SKIP_SC_HAC=false
 FEW_SHOT=false
 FEW_SHOT_SIZE=200
 
@@ -41,8 +41,8 @@ for arg in "$@"; do
         --force)
             FORCE=true
             ;;
-        --skip-sc)
-            SKIP_SC=true
+        --skip-sc|--skip-sc-hac)
+            SKIP_SC_HAC=true
             ;;
         --steps=*)
             MAX_STEPS="${arg#*=}"
@@ -62,7 +62,8 @@ for arg in "$@"; do
             echo "Options:"
             echo "  --dry-run      Show what would be run without executing"
             echo "  --force        Re-run even if output best.ckpt already exists"
-            echo "  --skip-sc      Skip spectral clustering checkpoints"
+            echo "  --skip-sc-hac  Skip spectral clustering and HAC checkpoints"
+            echo "  --skip-sc      Alias for --skip-sc-hac (deprecated)"
             echo "  --no-wandb     Disable WandB logging"
             echo "  --steps=N      Set max training steps (default: 50000)"
             echo "  --few-shot     Enable few-shot mode with 200 training samples"
@@ -148,6 +149,8 @@ get_coarsening_strategy() {
         echo "motif_community"
     elif [[ "$dir_name" == *"_sc_"* ]] || [[ "$dir_name" =~ _sc[^a-z] ]]; then
         echo "spectral"
+    elif [[ "$dir_name" == *"_hac_"* ]] || [[ "$dir_name" =~ _hac[^a-z] ]]; then
+        echo "hac"
     elif [[ "$dir_name" == *"_mas_"* ]] || [[ "$dir_name" =~ _mas[^a-z] ]]; then
         echo "motif_aware_spectral"
     else
@@ -186,10 +189,10 @@ echo "$CHECKPOINTS" | while read -r ckpt; do
 
     OUTPUT_NAME="coconut_${SHORT_NAME}"
 
-    # Skip spectral clustering checkpoints if requested (only for tokenizers that use coarsening)
-    if [ "$SKIP_SC" = true ] && [ "$COARSENING" = "spectral" ] && supports_coarsening "$TOKENIZER"; then
+    # Skip SC/HAC checkpoints if requested (only for tokenizers that use coarsening)
+    if [ "$SKIP_SC_HAC" = true ] && { [ "$COARSENING" = "spectral" ] || [ "$COARSENING" = "hac" ]; } && supports_coarsening "$TOKENIZER"; then
         echo "========================================"
-        echo "[$CURRENT/$TOTAL] SKIPPING: $SHORT_NAME (spectral clustering, --skip-sc)"
+        echo "[$CURRENT/$TOTAL] SKIPPING: $SHORT_NAME ($COARSENING, --skip-sc-hac)"
         echo ""
         continue
     fi

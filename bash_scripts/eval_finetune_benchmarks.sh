@@ -104,6 +104,8 @@ get_coarsening_strategy() {
         echo "motif_community"
     elif [[ "$dir_name" == *"_sc_"* ]] || [[ "$dir_name" =~ _sc[^a-z] ]] || [[ "$dir_name" == *"_sc" ]]; then
         echo "spectral"
+    elif [[ "$dir_name" == *"_hac_"* ]] || [[ "$dir_name" =~ _hac[^a-z] ]] || [[ "$dir_name" == *"_hac" ]]; then
+        echo "hac"
     elif [[ "$dir_name" == *"_mas_"* ]] || [[ "$dir_name" =~ _mas[^a-z] ]]; then
         echo "motif_aware_spectral"
     else

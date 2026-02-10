@@ -19,9 +19,9 @@ Trains all tokenizer variants from scratch on MOSES or COCONUT dataset.
 
 ### What it does
 
-1. Trains all tokenizer configurations (SENT, H-SENT+MC, HDT+MC, HDTC)
-2. By default uses motif_community (MC) coarsening (precomputed, faster)
-3. Optionally includes spectral clustering variants with `--all-coarsening`
+1. Trains all tokenizer configurations (SENT, H-SENT, HDT, HDTC) with all coarsening variants
+2. By default trains all 8 variants: MC, SC, and HAC coarsening for hierarchical tokenizers
+3. Optionally skips SC and HAC variants with `--skip-sc-hac` (MC only)
 4. Saves checkpoints to `outputs/benchmark/` (MOSES) or `outputs/benchmark_coconut/` (COCONUT)
 
 ### Usage
@@ -33,8 +33,8 @@ Trains all tokenizer variants from scratch on MOSES or COCONUT dataset.
 # Train on COCONUT instead (50K steps)
 ./bash_scripts/train_benchmarks.sh --coconut
 
-# Include spectral clustering variants (slower)
-./bash_scripts/train_benchmarks.sh --all-coarsening
+# Only train MC variants (skip SC and HAC, faster)
+./bash_scripts/train_benchmarks.sh --skip-sc-hac
 
 # Dry run (show commands without executing)
 ./bash_scripts/train_benchmarks.sh --dry-run
@@ -54,15 +54,18 @@ Trains all tokenizer variants from scratch on MOSES or COCONUT dataset.
 
 ### Tokenizers trained
 
-**Default (MC coarsening):**
+**Default (all 8 variants):**
 - `SENT` - Flat sequential tokenizer (baseline)
 - `H-SENT + MC` - Hierarchical SENT with motif community coarsening
+- `H-SENT + SC` - Hierarchical SENT with spectral clustering
+- `H-SENT + HAC` - Hierarchical SENT with hierarchical agglomerative clustering
 - `HDT + MC` - Hierarchical DFS with motif community coarsening
+- `HDT + SC` - Hierarchical DFS with spectral clustering
+- `HDT + HAC` - Hierarchical DFS with hierarchical agglomerative clustering
 - `HDTC` - Compositional (uses functional hierarchy, no coarsening needed)
 
-**With `--all-coarsening`:**
-- `H-SENT + SC` - Hierarchical SENT with spectral clustering
-- `HDT + SC` - Hierarchical DFS with spectral clustering
+**With `--skip-sc-hac` (4 variants):**
+- `SENT`, `H-SENT + MC`, `HDT + MC`, `HDTC`
 
 ### Output
 
@@ -105,8 +108,8 @@ Fine-tunes all pretrained models in `outputs/benchmark/` on the COCONUT complex 
 # Skip already completed checkpoints
 ./bash_scripts/finetune_benchmarks.sh --force  # Re-run even if exists
 
-# Skip spectral clustering models
-./bash_scripts/finetune_benchmarks.sh --skip-sc
+# Skip spectral clustering and HAC models
+./bash_scripts/finetune_benchmarks.sh --skip-sc-hac
 
 # Disable WandB logging
 ./bash_scripts/finetune_benchmarks.sh --no-wandb
@@ -221,12 +224,14 @@ The script automatically extracts tokenizer type and coarsening strategy from di
 **Coarsening strategies** (only for `hsent` and `hdt`):
 - `mc` → `motif_community` - Direct motif-based community assignment
 - `sc` → `spectral` - Standard spectral clustering (default)
+- `hac` → `hac` - Hierarchical agglomerative clustering
 - `mas` → `motif_aware_spectral` - Spectral clustering with motif preservation
 
 **Examples:**
 ```
 moses_hsent_mc_n100000_20260126/   → tokenizer=hsent, coarsening=motif_community
 moses_hdt_sc_n100000_20260126/    → tokenizer=hdt, coarsening=spectral
+moses_hsent_hac_n100000_20260126/ → tokenizer=hsent, coarsening=hac
 moses_hsent_mas_n100000_20260126/ → tokenizer=hsent, coarsening=motif_aware_spectral
 moses_hdtc_n100000_20260126/      → tokenizer=hdtc (no coarsening)
 moses_sent_n100000_20260126/      → tokenizer=sent (no coarsening)
