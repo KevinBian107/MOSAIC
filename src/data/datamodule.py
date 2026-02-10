@@ -246,6 +246,10 @@ class MolecularDataModule(pl.LightningDataModule):
         if hasattr(self.tokenizer, "min_community_size"):
             config["min_community_size"] = self.tokenizer.min_community_size
 
+        # Add coarsening strategy for H-SENT/HDT tokenizers
+        if hasattr(self.tokenizer, "coarsening_strategy"):
+            config["coarsening_strategy"] = self.tokenizer.coarsening_strategy
+
         if hasattr(self.tokenizer, "include_rings"):
             config["include_rings"] = self.tokenizer.include_rings
 
