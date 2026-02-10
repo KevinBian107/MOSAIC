@@ -103,6 +103,42 @@ gdown our trained checkpoint for different models from [this google drive](https
 pytest tests/ -v
 ```
 
+### Batch Benchmark Scripts
+
+The `bash_scripts/` directory provides end-to-end automation for the full benchmark pipeline. Each script supports `--dry-run`, `--force`, and `--help` flags. See [bash_scripts/README.md](bash_scripts/README.md) for detailed options.
+
+```
+0. precompute_benchmarks.sh       -> Precompute tokenized cache (optional, speeds up training)
+1. train_benchmarks.sh            -> Pretrain all tokenizer variants on MOSES (or COCONUT)
+2. eval_benchmarks.sh             -> Evaluate pretrained models (validity, FCD, motif rate, etc.)
+3. finetune_benchmarks.sh         -> Fine-tune on COCONUT (transfer learning)
+4. eval_finetune_benchmarks.sh    -> Evaluate fine-tuned models
+```
+
+```bash
+# Step 0: Precompute tokenized cache (optional, speeds up training)
+./bash_scripts/precompute_benchmarks.sh              # MOSES (1M samples, parallel screen sessions)
+./bash_scripts/precompute_benchmarks.sh --coconut    # COCONUT (5K samples, runs directly)
+./bash_scripts/precompute_benchmarks.sh --all        # Both datasets
+
+# Step 1: Train all tokenizer variants from scratch
+./bash_scripts/train_benchmarks.sh                   # MOSES (default, 500K steps)
+./bash_scripts/train_benchmarks.sh --coconut         # COCONUT (50K steps)
+./bash_scripts/train_benchmarks.sh --skip-sc-hac     # Only MC coarsening variants
+
+# Step 2: Evaluate pretrained models
+./bash_scripts/eval_benchmarks.sh                    # MOSES benchmarks
+./bash_scripts/eval_benchmarks.sh --coconut          # COCONUT benchmarks
+
+# Step 3: Fine-tune pretrained models on COCONUT
+./bash_scripts/finetune_benchmarks.sh                # Full fine-tuning (5K samples)
+./bash_scripts/finetune_benchmarks.sh --few-shot     # Few-shot (200 samples)
+
+# Step 4: Evaluate fine-tuned models
+./bash_scripts/eval_finetune_benchmarks.sh           # Full mode
+./bash_scripts/eval_finetune_benchmarks.sh --few-shot  # Few-shot mode
+```
+
 ## Project Structure
 
 ```
@@ -117,6 +153,7 @@ MOSAIC/
 │   └── realistic_gen/     # Generation quality analysis
 ├── configs/               # Hydra configuration
 ├── scripts/               # Training, evaluation, and visualization scripts
+├── bash_scripts/          # Batch benchmark automation scripts
 ├── tests/                 # Test suite
 └── docs/                  # Documentation
 ```

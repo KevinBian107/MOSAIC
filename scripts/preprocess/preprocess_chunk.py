@@ -1,24 +1,27 @@
 #!/usr/bin/env python
 """Preprocess a specific chunk of the dataset for parallel processing.
 
-Supports multiple coarsening strategies:
+Supports MOSES and COCONUT datasets with multiple coarsening strategies:
 - spectral: Optimized spectral clustering (25x speedup, default)
 - hac: Hierarchical agglomerative clustering with connectivity constraint
+- motif_community: Direct motif-based community assignment
+- motif_aware_spectral: Spectral clustering with motif preservation
 
 Usage:
+    # MOSES (default)
     python scripts/preprocess/preprocess_chunk.py \
         --tokenizer hsent \
         --start 0 \
         --end 100000 \
         --output data/cache/hsent_spectral_chunk_0_100000.pt
 
+    # COCONUT
     python scripts/preprocess/preprocess_chunk.py \
         --tokenizer hsent \
-        --coarsening-strategy hac \
-        --hac-linkage ward \
+        --dataset coconut \
         --start 0 \
-        --end 100000 \
-        --output data/cache/hsent_hac_chunk_0_100000.pt
+        --end 5000 \
+        --output data/cache/hsent_spectral_chunk_0_5000.pt
 """
 
 import argparse
@@ -32,6 +35,7 @@ from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from src.data.coconut_loader import CoconutLoader
 from src.data.molecular import MolecularDataset, NUM_ATOM_TYPES, NUM_BOND_TYPES
 from src.tokenizers import HDTTokenizer, HSENTTokenizer
 
@@ -47,8 +51,37 @@ def main():
     parser.add_argument("--output", type=str, required=True, help="Output file path")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
+        "--dataset",
+        choices=["moses", "coconut"],
+        default="moses",
+        help="Dataset to preprocess (default: moses)",
+    )
+    parser.add_argument(
+        "--data-file",
+        default="data/coconut_complex.smi",
+        help="COCONUT SMILES file path (default: data/coconut_complex.smi)",
+    )
+    parser.add_argument(
+        "--min-atoms",
+        type=int,
+        default=20,
+        help="Min atoms for COCONUT filtering (default: 20)",
+    )
+    parser.add_argument(
+        "--max-atoms",
+        type=int,
+        default=100,
+        help="Max atoms for COCONUT filtering (default: 100)",
+    )
+    parser.add_argument(
+        "--min-rings",
+        type=int,
+        default=3,
+        help="Min rings for COCONUT filtering (default: 3)",
+    )
+    parser.add_argument(
         "--coarsening-strategy",
-        choices=["spectral", "hac"],
+        choices=["spectral", "hac", "motif_community", "motif_aware_spectral"],
         default="spectral",
         help="Coarsening strategy (default: spectral)",
     )
@@ -71,22 +104,58 @@ def main():
     log.info(f"Tokenizer: {args.tokenizer}")
     log.info(f"Output: {args.output}")
 
-    # Load full dataset (MOSES loads everything but we'll only tokenize our chunk)
-    log.info("Loading MOSES dataset...")
-    mol_dataset = MolecularDataset.from_moses(
-        split="train",
-        max_molecules=args.end,  # Load up to our end index
-        include_hydrogens=False,
-        labeled=True,
-        seed=args.seed,
-    )
+    # Load dataset
+    if args.dataset == "moses":
+        log.info("Loading MOSES dataset...")
+        mol_dataset = MolecularDataset.from_moses(
+            split="train",
+            max_molecules=args.end,  # Load up to our end index
+            include_hydrogens=False,
+            labeled=True,
+            seed=args.seed,
+        )
+        # For MOSES, indices into mol_dataset match global indices
+        chunk_offset = args.start
 
-    if len(mol_dataset) < args.end:
-        log.warning(f"Dataset only has {len(mol_dataset)} samples, adjusting end to {len(mol_dataset)}")
-        args.end = len(mol_dataset)
-        chunk_size = args.end - args.start
+        if len(mol_dataset) < args.end:
+            log.warning(
+                f"Dataset only has {len(mol_dataset)} samples, "
+                f"adjusting end to {len(mol_dataset)}"
+            )
+            args.end = len(mol_dataset)
+            chunk_size = args.end - args.start
 
-    log.info(f"✓ Loaded {len(mol_dataset)} molecules")
+    elif args.dataset == "coconut":
+        log.info("Loading COCONUT dataset...")
+        loader = CoconutLoader(
+            min_atoms=args.min_atoms,
+            max_atoms=args.max_atoms,
+            min_rings=args.min_rings,
+            data_file=args.data_file,
+        )
+        all_smiles = loader.load_smiles(seed=args.seed)
+        log.info(f"Loaded {len(all_smiles)} filtered COCONUT SMILES")
+
+        if args.end > len(all_smiles):
+            log.warning(
+                f"Dataset only has {len(all_smiles)} samples, "
+                f"adjusting end to {len(all_smiles)}"
+            )
+            args.end = len(all_smiles)
+            chunk_size = args.end - args.start
+
+        chunk_smiles = all_smiles[args.start : args.end]
+        mol_dataset = MolecularDataset(
+            chunk_smiles,
+            dataset_name="coconut_train",
+            include_hydrogens=False,
+            labeled=True,
+        )
+        # For COCONUT, mol_dataset is already sliced to the chunk
+        # Index 0 in mol_dataset corresponds to global index args.start
+        chunk_offset = 0
+
+    log.info(f"Loaded {len(mol_dataset)} molecules")
 
     # Build tokenizer config for cache hash
     tokenizer_config = {
@@ -134,7 +203,7 @@ def main():
         num_edge_types=NUM_BOND_TYPES,
     )
 
-    log.info(f"Tokenizer config:")
+    log.info("Tokenizer config:")
     log.info(f"  Type: {type(tokenizer).__name__}")
     log.info(f"  Coarsener: {type(tokenizer.coarsener).__name__}")
     if hasattr(tokenizer.coarsener, "n_init"):
@@ -151,12 +220,14 @@ def main():
     global_indices = []
 
     start_time = time.time()
-    for i in tqdm(range(args.start, args.end), desc="Tokenizing"):
-        graph = mol_dataset[i]
+    local_size = args.end - args.start
+    for local_i in tqdm(range(local_size), desc="Tokenizing"):
+        dataset_idx = chunk_offset + local_i
+        graph = mol_dataset[dataset_idx]
         tokens = tokenizer(graph)
         tokenized_data.append(tokens)
-        smiles_list.append(mol_dataset.smiles_list[i])
-        global_indices.append(i)
+        smiles_list.append(mol_dataset.smiles_list[dataset_idx])
+        global_indices.append(args.start + local_i)
 
     elapsed = time.time() - start_time
     speed = chunk_size / elapsed
