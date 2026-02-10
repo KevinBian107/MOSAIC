@@ -43,8 +43,8 @@ generation:
 
 # Animation settings
 animation:
-  fps: 2
-  max_frames: 150
+  fps: 10
+  max_frames: 500
   figsize: [10, 12]
   show_tokens: true
   side_panel_width: 4
