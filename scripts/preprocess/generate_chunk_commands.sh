@@ -5,12 +5,19 @@
 TOKENIZER=$1
 NUM_CHUNKS=${2:-8}
 COARSENING=${3:-spectral}
-TOTAL_SAMPLES=500000
+DATASET=${4:-moses}
+
+if [ "$DATASET" = "coconut" ]; then
+    TOTAL_SAMPLES=5000
+else
+    TOTAL_SAMPLES=1000000
+fi
 
 if [ -z "$TOKENIZER" ]; then
-    echo "Usage: $0 <tokenizer> [num_chunks] [coarsening_strategy]"
+    echo "Usage: $0 <tokenizer> [num_chunks] [coarsening_strategy] [dataset]"
     echo "Example: $0 hsent 8"
     echo "Example: $0 hsent 8 hac"
+    echo "Example: $0 hsent 8 spectral coconut"
     exit 1
 fi
 
@@ -19,6 +26,7 @@ CHUNK_SIZE=$((TOTAL_SAMPLES / NUM_CHUNKS))
 echo "=========================================="
 echo "PARALLEL CHUNKED PREPROCESSING"
 echo "=========================================="
+echo "Dataset: $DATASET"
 echo "Tokenizer: $TOKENIZER"
 echo "Coarsening: $COARSENING"
 echo "Total samples: $TOTAL_SAMPLES"
@@ -42,6 +50,7 @@ for ((i=0; i<NUM_CHUNKS; i++)); do
     echo "# Terminal $((i+1)): Chunk $i"
     echo "python scripts/preprocess/preprocess_chunk.py \\"
     echo "    --tokenizer $TOKENIZER \\"
+    echo "    --dataset $DATASET \\"
     echo "    --coarsening-strategy $COARSENING \\"
     echo "    --start $START \\"
     echo "    --end $END \\"
@@ -58,9 +67,9 @@ echo "    --tokenizer $TOKENIZER \\"
 echo "    --coarsening-strategy $COARSENING \\"
 echo "    --chunk_dir data/cache \\"
 echo "    --split train \\"
-echo "    --dataset moses"
+echo "    --dataset $DATASET"
 echo ""
-echo "This will automatically create: moses_train_${TOKENIZER}_${TOTAL_SAMPLES}_<hash>.pt"
+echo "This will automatically create: ${DATASET}_train_${TOKENIZER}_${TOTAL_SAMPLES}_<hash>.pt"
 echo "(Hash is generated from tokenizer config for cache validation)"
 echo ""
 echo "=========================================="

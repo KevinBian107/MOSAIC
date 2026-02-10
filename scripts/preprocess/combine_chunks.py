@@ -41,18 +41,23 @@ def get_cache_filename(
 def main():
     parser = argparse.ArgumentParser(description="Combine preprocessed chunks")
     parser.add_argument("--tokenizer", choices=["hsent", "hdt"], required=True)
-    parser.add_argument("--chunk_dir", type=str, required=True, help="Directory containing chunks")
+    parser.add_argument(
+        "--chunk_dir", type=str, required=True, help="Directory containing chunks"
+    )
     parser.add_argument("--split", type=str, default="train", help="Dataset split name")
     parser.add_argument("--dataset", type=str, default="moses", help="Dataset name")
     parser.add_argument(
         "--coarsening-strategy",
+        choices=["spectral", "hac"],
         default="spectral",
         help="Coarsening strategy used in chunks (default: spectral)",
     )
     args = parser.parse_args()
 
     # Find all chunk files (try strategy-prefixed pattern first, fall back to legacy)
-    chunk_pattern = f"{args.chunk_dir}/{args.tokenizer}_{args.coarsening_strategy}_chunk_*.pt"
+    chunk_pattern = (
+        f"{args.chunk_dir}/{args.tokenizer}_{args.coarsening_strategy}_chunk_*.pt"
+    )
     chunk_files = sorted(glob(chunk_pattern))
     if not chunk_files:
         # Fall back to legacy pattern without coarsening strategy prefix
@@ -95,15 +100,23 @@ def main():
             # Use maximum vocab_size and max_num_nodes across all chunks
             # (chunks may see different max values depending on molecules)
             if chunk_data["vocab_size"] > vocab_size:
-                log.info(f"  Updating vocab_size: {vocab_size} -> {chunk_data['vocab_size']}")
+                log.info(
+                    f"  Updating vocab_size: {vocab_size} -> {chunk_data['vocab_size']}"
+                )
                 vocab_size = chunk_data["vocab_size"]
             if chunk_data["max_num_nodes"] > max_num_nodes:
-                log.info(f"  Updating max_num_nodes: {max_num_nodes} -> {chunk_data['max_num_nodes']}")
+                log.info(
+                    f"  Updating max_num_nodes: {max_num_nodes} -> {chunk_data['max_num_nodes']}"
+                )
                 max_num_nodes = chunk_data["max_num_nodes"]
 
             # Verify tokenizer settings are consistent
-            assert tokenizer_type == chunk_data["tokenizer_type"], "Tokenizer type mismatch!"
-            assert tokenizer_config == chunk_data["tokenizer_config"], "Tokenizer config mismatch!"
+            assert tokenizer_type == chunk_data["tokenizer_type"], (
+                "Tokenizer type mismatch!"
+            )
+            assert tokenizer_config == chunk_data["tokenizer_config"], (
+                "Tokenizer config mismatch!"
+            )
 
     # Sort by global indices to ensure correct order
     log.info("Sorting by global indices...")
@@ -141,8 +154,8 @@ def main():
     log.info(f"Max nodes: {max_num_nodes}")
     log.info(f"Output file: {output_path}")
     log.info(f"Cache filename: {cache_filename}")
-    log.info(f"\nThis file can be used by the training script with:")
-    log.info(f"  data.use_cache=true")
+    log.info("\nThis file can be used by the training script with:")
+    log.info("  data.use_cache=true")
 
 
 if __name__ == "__main__":

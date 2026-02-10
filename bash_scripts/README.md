@@ -5,11 +5,82 @@ Utility scripts for running batch operations.
 ## Workflow
 
 ```
-1. train_benchmarks.sh     → Pretrain on MOSES (or COCONUT)
-2. eval_benchmarks.sh      → Evaluate pretrained models
-3. finetune_benchmarks.sh  → Fine-tune on COCONUT (transfer learning)
-4. eval_finetune_benchmarks.sh → Evaluate fine-tuned models
+0. precompute_benchmarks.sh       → Precompute tokenized cache (optional, speeds up training)
+1. train_benchmarks.sh            → Pretrain on MOSES (or COCONUT)
+2. eval_benchmarks.sh             → Evaluate pretrained models
+3. finetune_benchmarks.sh         → Fine-tune on COCONUT (transfer learning)
+4. eval_finetune_benchmarks.sh    → Evaluate fine-tuned models
 ```
+
+---
+
+## precompute_benchmarks.sh
+
+Precomputes tokenized cache files for hierarchical tokenizers (H-SENT, HDT) with SC and HAC coarsening. This is **optional** but speeds up training startup significantly for large datasets.
+
+Only SC (spectral clustering) and HAC (hierarchical agglomerative clustering) benefit from precomputation. Other coarsening methods (MC, MAS) are fast enough to tokenize on-the-fly during training.
+
+### What it does
+
+1. For each tokenizer + coarsening combo, runs `preprocess_chunk.py` to tokenize molecules
+2. For MOSES (1M samples): launches parallel screen sessions for chunked processing
+3. For COCONUT (5K samples): runs directly in foreground (takes ~4 minutes per combo)
+4. Combines chunks into a single cache file per combo
+5. Cache files are used by training with `data.use_cache=true`
+
+### Usage
+
+```bash
+# Precompute all combos for MOSES (default, uses screen sessions)
+./bash_scripts/precompute_benchmarks.sh
+
+# Precompute all combos for COCONUT (runs directly, ~16 min total)
+./bash_scripts/precompute_benchmarks.sh --coconut
+
+# Precompute both MOSES and COCONUT
+./bash_scripts/precompute_benchmarks.sh --all
+
+# Single tokenizer + coarsening combo
+./bash_scripts/precompute_benchmarks.sh --tokenizer=hsent --coarsening=sc
+
+# Dry run (show commands without executing)
+./bash_scripts/precompute_benchmarks.sh --dry-run
+
+# Re-run even if cache files exist
+./bash_scripts/precompute_benchmarks.sh --force
+
+# Show help
+./bash_scripts/precompute_benchmarks.sh --help
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--coconut` | Precompute COCONUT instead of MOSES |
+| `--all` | Precompute both MOSES and COCONUT |
+| `--coarsening=STRATEGY` | Filter: `sc`, `hac`, or `all` (default: `all`) |
+| `--tokenizer=TYPE` | Filter: `hsent`, `hdt`, or `all` (default: `all`) |
+| `--chunks=N` | Number of parallel chunks for MOSES (default: 8) |
+| `--output-dir=PATH` | Cache directory (default: `data/cache`) |
+| `--dry-run` | Show commands without executing |
+| `--force` | Re-run even if cache files exist |
+
+### Combos precomputed (default: all 4)
+
+```
+hsent:sc   hsent:hac
+hdt:sc     hdt:hac
+```
+
+### Output
+
+Cache files are saved to `data/cache/` with the naming pattern:
+```
+{dataset}_train_{tokenizer}_{num_samples}_{config_hash}.pt
+```
+
+Use in training: `python scripts/train.py ... data.use_cache=true`
 
 ---
 
