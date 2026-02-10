@@ -44,34 +44,6 @@ The comparison shows:
 | **HDT** | Hierarchical tree with bidirectional parent↔child arrows |
 | **HDTC** | Two-level functional hierarchy with ring/functional group communities |
 
-Compare standard vs motif-aware coarsening:
-
-```bash
-# Compare standard vs motif-aware coarsening
-python scripts/visualization/visualize_motif_aware_sc.py --name cholesterol --alpha 10.0
-python scripts/visualization/visualize_motif_aware_sc.py --demo --output-dir ./figures
-```
-
-![motif](figure/motif.png)
-
-Visualize the $M$ matrix:
-
-```bash
-# Custom SMILES
-python scripts/visualization/visualize_motif_m_matrix.py --smiles "c1ccc2ccccc2c1" --name naphthalene
-
-# Demo with 9 complex molecules
-python scripts/visualization/visualize_motif_m_matrix.py --demo --output-dir ./figures
-
-# List all molecules with motif counts
-python scripts/visualization/visualize_motif_m_matrix.py --list
-
-# Normalize M by motif size (prevents large motifs from dominating)
-python scripts/visualization/visualize_motif_m_matrix.py --name cholesterol --normalize
-```
-
-![m_matrix](figure/m_matrix.png)
-
 ### Generation Demo
 
 Visualize step-by-step molecule generation with animated GIFs. Uses Hydra
