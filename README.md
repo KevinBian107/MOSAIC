@@ -13,7 +13,7 @@ For generating graphs using tokens with hierarchical insights, we need 3 things:
 3. **Flatten the generated H-graph**: Reconstruct the flat graph from tokens via bipartite edge union for H-SENT, or union of back edges for HDT.
 
 ![HDT](/docs/figure/demo.gif)
-> H-Graph model generation of novel molecules in the coconut dataset.
+> H-Graph model generation of novel molecules in the coconut dataset. Run `python scripts/visualization/generation_demo.py`
 
 ## Quick Start
 
@@ -25,7 +25,7 @@ conda env create -f environment.yaml
 conda activate mosaic
 ```
 
-### Training
+### Training from Scratch
 
 ```bash
 # Train on MOSES dataset (default) with HDTC tokenizer
@@ -37,8 +37,8 @@ python scripts/train.py experiment=moses tokenizer=hsent   # Hierarchical SENT
 python scripts/train.py experiment=moses tokenizer=hdt     # Hierarchical DFS
 python scripts/train.py experiment=moses tokenizer=hdtc    # Compositional (default)
 
-# Train on QM9 dataset
-python scripts/train.py experiment=qm9
+# Train on moses dataset
+python scripts/train.py experiment=moses
 
 # Train on COCONUT dataset (complex natural products)
 python scripts/train.py experiment=coconut
@@ -49,39 +49,22 @@ python scripts/train.py \
     model.model_name=gpt2-s \
     trainer.max_steps=100000 \
     tokenizer=hsent
-```
 
-### Evaluation
-
-```bash
+# Run different test on unconditional generations
 python scripts/test.py
-```
-
-### Realistic Generation
-
-Generate molecules and analyze how well they match the structural patterns of training data. This evaluates whether the model learns realistic chemical preferences.
-
-```bash
-# Generate and analyze with HDT
 python scripts/realistic_gen.py
 
-# Generate and analyze with SENT
-python scripts/realistic_gen.py \
-    model.checkpoint_path=outputs/train/moses_sent_n1000000_20260123-140906/best.ckpt \
-    tokenizer=sent
-
-# Custom number of samples
-python scripts/realistic_gen.py \
-    generation.num_samples=500
+# Create output table
+python scripts/compare_results.py
 ```
+
 
 ### Transfer Learning / Fine-tuning
 
 Fine-tune a pretrained model on COCONUT complex natural products to evaluate transfer learning capabilities.
 
 ```bash
-# First, prepare the complex molecule dataset (one-time setup)
-# Downloads and filters COCONUT natural products (~191MB download)
+# First, prepare the complex molecule dataset (one-time setup, ~191MB download)
 python scripts/prepare_coconut_data.py
 
 # Custom filtering thresholds
@@ -110,21 +93,9 @@ python scripts/eval_finetune.py \
 python scripts/compare_finetune_results.py
 ```
 
-### Table Comparison
-
-```bash
-python scripts/compare_results.py
-```
-
 ### Trained Checkpoint
 gdown our trained checkpoint for different models from [this google drive](https://drive.google.com/drive/folders/1aMo5cQvexJ11GyIXACQys_UlA1CxKv7e?usp=drive_link).
 
-### Demo
-
-```bash
-# Generation Demo
-python scripts/visualization/generation_demo.py
-```
 
 ### Running Tests
 
