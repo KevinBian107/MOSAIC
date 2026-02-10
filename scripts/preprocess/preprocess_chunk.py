@@ -1,18 +1,24 @@
 #!/usr/bin/env python
 """Preprocess a specific chunk of the dataset for parallel processing.
 
-Uses optimized spectral coarsening for 25x speedup with equivalent quality:
-- n_init=10 (vs 100)
-- Vectorized modularity computation
-- Discretize assignment method
-- Statistically equivalent modularity scores (p=0.11)
+Supports multiple coarsening strategies:
+- spectral: Optimized spectral clustering (25x speedup, default)
+- hac: Hierarchical agglomerative clustering with connectivity constraint
 
 Usage:
     python scripts/preprocess/preprocess_chunk.py \
         --tokenizer hsent \
         --start 0 \
         --end 100000 \
-        --output data/cache/hsent_chunk_0_100000.pt
+        --output data/cache/hsent_spectral_chunk_0_100000.pt
+
+    python scripts/preprocess/preprocess_chunk.py \
+        --tokenizer hsent \
+        --coarsening-strategy hac \
+        --hac-linkage ward \
+        --start 0 \
+        --end 100000 \
+        --output data/cache/hsent_hac_chunk_0_100000.pt
 """
 
 import argparse
@@ -40,6 +46,24 @@ def main():
     parser.add_argument("--end", type=int, required=True, help="End index (exclusive)")
     parser.add_argument("--output", type=str, required=True, help="Output file path")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--coarsening-strategy",
+        choices=["spectral", "hac"],
+        default="spectral",
+        help="Coarsening strategy (default: spectral)",
+    )
+    parser.add_argument(
+        "--hac-linkage",
+        default="ward",
+        choices=["ward", "complete", "average", "single"],
+        help="HAC linkage criterion (default: ward)",
+    )
+    parser.add_argument(
+        "--hac-feature-type",
+        default="adjacency",
+        choices=["adjacency"],
+        help="HAC node feature type (default: adjacency)",
+    )
     args = parser.parse_args()
 
     chunk_size = args.end - args.start
@@ -72,38 +96,37 @@ def main():
         "labeled_graph": True,
         "node_order": "BFS",
         "min_community_size": 4,
-        "coarsening_strategy": "spectral",  # Optimized spectral with 25x speedup
+        "coarsening_strategy": args.coarsening_strategy,
         "motif_aware": False,
         "motif_alpha": 1.0,
         "normalize_by_motif_size": False,
         "undirected": True,
     }
+    # Include HAC-specific params in config hash when using HAC
+    if args.coarsening_strategy == "hac":
+        tokenizer_config["hac_linkage"] = args.hac_linkage
+        tokenizer_config["hac_feature_type"] = args.hac_feature_type
 
-    # Initialize tokenizer (using optimized spectral coarsening)
-    # Optimizations: n_init=10, vectorized modularity, discretize
-    # Provides 25x speedup with equivalent quality
+    # Build common tokenizer kwargs
+    tokenizer_kwargs = dict(
+        max_length=-1,
+        truncation_length=2048,
+        node_order="BFS",
+        min_community_size=4,
+        coarsening_strategy=args.coarsening_strategy,
+        motif_aware=False,
+        labeled_graph=True,
+        seed=args.seed,
+    )
+    if args.coarsening_strategy == "hac":
+        tokenizer_kwargs["hac_linkage"] = args.hac_linkage
+        tokenizer_kwargs["hac_feature_type"] = args.hac_feature_type
+
+    # Initialize tokenizer
     if args.tokenizer == "hsent":
-        tokenizer = HSENTTokenizer(
-            max_length=-1,
-            truncation_length=2048,
-            node_order="BFS",
-            min_community_size=4,
-            coarsening_strategy="spectral",  # Optimized spectral (25x faster)
-            motif_aware=False,
-            labeled_graph=True,
-            seed=args.seed,
-        )
+        tokenizer = HSENTTokenizer(**tokenizer_kwargs)
     else:  # hdt
-        tokenizer = HDTTokenizer(
-            max_length=-1,
-            truncation_length=2048,
-            node_order="BFS",
-            min_community_size=4,
-            coarsening_strategy="spectral",  # Optimized spectral (25x faster)
-            motif_aware=False,
-            labeled_graph=True,
-            seed=args.seed,
-        )
+        tokenizer = HDTTokenizer(**tokenizer_kwargs)
 
     tokenizer.set_num_nodes(mol_dataset.max_num_nodes)
     tokenizer.set_num_node_and_edge_types(
@@ -114,7 +137,10 @@ def main():
     log.info(f"Tokenizer config:")
     log.info(f"  Type: {type(tokenizer).__name__}")
     log.info(f"  Coarsener: {type(tokenizer.coarsener).__name__}")
-    log.info(f"  n_init: {tokenizer.coarsener.n_init}")
+    if hasattr(tokenizer.coarsener, "n_init"):
+        log.info(f"  n_init: {tokenizer.coarsener.n_init}")
+    if hasattr(tokenizer.coarsener, "linkage"):
+        log.info(f"  linkage: {tokenizer.coarsener.linkage}")
     log.info(f"  k_min_factor: {tokenizer.coarsener.k_min_factor}")
     log.info(f"  k_max_factor: {tokenizer.coarsener.k_max_factor}")
 

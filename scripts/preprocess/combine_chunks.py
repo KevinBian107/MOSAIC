@@ -44,10 +44,19 @@ def main():
     parser.add_argument("--chunk_dir", type=str, required=True, help="Directory containing chunks")
     parser.add_argument("--split", type=str, default="train", help="Dataset split name")
     parser.add_argument("--dataset", type=str, default="moses", help="Dataset name")
+    parser.add_argument(
+        "--coarsening-strategy",
+        default="spectral",
+        help="Coarsening strategy used in chunks (default: spectral)",
+    )
     args = parser.parse_args()
 
-    # Find all chunk files
-    chunk_pattern = f"{args.chunk_dir}/{args.tokenizer}_chunk_*.pt"
+    # Find all chunk files (try strategy-prefixed pattern first, fall back to legacy)
+    chunk_pattern = f"{args.chunk_dir}/{args.tokenizer}_{args.coarsening_strategy}_chunk_*.pt"
+    chunk_files = sorted(glob(chunk_pattern))
+    if not chunk_files:
+        # Fall back to legacy pattern without coarsening strategy prefix
+        chunk_pattern = f"{args.chunk_dir}/{args.tokenizer}_chunk_*.pt"
     chunk_files = sorted(glob(chunk_pattern))
 
     if not chunk_files:
