@@ -74,18 +74,42 @@ Where:
 
 #### 2. Hierarchical Agglomerative Clustering (HAC)
 
-Bottom-up clustering that iteratively merges similar nodes/clusters:
+Bottom-up clustering with adjacency connectivity constraint. Uses sklearn's `AgglomerativeClustering` to ensure only adjacent nodes are merged.
 
-1. Initialize each node as its own cluster
-2. Compute pairwise distances/similarities between clusters
-3. Merge the two most similar clusters
-4. Repeat until reaching desired number of communities or distance threshold
+**Algorithm**:
+
+1. Build adjacency matrix **A** and use rows as node features (neighborhood pattern)
+2. Create connectivity constraint from **A** (only adjacent nodes can merge)
+3. Search for optimal k in range [k_min, k_max] (same formula as SC)
+4. For each k, run `AgglomerativeClustering(n_clusters=k, connectivity=A)` with the chosen linkage
+5. Select partition with maximum modularity Q
 
 **Linkage criteria**:
-- Single linkage: min distance between cluster members
-- Complete linkage: max distance between cluster members
-- Average linkage: mean distance between cluster members
-- Ward's method: minimize within-cluster variance
+
+| Linkage | Criterion | Best for |
+|---------|-----------|----------|
+| Ward (default) | Minimize within-cluster variance | Balanced, compact clusters |
+| Complete | Maximum distance between cluster members | Tight, spherical clusters |
+| Average | Mean distance between cluster members | General purpose |
+| Single | Minimum distance between cluster members | Elongated clusters |
+
+**Configuration**:
+
+```yaml
+# configs/tokenizer/hsent.yaml or hdt.yaml
+coarsening_strategy: hac
+hac_linkage: ward           # ward, complete, average, single
+hac_feature_type: adjacency # adjacency matrix rows as features
+```
+
+**Comparison with SC**:
+
+| Aspect | Spectral Clustering | HAC |
+|--------|-------------------|-----|
+| Approach | Top-down (eigendecomposition) | Bottom-up (merge) |
+| Connectivity | Implicit via affinity | Explicit constraint |
+| Determinism | Depends on init | Deterministic |
+| Speed | Slower (eigensolve) | Faster for small graphs |
 
 #### 3. Motif-Based Clustering
 

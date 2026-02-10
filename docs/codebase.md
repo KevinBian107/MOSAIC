@@ -144,6 +144,10 @@ MOSAIC/
   - Modularity-optimized spectral clustering
   - Optional motif-aware clustering with affinity augmentation
   - Configurable `min_community_size` for recursion depth
+- `HACCoarsening`: Agglomerative clustering with connectivity constraint (hac.py)
+  - Bottom-up merging with adjacency features and connectivity constraint
+  - Supports ward, complete, average, single linkage criteria
+  - Same recursive hierarchy building as SpectralCoarsening
 - Node ordering strategies (ordering.py)
   - BFS, DFS: Standard traversals from highest-degree node
   - BFSAC, BFSDC: BFS with ascending/descending cutset weight
