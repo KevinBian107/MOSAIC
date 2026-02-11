@@ -153,6 +153,7 @@ class MolecularDataModule(pl.LightningDataModule):
         tokenizer: Optional[Any] = None,
         batch_size: int = 32,
         num_workers: int = 0,
+        test_num_workers: Optional[int] = None,
         num_train: Optional[int] = None,
         num_val: Optional[int] = None,
         num_test: Optional[int] = None,
@@ -172,7 +173,8 @@ class MolecularDataModule(pl.LightningDataModule):
             dataset_name: Name of dataset to use ('moses', 'qm9', or 'coconut').
             tokenizer: Graph tokenizer instance.
             batch_size: Batch size for dataloaders.
-            num_workers: Number of dataloader workers.
+            num_workers: Number of dataloader workers for train/val.
+            test_num_workers: Number of dataloader workers for test (defaults to 0).
             num_train: Number of training molecules (None for all).
             num_val: Number of validation molecules (None for all).
             num_test: Number of test molecules (None for all).
@@ -192,6 +194,7 @@ class MolecularDataModule(pl.LightningDataModule):
         self.tokenizer = tokenizer
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.test_num_workers = test_num_workers if test_num_workers is not None else 0
         self.num_train = num_train
         self.num_val = num_val
         self.num_test = num_test
@@ -856,6 +859,6 @@ class MolecularDataModule(pl.LightningDataModule):
             self.test_dataset,
             batch_size=self.batch_size,
             shuffle=False,
-            num_workers=self.num_workers,
+            num_workers=self.test_num_workers,
             collate_fn=self._collate_fn if self.tokenizer else None,
         )

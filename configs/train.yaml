@@ -23,7 +23,8 @@ model:
 # NOTE: dataset_name, data_file, num_train, num_val, num_test come from experiment config
 data:
   batch_size: 32  # Per-GPU batch size. Effective batch = batch_size × devices
-  num_workers: 8  # Must be 0 for SENT tokenizer (Cython multiprocessing issue)
+  num_workers: 8  # Train/val dataloader workers
+  test_num_workers: 0  # Test dataloader workers (0 to avoid deadlocks during generation)
   include_hydrogens: false
   data_root: data
   use_cache: true  # Set to true to use preprocessed cached data
