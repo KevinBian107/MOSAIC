@@ -792,8 +792,10 @@ class MolecularDataModule(pl.LightningDataModule):
                 log.info("Using cached test data")
                 self.test_dataset = cached_test
                 self.test_smiles = cached_test.smiles_list
-            elif self.use_cache and self.tokenizer is not None:
-                # Auto-compute and cache test for subsequent runs
+            elif self.use_cache and self.tokenizer is not None and stage == "test":
+                # Only auto-cache test when explicitly in test stage to avoid
+                # OOM during training (eager tokenization of 500 SC/HAC samples
+                # is expensive and test data isn't needed during fit).
                 self.test_dataset = self._tokenize_and_cache("test", test_smiles)
                 self.test_smiles = self.test_dataset.smiles_list
             else:
