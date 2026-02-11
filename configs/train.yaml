@@ -14,15 +14,15 @@ resume: false
 # Model configuration
 model:
   model_name: gpt2-xs
-  learning_rate: 6e-4
+  learning_rate: 6e-4  # Baseline for batch_size=32. Scale with sqrt or linear when increasing batch
   weight_decay: 0.1
-  warmup_steps: 1000
+  warmup_steps: 1000   # Scale proportionally with batch size (e.g., 2000 for batch=128)
   max_steps: ${trainer.max_steps}
 
 # Data configuration
 # NOTE: dataset_name, data_file, num_train, num_val, num_test come from experiment config
 data:
-  batch_size: 32
+  batch_size: 32  # Per-GPU batch size. Effective batch = batch_size × devices
   num_workers: 8  # Must be 0 for SENT tokenizer (Cython multiprocessing issue)
   include_hydrogens: false
   data_root: data
@@ -31,12 +31,17 @@ data:
 
 # Training configuration
 trainer:
-  max_steps: 250000
+  max_steps: 250000  # Reduce proportionally with batch size (e.g., 62500 for batch=128)
   val_check_interval: 1000
   precision: 32
   gradient_clip_val: 1.0
   accelerator: auto
-  devices: 1
+  devices: 1  # Set to 2+ for multi-GPU DDP training
+  strategy: auto  # Use 'ddp' for multi-GPU. DDP automatically enabled when devices > 1
+  # For DDP training examples:
+  # - 2 GPUs × batch=32:  effective_batch=64,  LR=8.5e-4,  warmup=1414, steps=125K
+  # - 2 GPUs × batch=64:  effective_batch=128, LR=1.2e-3,  warmup=2000, steps=62.5K
+  # - 4 GPUs × batch=32:  effective_batch=128, LR=1.2e-3,  warmup=2000, steps=62.5K
 
 # Sampling configuration for evaluation
 sampling:
