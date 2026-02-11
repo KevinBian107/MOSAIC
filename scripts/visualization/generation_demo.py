@@ -47,7 +47,9 @@ from src.tokenizers import (  # noqa: E402
 )
 from src.tokenizers.motif.functional_detection import (  # noqa: E402
     FunctionalGroupDetector,
+    FunctionalGroupInstance,
 )
+from src.tokenizers.motif.functional_patterns import PATTERN_PRIORITY  # noqa: E402
 
 # Color scheme for visualization
 ATOM_COLORS = {
@@ -215,10 +217,14 @@ class BaseGenerationVisualizer(ABC):
 
     def _detect_motifs_with_edges(
         self,
-        smiles: str,
+        graph: Data,
         motif_cfg: Optional[DictConfig] = None,
     ) -> list[dict]:
-        """Detect motifs from SMILES using FunctionalGroupDetector.
+        """Detect motifs directly from a PyG graph.
+
+        Builds an RDKit mol from the graph (preserving atom index mapping)
+        and runs SMARTS matching on it, so motif atom indices correspond
+        exactly to graph node indices.
 
         Returns list of dicts with:
             - name: motif name
@@ -237,18 +243,58 @@ class BaseGenerationVisualizer(ABC):
                 return []
             include_rings = motif_cfg.get("include_rings", True)
 
-        detector = FunctionalGroupDetector(include_rings=include_rings)
-        groups = detector.detect(smiles)
-
-        if not groups:
-            return []
-
-        mol = Chem.MolFromSmiles(smiles)
+        mol = self._graph_to_mol(graph)
         if mol is None:
             return []
 
+        # Run SMARTS matching directly on the graph-built mol so that
+        # atom indices are in graph-node space.
+        detector = FunctionalGroupDetector(include_rings=include_rings)
+        groups: list[FunctionalGroupInstance] = []
+
+        if include_rings:
+            for name, smarts in detector.ring_patterns.items():
+                try:
+                    pattern = Chem.MolFromSmarts(smarts)
+                    if pattern is None:
+                        continue
+                    for match in mol.GetSubstructMatches(pattern):
+                        groups.append(
+                            FunctionalGroupInstance(
+                                name=name,
+                                pattern_type="ring",
+                                atom_indices=frozenset(match),
+                                priority=PATTERN_PRIORITY["ring"],
+                                pattern=smarts,
+                            )
+                        )
+                except Exception:
+                    continue
+
+        for name, (smarts, pattern_type) in detector.functional_patterns.items():
+            try:
+                pattern = Chem.MolFromSmarts(smarts)
+                if pattern is None:
+                    continue
+                for match in mol.GetSubstructMatches(pattern):
+                    groups.append(
+                        FunctionalGroupInstance(
+                            name=name,
+                            pattern_type=pattern_type,
+                            atom_indices=frozenset(match),
+                            priority=PATTERN_PRIORITY.get(pattern_type, 0),
+                            pattern=smarts,
+                        )
+                    )
+            except Exception:
+                continue
+
+        resolved = detector._resolve_overlaps(groups)
+        if not resolved:
+            return []
+
         result = []
-        for group in groups:
+        for group in resolved:
             atoms = group.atom_indices
             edges = set()
             for bond in mol.GetBonds():
@@ -296,11 +342,8 @@ class BaseGenerationVisualizer(ABC):
         final_graph = graphs_sampled[-1]
         positions = self._compute_layout(final_graph)
 
-        # Detect motifs from final SMILES
-        final_smiles = graph_to_smiles(final_graph)
-        detected_motifs = []
-        if final_smiles:
-            detected_motifs = self._detect_motifs_with_edges(final_smiles, motif_cfg)
+        # Detect motifs from final graph (indices match graph nodes directly)
+        detected_motifs = self._detect_motifs_with_edges(final_graph, motif_cfg)
 
         # Pre-compute token states for each frame.
         # tokens_so_far includes SOS (index 0) + generated tokens up through
@@ -433,13 +476,20 @@ class BaseGenerationVisualizer(ABC):
 
         return pos
 
-    def _compute_rdkit_layout(
-        self, graph: Data
-    ) -> Optional[dict[int, tuple[float, float]]]:
-        """Compute 2D molecular layout using RDKit."""
+    def _graph_to_mol(self, graph: Data) -> Optional[object]:
+        """Build an RDKit mol from a PyG graph with atom indices preserved.
+
+        Node i in the graph becomes atom i in the mol, so substructure
+        match indices can be used directly as graph node indices.
+
+        Args:
+            graph: PyG Data object with node/edge features.
+
+        Returns:
+            RDKit Mol or None if construction fails.
+        """
         try:
             from rdkit import Chem
-            from rdkit.Chem import AllChem
         except ImportError:
             return None
 
@@ -489,7 +539,26 @@ class BaseGenerationVisualizer(ABC):
 
                     mol.AddBond(i, j, bond_type)
 
-            mol = mol.GetMol()
+            return mol.GetMol()
+
+        except Exception:
+            return None
+
+    def _compute_rdkit_layout(
+        self, graph: Data
+    ) -> Optional[dict[int, tuple[float, float]]]:
+        """Compute 2D molecular layout using RDKit."""
+        try:
+            from rdkit.Chem import AllChem
+        except ImportError:
+            return None
+
+        mol = self._graph_to_mol(graph)
+        if mol is None:
+            return None
+
+        try:
+            num_nodes = graph.num_nodes
 
             AllChem.Compute2DCoords(mol)
             conformer = mol.GetConformer()
@@ -724,6 +793,32 @@ class BaseGenerationVisualizer(ABC):
                         ax.text(
                             center[0],
                             center[1] + 0.25,
+                            motif["name"],
+                            ha="center",
+                            va="center",
+                            fontsize=7,
+                            fontstyle="italic",
+                            color=shade_color,
+                            zorder=5,
+                        )
+
+                elif len(motif_positions) == 1:
+                    from matplotlib.patches import Circle
+
+                    cx, cy = motif_positions[0]
+                    circle = Circle(
+                        (cx, cy),
+                        radius=0.35,
+                        color=shade_color,
+                        alpha=MOTIF_SHADING_ALPHA,
+                        zorder=0,
+                    )
+                    ax.add_patch(circle)
+
+                    if show_motif_labels:
+                        ax.text(
+                            cx,
+                            cy + 0.45,
                             motif["name"],
                             ha="center",
                             va="center",
