@@ -1,5 +1,5 @@
 #!/bin/bash
-# Quick test script to validate DDP setup before full training
+# DDP Training Performance Test - NO generation/testing, pure training throughput
 #
 # Usage:
 #   bash configs/test_ddp.sh
@@ -7,103 +7,101 @@
 set -e
 
 echo "=========================================="
-echo "DDP Setup Validation Tests"
+echo "DDP Training Performance Test"
 echo "=========================================="
 echo ""
 
-# Test 1: Single GPU baseline (should always work)
-echo "[Test 1/4] Single GPU baseline (batch=32)..."
-python scripts/train.py \
-  trainer.devices=1 \
-  data.batch_size=32 \
-  data.num_train=1000 \
-  trainer.max_steps=50 \
-  trainer.val_check_interval=25 \
-  wandb.enabled=false \
-  logs.run_name=test_single_gpu
-
-echo "✓ Single GPU test passed"
-echo ""
-
-# Test 2: Single GPU large batch
-echo "[Test 2/4] Single GPU large batch (batch=128)..."
-python scripts/train.py \
-  trainer.devices=1 \
-  data.batch_size=128 \
-  model.learning_rate=1.2e-3 \
-  model.warmup_steps=100 \
-  data.num_train=1000 \
-  trainer.max_steps=50 \
-  trainer.val_check_interval=25 \
-  wandb.enabled=false \
-  logs.run_name=test_large_batch
-
-echo "✓ Large batch test passed"
-echo ""
-
-# Test 3: DDP 2 GPU (only if 2+ GPUs available)
-NUM_GPUS=$(nvidia-smi --list-gpus 2>/dev/null | wc -l || echo 1)
-
-if [ "$NUM_GPUS" -ge 2 ]; then
-    echo "[Test 3/4] DDP 2 GPUs (batch=32 per GPU)..."
-    python scripts/train.py \
-      trainer.devices=2 \
-      trainer.strategy=ddp \
-      data.batch_size=32 \
-      model.learning_rate=8.5e-4 \
-      model.warmup_steps=100 \
-      data.num_train=1000 \
-      trainer.max_steps=50 \
-      trainer.val_check_interval=25 \
-      wandb.enabled=false \
-      logs.run_name=test_ddp_2gpu
-
-    echo "✓ DDP 2 GPU test passed"
-    echo ""
-else
-    echo "[Test 3/4] Skipping DDP test (only $NUM_GPUS GPU available)"
-    echo ""
-fi
-
-# Test 4: Throughput benchmark
-echo "[Test 4/4] Throughput benchmark..."
-echo "Measuring samples/sec for different batch sizes..."
+# Test 1: Throughput benchmark - find optimal batch size
+echo "[1/4] Throughput benchmark (finding optimal batch size)..."
+echo "Testing different batch sizes on single GPU..."
 echo ""
 
 for BS in 32 64 128 256; do
     echo "  Testing batch_size=$BS..."
-    START=$(date +%s.%N)
 
     python scripts/train.py \
       trainer.devices=1 \
       data.batch_size=$BS \
-      data.num_train=1000 \
+      data.num_train=2000 \
       trainer.max_steps=100 \
+      trainer.val_check_interval=1000 \
       wandb.enabled=false \
-      logs.run_name=test_throughput_bs${BS} \
-      2>&1 | grep -E "(it/s|s/it)" | head -1 || true
+      wandb.eval_every_n_val=0 \
+      logs.run_name=throughput_bs${BS} \
+      2>&1 | grep -E "it/s" | tail -1 || echo "    (check output for it/s)"
 
-    END=$(date +%s.%N)
-    ELAPSED=$(echo "$END - $START" | bc)
-    SAMPLES=$((BS * 100))
-    THROUGHPUT=$(echo "scale=2; $SAMPLES / $ELAPSED" | bc)
-
-    echo "    Batch $BS: ~$THROUGHPUT samples/sec"
+    echo ""
 done
 
+echo "Compare it/s above - when it plateaus, you've found max throughput batch size"
 echo ""
-echo "=========================================="
-echo "All tests completed successfully!"
-echo "=========================================="
+
+# Test 2: Single GPU baseline
+echo "[2/4] Single GPU baseline (batch=32)..."
+time python scripts/train.py \
+  trainer.devices=1 \
+  data.batch_size=32 \
+  data.num_train=5000 \
+  trainer.max_steps=500 \
+  trainer.val_check_interval=100 \
+  wandb.enabled=false \
+  wandb.eval_every_n_val=0 \
+  logs.run_name=perf_1gpu_bs32
+
 echo ""
-echo "Summary:"
-echo "  ✓ Single GPU training works"
-echo "  ✓ Large batch size works"
+
+# Test 3: Single GPU large batch
+echo "[3/4] Single GPU large batch (batch=128)..."
+time python scripts/train.py \
+  trainer.devices=1 \
+  data.batch_size=128 \
+  model.learning_rate=1.2e-3 \
+  data.num_train=5000 \
+  trainer.max_steps=125 \
+  trainer.val_check_interval=50 \
+  wandb.enabled=false \
+  wandb.eval_every_n_val=0 \
+  logs.run_name=perf_1gpu_bs128
+
+echo ""
+
+# Test 4: 2 GPU DDP (if available)
+NUM_GPUS=$(nvidia-smi --list-gpus 2>/dev/null | wc -l || echo 1)
+
 if [ "$NUM_GPUS" -ge 2 ]; then
-    echo "  ✓ DDP multi-GPU works"
+    echo "[4/4] DDP 2 GPUs (batch=64 per GPU, effective=128)..."
+    echo "NOTE: data.batch_size is PER-GPU. Effective batch = batch_size × num_GPUs"
+    time python scripts/train.py \
+      trainer.devices=2 \
+      trainer.strategy=ddp \
+      data.batch_size=64 \
+      model.learning_rate=1.2e-3 \
+      data.num_train=5000 \
+      trainer.max_steps=125 \
+      trainer.val_check_interval=50 \
+      wandb.enabled=false \
+      wandb.eval_every_n_val=0 \
+      logs.run_name=perf_2gpu_bs64
 else
-    echo "  - DDP not tested (need 2+ GPUs)"
+    echo "[4/4] Skipping (only $NUM_GPUS GPU available)"
 fi
-echo "  ✓ Throughput benchmarked"
+
 echo ""
-echo "You're ready for DDP training! See configs/train_ddp_examples.yaml for recommended settings."
+echo "=========================================="
+echo "Performance test complete!"
+echo "=========================================="
+echo ""
+echo "How to read results:"
+echo "  - 'it/s' = iterations per second (higher is better)"
+echo "  - 'time' output = wall-clock time (lower is better)"
+echo ""
+echo "Expected speedups:"
+echo "  - 1 GPU batch=128 vs batch=32:  ~2-2.5x faster"
+echo "  - 2 GPU DDP vs 1 GPU batch=128:  ~1.7-1.9x faster"
+echo ""
+echo "DDP Batch Size Notes:"
+echo "  - data.batch_size is PER-GPU (not total)"
+echo "  - 2 GPUs × batch=64 = effective batch of 128"
+echo "  - 2 GPUs × batch=128 = effective batch of 256"
+echo "  - If batch=128 fits on 1 GPU, you can run batch=128 per GPU on DDP!"
+echo ""
