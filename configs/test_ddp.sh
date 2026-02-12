@@ -25,7 +25,7 @@ for BS in 32 64 128 256; do
       data.batch_size=$BS \
       data.num_train=2000 \
       trainer.max_steps=100 \
-      trainer.val_check_interval=1000 \
+      trainer.limit_val_batches=0 \
       wandb.enabled=false \
       wandb.eval_every_n_val=0 \
       sampling.num_samples=0 \
@@ -51,7 +51,7 @@ time python scripts/train.py \
   data.batch_size=32 \
   data.num_train=5000 \
   trainer.max_steps=500 \
-  trainer.val_check_interval=100 \
+  trainer.limit_val_batches=0 \
   wandb.enabled=false \
   wandb.eval_every_n_val=0 \
   sampling.num_samples=0 \
@@ -67,7 +67,7 @@ time python scripts/train.py \
   model.learning_rate=1.2e-3 \
   data.num_train=5000 \
   trainer.max_steps=125 \
-  trainer.val_check_interval=50 \
+  trainer.limit_val_batches=0 \
   wandb.enabled=false \
   wandb.eval_every_n_val=0 \
   sampling.num_samples=0 \
@@ -88,7 +88,7 @@ if [ "$NUM_GPUS" -ge 2 ]; then
       model.learning_rate=1.2e-3 \
       data.num_train=5000 \
       trainer.max_steps=125 \
-      trainer.val_check_interval=50 \
+      trainer.limit_val_batches=0 \
       wandb.enabled=false \
       wandb.eval_every_n_val=0 \
       sampling.num_samples=0 \
