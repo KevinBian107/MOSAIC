@@ -49,11 +49,11 @@ python scripts/train.py \
   data.num_train=$DATA_SIZE \
   data.use_cache=false \
   trainer.max_steps=$STEPS_1GPU \
-  trainer.limit_val_batches=0 \
+  trainer.val_check_interval=10000 \
   wandb.enabled=false \
   wandb.eval_every_n_val=0 \
   sampling.num_samples=0 \
-  logs.run_name=speedup_1gpu_bs64 2>&1 | tee /tmp/1gpu_output.log | grep -E "(Training dataset size:|Steps per epoch:|Epoch.*it/s|max_steps.*reached)"
+  logs.run_name=speedup_1gpu_bs64
 
 END_1GPU=$(date +%s.%N)
 TIME_1GPU=$(python3 -c "print(f'{$END_1GPU - $START_1GPU:.2f}')")
@@ -86,11 +86,11 @@ if [ "$NUM_GPUS" -ge 2 ]; then
       data.num_train=$DATA_SIZE \
       data.use_cache=false \
       trainer.max_steps=$STEPS_2GPU \
-      trainer.limit_val_batches=0 \
+      trainer.val_check_interval=10000 \
       wandb.enabled=false \
       wandb.eval_every_n_val=0 \
       sampling.num_samples=0 \
-      logs.run_name=speedup_2gpu_bs64 2>&1 | tee /tmp/2gpu_output.log | grep -E "(Training dataset size:|Steps per epoch:|Epoch.*it/s|max_steps.*reached)"
+      logs.run_name=speedup_2gpu_bs64
 
     END_2GPU=$(date +%s.%N)
     TIME_2GPU=$(python3 -c "print(f'{$END_2GPU - $START_2GPU:.2f}')")
