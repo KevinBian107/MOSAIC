@@ -27,6 +27,7 @@ for BS in 32 64 128 256; do
       trainer.val_check_interval=1000 \
       wandb.enabled=false \
       wandb.eval_every_n_val=0 \
+      sampling.num_samples=0 \
       logs.run_name=throughput_bs${BS} \
       2>&1 | grep -E "it/s" | tail -1 || echo "    (check output for it/s)"
 
@@ -46,6 +47,7 @@ time python scripts/train.py \
   trainer.val_check_interval=100 \
   wandb.enabled=false \
   wandb.eval_every_n_val=0 \
+  sampling.num_samples=0 \
   logs.run_name=perf_1gpu_bs32
 
 echo ""
@@ -61,6 +63,7 @@ time python scripts/train.py \
   trainer.val_check_interval=50 \
   wandb.enabled=false \
   wandb.eval_every_n_val=0 \
+  sampling.num_samples=0 \
   logs.run_name=perf_1gpu_bs128
 
 echo ""
@@ -81,6 +84,7 @@ if [ "$NUM_GPUS" -ge 2 ]; then
       trainer.val_check_interval=50 \
       wandb.enabled=false \
       wandb.eval_every_n_val=0 \
+      sampling.num_samples=0 \
       logs.run_name=perf_2gpu_bs64
 else
     echo "[4/4] Skipping (only $NUM_GPUS GPU available)"
