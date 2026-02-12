@@ -12,11 +12,14 @@ echo "DDP Speedup Comparison Test"
 echo "=========================================="
 echo ""
 echo "Configuration:"
-echo "  - Data size: 10,000 samples"
-echo "  - Batch size: 64 (per GPU for DDP)"
-echo "  - Epochs: 2"
-echo "  - 1 GPU: effective batch = 64"
-echo "  - 2 GPU DDP: effective batch = 128 (64 × 2)"
+echo "  - Data size: $DATA_SIZE samples"
+echo "  - Batch size: $BATCH_SIZE (per GPU for DDP)"
+echo "  - Epochs: $EPOCHS"
+echo "  - 1 GPU: effective batch = $BATCH_SIZE"
+echo "  - 2 GPU DDP: effective batch = $((BATCH_SIZE * 2)) (${BATCH_SIZE} × 2)"
+echo ""
+echo "⚠️  WARNING: If you have cached data from smaller runs, delete data/cache/ first!"
+echo "  Run: rm -rf data/cache/*.pt"
 echo ""
 
 # Common settings
@@ -39,20 +42,23 @@ echo ""
 # Test 1: Single GPU baseline
 echo "[1/2] Single GPU (batch=64)..."
 echo "Running $EPOCHS epochs ($STEPS_1GPU steps)..."
+echo "DEBUG: data.num_train=$DATA_SIZE, trainer.max_steps=$STEPS_1GPU"
 START_1GPU=$(date +%s.%N)
 
+# Run without grep first to see full output
 python scripts/train.py \
   trainer.devices=1 \
   data.batch_size=$BATCH_SIZE \
   model.learning_rate=$BASE_LR \
   data.num_train=$DATA_SIZE \
+  data.use_cache=false \
   trainer.max_steps=$STEPS_1GPU \
   trainer.limit_val_batches=0 \
   wandb.enabled=false \
   wandb.eval_every_n_val=0 \
   sampling.num_samples=0 \
   logs.run_name=speedup_1gpu_bs64 \
-  2>&1 | grep -E "Epoch.*it/s" | tail -1
+  2>&1 | tee /tmp/ddp_test_output.log | grep -E "(Training dataset size:|Steps per epoch:|Epoch.*it/s)" | tail -5
 
 END_1GPU=$(date +%s.%N)
 TIME_1GPU=$(python3 -c "print(f'{$END_1GPU - $START_1GPU:.2f}')")
@@ -80,6 +86,7 @@ if [ "$NUM_GPUS" -ge 2 ]; then
       data.batch_size=$BATCH_SIZE \
       model.learning_rate=$DDP_LR \
       data.num_train=$DATA_SIZE \
+      data.use_cache=false \
       trainer.max_steps=$STEPS_2GPU \
       trainer.limit_val_batches=0 \
       wandb.enabled=false \
