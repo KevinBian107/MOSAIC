@@ -7,6 +7,12 @@
 
 set -e
 
+# Common settings - DEFINE BEFORE USING!
+DATA_SIZE=50000  # Use a realistic size that actually exists
+BATCH_SIZE=64
+EPOCHS=2
+BASE_LR=6e-4
+
 echo "=========================================="
 echo "DDP Speedup Comparison Test"
 echo "=========================================="
@@ -18,21 +24,12 @@ echo "  - Epochs: $EPOCHS"
 echo "  - 1 GPU: effective batch = $BATCH_SIZE"
 echo "  - 2 GPU DDP: effective batch = $((BATCH_SIZE * 2)) (${BATCH_SIZE} × 2)"
 echo ""
-echo "⚠️  WARNING: If you have cached data from smaller runs, delete data/cache/ first!"
-echo "  Run: rm -rf data/cache/*.pt"
-echo ""
-
-# Common settings
-DATA_SIZE=500000
-BATCH_SIZE=64
-EPOCHS=4
-BASE_LR=6e-4
 
 # Calculate steps per epoch
-# 1 GPU: 10000 / 64 = 156 steps per epoch
-# 2 GPU: 10000 / 128 = 78 steps per epoch (data split between GPUs)
-STEPS_1GPU=$((DATA_SIZE / BATCH_SIZE * EPOCHS))      # 312 steps total
-STEPS_2GPU=$((DATA_SIZE / (BATCH_SIZE * 2) * EPOCHS)) # 156 steps total
+# 1 GPU: DATA_SIZE / BATCH_SIZE = steps per epoch
+# 2 GPU: DATA_SIZE / (BATCH_SIZE * 2) = steps per epoch (data split between GPUs)
+STEPS_1GPU=$((DATA_SIZE / BATCH_SIZE * EPOCHS))
+STEPS_2GPU=$((DATA_SIZE / (BATCH_SIZE * 2) * EPOCHS))
 
 echo "Steps calculation:"
 echo "  1 GPU: $DATA_SIZE samples ÷ $BATCH_SIZE batch = $((DATA_SIZE / BATCH_SIZE)) steps/epoch × $EPOCHS epochs = $STEPS_1GPU total steps"
@@ -42,10 +39,9 @@ echo ""
 # Test 1: Single GPU baseline
 echo "[1/2] Single GPU (batch=64)..."
 echo "Running $EPOCHS epochs ($STEPS_1GPU steps)..."
-echo "DEBUG: data.num_train=$DATA_SIZE, trainer.max_steps=$STEPS_1GPU"
 START_1GPU=$(date +%s.%N)
 
-# Run without grep first to see full output
+# Run and capture actual dataset size from output
 python scripts/train.py \
   trainer.devices=1 \
   data.batch_size=$BATCH_SIZE \
@@ -57,14 +53,16 @@ python scripts/train.py \
   wandb.enabled=false \
   wandb.eval_every_n_val=0 \
   sampling.num_samples=0 \
-  logs.run_name=speedup_1gpu_bs64 \
-  2>&1 | tee /tmp/ddp_test_output.log | grep -E "(Training dataset size:|Steps per epoch:|Epoch.*it/s)" | tail -5
+  logs.run_name=speedup_1gpu_bs64 2>&1 | tee /tmp/1gpu_output.log | grep -E "(Training dataset size:|Steps per epoch:|Epoch.*it/s|max_steps.*reached)"
 
 END_1GPU=$(date +%s.%N)
 TIME_1GPU=$(python3 -c "print(f'{$END_1GPU - $START_1GPU:.2f}')")
-THROUGHPUT_1GPU=$(python3 -c "print(f'{($DATA_SIZE * $EPOCHS) / ($END_1GPU - $START_1GPU):.2f}')")
 
-echo "✓ 1 GPU completed: ${TIME_1GPU}s (${THROUGHPUT_1GPU} samples/sec)"
+# Calculate actual samples processed (might be less than requested)
+ACTUAL_SAMPLES_1GPU=$((STEPS_1GPU * BATCH_SIZE))
+THROUGHPUT_1GPU=$(python3 -c "print(f'{$ACTUAL_SAMPLES_1GPU / ($END_1GPU - $START_1GPU):.2f}')")
+
+echo "✓ 1 GPU completed: ${TIME_1GPU}s (${THROUGHPUT_1GPU} samples/sec for $ACTUAL_SAMPLES_1GPU samples)"
 echo ""
 
 # Test 2: 2 GPU DDP (if available)
@@ -92,14 +90,16 @@ if [ "$NUM_GPUS" -ge 2 ]; then
       wandb.enabled=false \
       wandb.eval_every_n_val=0 \
       sampling.num_samples=0 \
-      logs.run_name=speedup_2gpu_bs64 \
-      2>&1 | grep -E "Epoch.*it/s" | tail -1
+      logs.run_name=speedup_2gpu_bs64 2>&1 | tee /tmp/2gpu_output.log | grep -E "(Training dataset size:|Steps per epoch:|Epoch.*it/s|max_steps.*reached)"
 
     END_2GPU=$(date +%s.%N)
     TIME_2GPU=$(python3 -c "print(f'{$END_2GPU - $START_2GPU:.2f}')")
-    THROUGHPUT_2GPU=$(python3 -c "print(f'{($DATA_SIZE * $EPOCHS) / ($END_2GPU - $START_2GPU):.2f}')")
 
-    echo "✓ 2 GPU DDP completed: ${TIME_2GPU}s (${THROUGHPUT_2GPU} samples/sec)"
+    # Calculate actual samples processed
+    ACTUAL_SAMPLES_2GPU=$((STEPS_2GPU * BATCH_SIZE * 2))  # ×2 because each GPU processes BATCH_SIZE
+    THROUGHPUT_2GPU=$(python3 -c "print(f'{$ACTUAL_SAMPLES_2GPU / ($END_2GPU - $START_2GPU):.2f}')")
+
+    echo "✓ 2 GPU DDP completed: ${TIME_2GPU}s (${THROUGHPUT_2GPU} samples/sec for $ACTUAL_SAMPLES_2GPU samples)"
     echo ""
 
     # Calculate speedup
@@ -113,9 +113,9 @@ if [ "$NUM_GPUS" -ge 2 ]; then
     echo "=========================================="
     echo ""
     echo "Training Configuration:"
-    echo "  - Dataset: $DATA_SIZE samples"
+    echo "  - Requested dataset: $DATA_SIZE samples"
     echo "  - Epochs: $EPOCHS"
-    echo "  - Total samples processed: $((DATA_SIZE * EPOCHS))"
+    echo "  - Actual steps: 1 GPU=$STEPS_1GPU, 2 GPU=$STEPS_2GPU"
     echo ""
     echo "Performance:"
     echo "  ┌─────────────┬────────────┬──────────────┬────────────────┐"
@@ -138,7 +138,9 @@ if [ "$NUM_GPUS" -ge 2 ]; then
     echo "  • Actual speedup: ${SPEEDUP}x"
     echo "  • Scaling efficiency: ${EFFICIENCY}%"
 
-    if (( $(echo "$SPEEDUP > 1.5" | python3 -c "import sys; print(float(input()))" ) )); then
+    # Fix the comparison syntax error
+    IS_GOOD=$(python3 -c "print('1' if $SPEEDUP > 1.5 else '0')")
+    if [ "$IS_GOOD" = "1" ]; then
         echo "  • ✅ Good scaling! DDP is effective for this workload."
     else
         echo "  • ⚠️ Suboptimal scaling. Consider larger batch sizes or models."
