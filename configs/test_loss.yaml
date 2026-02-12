@@ -1,0 +1,26 @@
+# @package _global_
+
+defaults:
+  - experiment: moses
+  - tokenizer: hsent    # Options: sent, hsent, hdt, hdtc
+  - _self_  # Must be last to override experiment defaults
+
+# Random seed
+seed: 42
+
+# Model configuration
+model:
+  checkpoint_path: outputs/train/moses_hsent_andrew/best.ckpt
+
+# Data configuration (dataset_name comes from experiment config)
+data:
+  batch_size: 64
+  num_workers: 4
+  include_hydrogens: false
+  data_root: data
+
+# Logging configuration
+logs:
+  base_dir: outputs/test_loss
+  run_name: ${data.dataset_name}_${tokenizer.type}_test_loss
+  path: ${logs.base_dir}/${logs.run_name}_${now:%Y%m%d-%H%M%S}

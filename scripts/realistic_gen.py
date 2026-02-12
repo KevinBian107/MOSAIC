@@ -263,9 +263,9 @@ def main(cfg: DictConfig) -> None:
     tokenizer = get_tokenizer(cfg)
     tokenizer_type = cfg.tokenizer.get("type", "sent").lower()
 
-    # Load training data for comparison (before model loading so
+    # Load test data for reference comparison (before model loading so
     # datamodule.setup() doesn't mutate the tokenizer after the model is built)
-    log.info("Loading training data for comparison...")
+    log.info("Loading test data for reference comparison...")
     datamodule = MolecularDataModule(
         dataset_name=cfg.data.dataset_name,
         tokenizer=tokenizer,
@@ -282,9 +282,9 @@ def main(cfg: DictConfig) -> None:
         max_atoms=cfg.data.get("max_atoms", 100),
         min_rings=cfg.data.get("min_rings", 3),
     )
-    datamodule.setup(stage="fit")
-    train_smiles = datamodule.train_smiles
-    log.info(f"Loaded {len(train_smiles)} training SMILES")
+    datamodule.setup(stage="test")
+    test_smiles = datamodule.test_smiles
+    log.info(f"Loaded {len(test_smiles)} test SMILES for reference")
 
     # Configure tokenizer from checkpoint (force-corrects max_num_nodes
     # after any inflation by datamodule.setup())
@@ -339,10 +339,10 @@ def main(cfg: DictConfig) -> None:
     motif_smiles = cfg.analysis.motif_smiles
     log.info(f"\nFiltering for motif: {motif_smiles}")
 
-    train_filtered = filter_by_motif(train_smiles, motif_smiles)
+    train_filtered = filter_by_motif(test_smiles, motif_smiles)
     gen_filtered = filter_by_motif(generated_smiles, motif_smiles)
 
-    log.info(f"  Training: {len(train_filtered)}/{len(train_smiles)} contain motif")
+    log.info(f"  Reference: {len(train_filtered)}/{len(test_smiles)} contain motif")
     log.info(f"  Generated: {len(gen_filtered)}/{len(generated_smiles)} contain motif")
 
     if len(train_filtered) == 0 or len(gen_filtered) == 0:

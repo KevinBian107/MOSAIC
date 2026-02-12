@@ -21,9 +21,6 @@ model:
 data:
   batch_size: 32
   num_workers: 0
-  num_train: 100  # Used for reference in metrics
-  num_val: 100
-  num_test: 100
   include_hydrogens: false
   data_root: data
 

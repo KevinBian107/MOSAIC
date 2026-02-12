@@ -13,7 +13,7 @@ Coarsening strategies:
 - SpectralCoarsening: Modularity-optimized spectral clustering (multi-level)
 - SimpleSpectralCoarsening: Single-level spectral clustering
 - MotifAwareSpectralCoarsening: Spectral clustering with motif preservation
-- HACCoarsening: Hierarchical agglomerative clustering with connectivity constraint
+- AffinityCoarsening: Boruvka-based affinity clustering with modularity-optimal cut
 - FunctionalHierarchyBuilder: Two-level functional hierarchy for HDTC
 
 Shared utilities:
@@ -25,6 +25,7 @@ Shared utilities:
 
 from src.tokenizers.base import BatchConverter, Tokenizer
 from src.tokenizers.coarsening import (
+    AffinityCoarsening,
     CoarseningStrategy,
     FunctionalHierarchyBuilder,
     HACCoarsening,
@@ -64,7 +65,8 @@ __all__ = [
     "MotifAwareSpectralCoarsening",
     "MotifAwareCoarsening",  # Backwards compatibility
     "MotifCommunityCoarsening",
-    "HACCoarsening",
+    "AffinityCoarsening",
+    "HACCoarsening",  # Backwards compatibility alias
     "FunctionalHierarchyBuilder",
     # Structures
     "Partition",
