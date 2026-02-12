@@ -368,7 +368,7 @@ def main(cfg: DictConfig) -> None:
     log.info("=" * 50)
 
     mol_metrics = MolecularMetrics(
-        reference_smiles=datamodule.train_smiles,
+        reference_smiles=datamodule.test_smiles,
     )
     mol_results = mol_metrics(generated_smiles)
 
@@ -385,7 +385,7 @@ def main(cfg: DictConfig) -> None:
     if cfg.metrics.get("compute_motif", True):  # Default enabled
         try:
             motif_metrics = MotifDistributionMetric(
-                reference_smiles=datamodule.train_smiles,
+                reference_smiles=datamodule.test_smiles,
             )
             motif_results = motif_metrics(generated_smiles)
 
@@ -415,7 +415,7 @@ def main(cfg: DictConfig) -> None:
             # Convert reference SMILES to graphs for PGD
             # Limit to max_reference_size for memory constraints
             max_ref_size = cfg.metrics.get("pgd_reference_size", 10000)
-            reference_smiles = datamodule.train_smiles[:max_ref_size]
+            reference_smiles = datamodule.test_smiles[:max_ref_size]
 
             log.info(
                 f"Converting {len(reference_smiles)} reference SMILES to graphs..."

@@ -1,21 +1,22 @@
-"""Tests for HAC (Hierarchical Agglomerative Clustering) coarsening.
+"""Tests for affinity-based graph coarsening (AffinityCoarsening).
 
 Tests cover:
 - Partition coverage and validity
 - Trivial and small graph cases
-- Different linkage criteria
+- Bond weight affinity computation
 - Hierarchy structure and recursion
 - Roundtrip tests with HSENT and HDT tokenizers
 - Tokenizer coarsener wiring
 - Modularity computation
 """
 
+import numpy as np
 import pytest
 import torch
 from torch_geometric.data import Data
 
 from src.tokenizers import HDTTokenizer, HSENTTokenizer
-from src.tokenizers.coarsening.hac import HACCoarsening
+from src.tokenizers.coarsening.hac import AffinityCoarsening, BOND_WEIGHT_MAP
 
 # Optional RDKit import
 try:
@@ -99,16 +100,34 @@ def benzene_data() -> Data:
     return Data(edge_index=edge_index, num_nodes=6)
 
 
+@pytest.fixture
+def weighted_graph() -> Data:
+    """4-node graph with different bond types for affinity testing."""
+    # 0 --double-- 1
+    # |            |
+    # single      single
+    # |            |
+    # 2 --triple-- 3
+    edges = [(0, 1), (1, 0), (0, 2), (2, 0), (1, 3), (3, 1), (2, 3), (3, 2)]
+    edge_attr = [2, 2, 0, 0, 0, 0, 3, 3]  # double, single, single, triple
+    edge_index = torch.tensor(edges, dtype=torch.long).t()
+    return Data(
+        edge_index=edge_index,
+        edge_attr=torch.tensor(edge_attr, dtype=torch.long),
+        num_nodes=4,
+    )
+
+
 # ===========================================================================
 # Test Partition Coverage
 # ===========================================================================
 
 
 class TestPartitionCoverage:
-    """Test that HAC partitions cover all nodes without overlap."""
+    """Test that affinity partitions cover all nodes without overlap."""
 
     def test_all_nodes_assigned(self, two_triangles: Data) -> None:
-        coarsener = HACCoarsening(min_community_size=4, seed=42)
+        coarsener = AffinityCoarsening(min_community_size=4, seed=42)
         communities = coarsener.partition(two_triangles)
 
         all_nodes = set()
@@ -118,7 +137,7 @@ class TestPartitionCoverage:
         assert all_nodes == set(range(two_triangles.num_nodes))
 
     def test_no_overlap(self, two_triangles: Data) -> None:
-        coarsener = HACCoarsening(min_community_size=4, seed=42)
+        coarsener = AffinityCoarsening(min_community_size=4, seed=42)
         communities = coarsener.partition(two_triangles)
 
         seen: set[int] = set()
@@ -128,7 +147,7 @@ class TestPartitionCoverage:
             seen |= comm
 
     def test_all_nodes_assigned_larger(self, larger_graph: Data) -> None:
-        coarsener = HACCoarsening(min_community_size=4, seed=42)
+        coarsener = AffinityCoarsening(min_community_size=4, seed=42)
         communities = coarsener.partition(larger_graph)
 
         all_nodes = set()
@@ -151,7 +170,7 @@ class TestTrivialCases:
             edge_index=torch.zeros((2, 0), dtype=torch.long),
             num_nodes=1,
         )
-        coarsener = HACCoarsening(min_community_size=4, seed=42)
+        coarsener = AffinityCoarsening(min_community_size=4, seed=42)
         communities = coarsener.partition(data)
         assert len(communities) == 1
         assert communities[0] == {0}
@@ -161,7 +180,7 @@ class TestTrivialCases:
             edge_index=torch.zeros((2, 0), dtype=torch.long),
             num_nodes=5,
         )
-        coarsener = HACCoarsening(min_community_size=4, seed=42)
+        coarsener = AffinityCoarsening(min_community_size=4, seed=42)
         communities = coarsener.partition(data)
         # Should return single community (no edges to split on)
         assert len(communities) == 1
@@ -173,7 +192,7 @@ class TestTrivialCases:
             edge_index=torch.tensor(edges, dtype=torch.long).t(),
             num_nodes=2,
         )
-        coarsener = HACCoarsening(min_community_size=4, seed=42)
+        coarsener = AffinityCoarsening(min_community_size=4, seed=42)
         hg = coarsener.build_hierarchy(data)
         assert hg.num_communities == 1
 
@@ -188,47 +207,59 @@ class TestPartitionQuality:
 
     def test_two_triangles_finds_communities(self, two_triangles: Data) -> None:
         """Two triangles should partition into 2+ communities."""
-        coarsener = HACCoarsening(min_community_size=4, seed=42)
+        coarsener = AffinityCoarsening(min_community_size=4, seed=42)
         communities = coarsener.partition(two_triangles)
         assert len(communities) >= 2
 
     def test_three_cliques_finds_communities(self, larger_graph: Data) -> None:
         """Three cliques should partition into 3 communities."""
-        coarsener = HACCoarsening(min_community_size=4, seed=42)
+        coarsener = AffinityCoarsening(min_community_size=4, seed=42)
         communities = coarsener.partition(larger_graph)
         assert len(communities) >= 2
 
 
 # ===========================================================================
-# Test Different Linkages
+# Test Bond Weight Affinity
 # ===========================================================================
 
 
-class TestLinkages:
-    """Test that all linkage criteria produce valid partitions."""
+class TestBondWeightAffinity:
+    """Test that edge weights from bond types are used correctly."""
 
-    @pytest.mark.parametrize("linkage", ["ward", "complete", "average", "single"])
-    def test_linkage_produces_valid_partition(
-        self, linkage: str, larger_graph: Data
-    ) -> None:
-        coarsener = HACCoarsening(linkage=linkage, min_community_size=4, seed=42)
-        communities = coarsener.partition(larger_graph)
+    def test_bond_weight_map_values(self) -> None:
+        """Verify the BOND_WEIGHT_MAP has correct entries."""
+        assert BOND_WEIGHT_MAP[0] == 1.0  # single
+        assert BOND_WEIGHT_MAP[1] == 1.0  # single alias
+        assert BOND_WEIGHT_MAP[2] == 2.0  # double
+        assert BOND_WEIGHT_MAP[3] == 3.0  # triple
+        assert BOND_WEIGHT_MAP[4] == 1.5  # aromatic
 
-        # All nodes covered
-        all_nodes = set()
-        for comm in communities:
-            all_nodes |= comm
-        assert all_nodes == set(range(larger_graph.num_nodes))
+    def test_weighted_adjacency_uses_bond_types(self, weighted_graph: Data) -> None:
+        """Weighted adjacency should reflect bond types."""
+        coarsener = AffinityCoarsening(seed=42)
+        adj = coarsener._build_weighted_adj(weighted_graph)
 
-        # At least 1 community
-        assert len(communities) >= 1
+        # 0-1: double bond (weight 2.0)
+        assert adj[0, 1] == 2.0
+        assert adj[1, 0] == 2.0
 
-    @pytest.mark.parametrize("linkage", ["ward", "complete", "average", "single"])
-    def test_linkage_builds_hierarchy(self, linkage: str, larger_graph: Data) -> None:
-        coarsener = HACCoarsening(linkage=linkage, min_community_size=4, seed=42)
-        hg = coarsener.build_hierarchy(larger_graph)
-        assert hg.num_communities >= 2
-        assert len(hg.partitions) == hg.num_communities
+        # 0-2: single bond (weight 1.0)
+        assert adj[0, 2] == 1.0
+
+        # 2-3: triple bond (weight 3.0)
+        assert adj[2, 3] == 3.0
+        assert adj[3, 2] == 3.0
+
+    def test_unweighted_graph_uses_unit_weights(self, two_triangles: Data) -> None:
+        """Graph without edge_attr should have uniform weight 1.0."""
+        coarsener = AffinityCoarsening(seed=42)
+        adj = coarsener._build_weighted_adj(two_triangles)
+
+        # All edges should have weight 1.0
+        for i in range(6):
+            for j in range(6):
+                if adj[i, j] > 0:
+                    assert adj[i, j] == 1.0
 
 
 # ===========================================================================
@@ -237,17 +268,17 @@ class TestLinkages:
 
 
 class TestHierarchyStructure:
-    """Test HierarchicalGraph structure produced by HAC."""
+    """Test HierarchicalGraph structure produced by affinity coarsening."""
 
     def test_hierarchy_has_partitions_and_bipartites(self, two_triangles: Data) -> None:
-        coarsener = HACCoarsening(min_community_size=4, seed=42)
+        coarsener = AffinityCoarsening(min_community_size=4, seed=42)
         hg = coarsener.build_hierarchy(two_triangles)
 
         assert len(hg.partitions) >= 1
         assert len(hg.community_assignment) == two_triangles.num_nodes
 
     def test_hierarchy_larger_graph(self, larger_graph: Data) -> None:
-        coarsener = HACCoarsening(min_community_size=4, seed=42)
+        coarsener = AffinityCoarsening(min_community_size=4, seed=42)
         hg = coarsener.build_hierarchy(larger_graph)
 
         assert hg.num_communities >= 2
@@ -255,7 +286,7 @@ class TestHierarchyStructure:
         assert total_nodes == larger_graph.num_nodes
 
     def test_community_assignment_valid(self, larger_graph: Data) -> None:
-        coarsener = HACCoarsening(min_community_size=4, seed=42)
+        coarsener = AffinityCoarsening(min_community_size=4, seed=42)
         hg = coarsener.build_hierarchy(larger_graph)
 
         for i, comm_id in enumerate(hg.community_assignment):
@@ -272,12 +303,8 @@ class TestModularity:
 
     def test_modularity_positive_for_good_partition(self, larger_graph: Data) -> None:
         """Non-trivial graph should have positive modularity."""
-        from torch_geometric.utils import to_dense_adj
-
-        coarsener = HACCoarsening(min_community_size=4, seed=42)
-        n = larger_graph.num_nodes
-        adj = to_dense_adj(larger_graph.edge_index, max_num_nodes=n)[0]
-        adj = ((adj + adj.t()) / 2).numpy()
+        coarsener = AffinityCoarsening(min_community_size=4, seed=42)
+        adj = coarsener._build_weighted_adj(larger_graph)
 
         communities = coarsener.partition(larger_graph)
         partition_dict: dict[int, int] = {}
@@ -289,16 +316,14 @@ class TestModularity:
         assert modularity > 0
 
     def test_modularity_zero_for_no_edges(self) -> None:
-        import numpy as np
-
-        coarsener = HACCoarsening()
+        coarsener = AffinityCoarsening()
         adj = np.zeros((5, 5))
         partition = {i: 0 for i in range(5)}
         assert coarsener._compute_modularity(adj, partition) == 0.0
 
 
 # ===========================================================================
-# Test Roundtrip: HSENT + HAC
+# Test Roundtrip: HSENT + Affinity
 # ===========================================================================
 
 
@@ -349,12 +374,12 @@ class TestHSENTRoundtrip:
 
 
 # ===========================================================================
-# Test Roundtrip: HDT + HAC
+# Test Roundtrip: HDT + Affinity
 # ===========================================================================
 
 
 class TestHDTRoundtrip:
-    """Roundtrip tests for HDT tokenizer with HAC coarsening."""
+    """Roundtrip tests for HDT tokenizer with affinity coarsening."""
 
     def test_roundtrip_larger_graph(self, larger_graph: Data) -> None:
         tokenizer = HDTTokenizer(
@@ -405,38 +430,30 @@ class TestHDTRoundtrip:
 
 
 class TestTokenizerWiring:
-    """Test that tokenizers correctly instantiate HACCoarsening."""
+    """Test that tokenizers correctly instantiate AffinityCoarsening."""
 
-    def test_hsent_creates_hac_coarsener(self) -> None:
+    def test_hsent_creates_affinity_coarsener(self) -> None:
         tokenizer = HSENTTokenizer(coarsening_strategy="hac", seed=42)
-        assert isinstance(tokenizer.coarsener, HACCoarsening)
-        assert tokenizer.coarsener.linkage == "ward"
+        assert isinstance(tokenizer.coarsener, AffinityCoarsening)
 
-    def test_hdt_creates_hac_coarsener(self) -> None:
+    def test_hdt_creates_affinity_coarsener(self) -> None:
         tokenizer = HDTTokenizer(coarsening_strategy="hac", seed=42)
-        assert isinstance(tokenizer.coarsener, HACCoarsening)
-        assert tokenizer.coarsener.linkage == "ward"
+        assert isinstance(tokenizer.coarsener, AffinityCoarsening)
 
-    def test_hsent_passes_hac_params(self) -> None:
+    def test_hsent_passes_params(self) -> None:
         tokenizer = HSENTTokenizer(
             coarsening_strategy="hac",
-            hac_linkage="complete",
-            hac_feature_type="adjacency",
             min_community_size=8,
             seed=42,
         )
-        assert isinstance(tokenizer.coarsener, HACCoarsening)
-        assert tokenizer.coarsener.linkage == "complete"
-        assert tokenizer.coarsener.feature_type == "adjacency"
+        assert isinstance(tokenizer.coarsener, AffinityCoarsening)
         assert tokenizer.coarsener.min_community_size == 8
 
-    def test_hdt_passes_hac_params(self) -> None:
+    def test_hdt_passes_params(self) -> None:
         tokenizer = HDTTokenizer(
             coarsening_strategy="hac",
-            hac_linkage="average",
             min_community_size=6,
             seed=42,
         )
-        assert isinstance(tokenizer.coarsener, HACCoarsening)
-        assert tokenizer.coarsener.linkage == "average"
+        assert isinstance(tokenizer.coarsener, AffinityCoarsening)
         assert tokenizer.coarsener.min_community_size == 6

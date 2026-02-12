@@ -80,6 +80,13 @@ METRIC_SECTIONS = [
             "functional_group_kl",
         ],
     ),
+    (
+        "Test Loss",
+        [
+            "test_loss",
+            "perplexity",
+        ],
+    ),
 ]
 
 # Flat list of all metrics (for backward compatibility)
@@ -110,10 +117,17 @@ DEFAULT_REALISTIC_METRICS = [
     "functional_group_tv",
     "functional_group_kl",
 ]
+DEFAULT_TEST_LOSS_METRICS = [
+    "test_loss",
+    "perplexity",
+]
 
 # Combined default metrics
 DEFAULT_METRICS = (
-    TRAINING_INFO_METRICS + DEFAULT_TEST_METRICS + DEFAULT_REALISTIC_METRICS
+    TRAINING_INFO_METRICS
+    + DEFAULT_TEST_METRICS
+    + DEFAULT_REALISTIC_METRICS
+    + DEFAULT_TEST_LOSS_METRICS
 )
 
 # Metrics where lower is better (for highlighting)
@@ -134,6 +148,9 @@ LOWER_IS_BETTER = {
     "substitution_kl",
     "functional_group_tv",
     "functional_group_kl",
+    # Test loss metrics (lower is better)
+    "test_loss",
+    "perplexity",
 }
 
 # Display names for metrics
@@ -164,6 +181,9 @@ METRIC_DISPLAY_NAMES = {
     "substitution_kl": "Subst KL",
     "functional_group_tv": "FG TV",
     "functional_group_kl": "FG KL",
+    # Test loss metrics
+    "test_loss": "Test Loss",
+    "perplexity": "Perplexity",
 }
 
 # Display names for tokenizers
@@ -554,7 +574,13 @@ def select_best_per_tokenizer_and_coarsening(runs: list[dict]) -> list[dict]:
 
     # Sort by tokenizer type, then coarsening strategy for consistent ordering
     tokenizer_order = ["sent", "hsent", "hdt", "hdtc"]
-    coarsening_order = ["N/A", "motif", "spectral", "functional_group", "motif_fg_community"]
+    coarsening_order = [
+        "N/A",
+        "motif",
+        "spectral",
+        "functional_group",
+        "motif_fg_community",
+    ]
 
     def sort_key(r: dict) -> tuple[int, int]:
         tokenizer = get_run_info(r)["tokenizer"]
@@ -802,6 +828,12 @@ Examples:
         help="Directory containing realistic gen outputs (default: outputs/realistic_gen)",
     )
     parser.add_argument(
+        "--test-loss-dir",
+        type=Path,
+        default=Path("outputs/test_loss"),
+        help="Directory containing test loss outputs (default: outputs/test_loss)",
+    )
+    parser.add_argument(
         "--test-only",
         action="store_true",
         help="Only show test metrics, exclude realistic generation metrics",
@@ -906,6 +938,23 @@ Examples:
         else:
             print("No realistic generation runs found")
 
+    # Load and merge test loss results
+    if not args.test_only:
+        test_loss_runs = load_realistic_gen_runs(args.test_loss_dir)
+        if test_loss_runs:
+            print(f"Found {len(test_loss_runs)} test loss runs")
+            test_loss_matches = match_realistic_gen_to_test(runs, test_loss_runs)
+            print(f"Matched {len(test_loss_matches)} test runs with test loss results")
+            for test_run in runs:
+                test_loss_run = test_loss_matches.get(test_run["name"])
+                if test_loss_run:
+                    test_loss_results = test_loss_run.get("results", {})
+                    for metric in DEFAULT_TEST_LOSS_METRICS:
+                        if metric in test_loss_results:
+                            test_run["results"][metric] = test_loss_results[metric]
+        else:
+            print("No test loss runs found")
+
     # Select best per tokenizer+coarsening unless --all is specified
     if not args.all:
         runs = select_best_per_tokenizer_and_coarsening(runs)
@@ -915,7 +964,9 @@ Examples:
         )
         title = args.title
     else:
-        title = args.title.replace("(Best per Tokenizer+Coarsening by PGD)", "(All Runs)")
+        title = args.title.replace(
+            "(Best per Tokenizer+Coarsening by PGD)", "(All Runs)"
+        )
 
     # Determine metrics to show
     if args.metrics:
