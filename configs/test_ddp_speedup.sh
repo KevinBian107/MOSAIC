@@ -49,7 +49,8 @@ python scripts/train.py \
   data.num_train=$DATA_SIZE \
   data.use_cache=false \
   trainer.max_steps=$STEPS_1GPU \
-  +trainer.limit_val_batches=0.0 \
+  +trainer.limit_val_batches=0 \
+  +trainer.num_sanity_val_steps=0 \
   wandb.enabled=false \
   wandb.eval_every_n_val=0 \
   sampling.num_samples=0 \
@@ -86,7 +87,8 @@ if [ "$NUM_GPUS" -ge 2 ]; then
       data.num_train=$DATA_SIZE \
       data.use_cache=false \
       trainer.max_steps=$STEPS_2GPU \
-      +trainer.limit_val_batches=0.0 \
+      +trainer.limit_val_batches=0 \
+      +trainer.num_sanity_val_steps=0 \
       wandb.enabled=false \
       wandb.eval_every_n_val=0 \
       sampling.num_samples=0 \

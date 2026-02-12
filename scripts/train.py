@@ -1055,6 +1055,9 @@ def main(cfg: DictConfig) -> None:
     """
     log.info(f"Configuration:\n{OmegaConf.to_yaml(cfg)}")
 
+    # Enable Tensor Core matmul precision for better performance on A5000/A100
+    torch.set_float32_matmul_precision("medium")
+
     pl.seed_everything(cfg.seed, workers=True)
 
     # Create output directory and save configuration
@@ -1284,6 +1287,8 @@ def main(cfg: DictConfig) -> None:
     trainer = pl.Trainer(
         max_steps=cfg.trainer.max_steps,
         val_check_interval=val_check_interval,  # Use calculated value
+        limit_val_batches=cfg.trainer.get("limit_val_batches", 1.0),
+        num_sanity_val_steps=cfg.trainer.get("num_sanity_val_steps", 2),
         precision=cfg.trainer.precision,
         gradient_clip_val=cfg.trainer.gradient_clip_val,
         accelerator=cfg.trainer.accelerator,
