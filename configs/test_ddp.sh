@@ -32,9 +32,10 @@ for BS in 32 64 128 256; do
       logs.run_name=throughput_bs${BS}
 
     END=$(date +%s.%N)
-    ELAPSED=$(echo "$END - $START" | bc)
     SAMPLES=$((BS * 100))
-    THROUGHPUT=$(echo "scale=2; $SAMPLES / $ELAPSED" | bc)
+
+    # Use Python for calculation instead of bc
+    THROUGHPUT=$(python3 -c "print(f'{$SAMPLES / ($END - $START):.2f}')")
 
     echo "    Batch $BS: ~$THROUGHPUT samples/sec"
     echo ""
