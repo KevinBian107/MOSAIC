@@ -1183,21 +1183,29 @@ def main(cfg: DictConfig) -> None:
     datamodule.setup()
 
     # Calculate steps per epoch and adjust val_check_interval if needed
-    train_dataset_size = len(datamodule.train_dataset)
-    steps_per_epoch = train_dataset_size // cfg.data.batch_size
-    val_check_interval = cfg.trainer.val_check_interval
+    # Skip this if validation is disabled (limit_val_batches=0)
+    limit_val_batches = cfg.trainer.get("limit_val_batches", 1.0)
 
-    # If val_check_interval exceeds steps per epoch, use steps per epoch (1 eval per epoch)
-    if val_check_interval > steps_per_epoch:
-        log.warning(
-            f"val_check_interval ({val_check_interval}) exceeds steps per epoch ({steps_per_epoch}). "
-            f"Setting val_check_interval={steps_per_epoch} (1 validation per epoch)"
-        )
-        val_check_interval = steps_per_epoch
+    if limit_val_batches == 0:
+        # Validation disabled - set val_check_interval to None to avoid validation setup
+        val_check_interval = None
+        log.info("Validation disabled (limit_val_batches=0)")
+    else:
+        train_dataset_size = len(datamodule.train_dataset)
+        steps_per_epoch = train_dataset_size // cfg.data.batch_size
+        val_check_interval = cfg.trainer.val_check_interval
 
-    log.info(f"Training dataset size: {train_dataset_size:,} samples")
-    log.info(f"Steps per epoch: {steps_per_epoch:,}")
-    log.info(f"Validation check interval: {val_check_interval:,} steps")
+        # If val_check_interval exceeds steps per epoch, use steps per epoch (1 eval per epoch)
+        if val_check_interval > steps_per_epoch:
+            log.warning(
+                f"val_check_interval ({val_check_interval}) exceeds steps per epoch ({steps_per_epoch}). "
+                f"Setting val_check_interval={steps_per_epoch} (1 validation per epoch)"
+            )
+            val_check_interval = steps_per_epoch
+
+        log.info(f"Training dataset size: {train_dataset_size:,} samples")
+        log.info(f"Steps per epoch: {steps_per_epoch:,}")
+        log.info(f"Validation check interval: {val_check_interval:,} steps")
 
     # Ensure model position embeddings can handle any sequence the tokenizer produces
     model_max_length = max(
@@ -1286,8 +1294,8 @@ def main(cfg: DictConfig) -> None:
 
     trainer = pl.Trainer(
         max_steps=cfg.trainer.max_steps,
-        val_check_interval=val_check_interval,  # Use calculated value
-        limit_val_batches=cfg.trainer.get("limit_val_batches", 1.0),
+        val_check_interval=val_check_interval if val_check_interval is not None else 1.0,
+        limit_val_batches=limit_val_batches,
         num_sanity_val_steps=cfg.trainer.get("num_sanity_val_steps", 2),
         precision=cfg.trainer.precision,
         gradient_clip_val=cfg.trainer.gradient_clip_val,
