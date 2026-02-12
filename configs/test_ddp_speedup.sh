@@ -20,9 +20,9 @@ echo "  - 2 GPU DDP: effective batch = 128 (64 × 2)"
 echo ""
 
 # Common settings
-DATA_SIZE=10000
+DATA_SIZE=500000
 BATCH_SIZE=64
-EPOCHS=2
+EPOCHS=4
 BASE_LR=6e-4
 
 # Calculate steps per epoch
