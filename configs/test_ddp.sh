@@ -18,6 +18,7 @@ echo ""
 
 for BS in 32 64 128 256; do
     echo "  Testing batch_size=$BS..."
+    START=$(date +%s.%N)
 
     python scripts/train.py \
       trainer.devices=1 \
@@ -28,13 +29,18 @@ for BS in 32 64 128 256; do
       wandb.enabled=false \
       wandb.eval_every_n_val=0 \
       sampling.num_samples=0 \
-      logs.run_name=throughput_bs${BS} \
-      2>&1 | grep -E "it/s" | tail -1 || echo "    (check output for it/s)"
+      logs.run_name=throughput_bs${BS}
 
+    END=$(date +%s.%N)
+    ELAPSED=$(echo "$END - $START" | bc)
+    SAMPLES=$((BS * 100))
+    THROUGHPUT=$(echo "scale=2; $SAMPLES / $ELAPSED" | bc)
+
+    echo "    Batch $BS: ~$THROUGHPUT samples/sec"
     echo ""
 done
 
-echo "Compare it/s above - when it plateaus, you've found max throughput batch size"
+echo "Compare samples/sec above - higher is better!"
 echo ""
 
 # Test 2: Single GPU baseline
