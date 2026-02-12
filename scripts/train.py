@@ -1309,50 +1309,54 @@ def main(cfg: DictConfig) -> None:
     trainer.save_checkpoint(last_ckpt_path)
     log.info(f"Saved final checkpoint to {last_ckpt_path} (step {trainer.global_step})")
 
-    log.info("Running evaluation on test set...")
-    trainer.test(model, datamodule)
+    # Skip test evaluation and generation if num_samples is 0 (for pure training performance testing)
+    if cfg.sampling.num_samples > 0:
+        log.info("Running evaluation on test set...")
+        trainer.test(model, datamodule)
 
-    log.info("Generating samples for evaluation...")
-    model.eval()
-    generated_graphs, gen_time = model.generate(
-        num_samples=cfg.sampling.num_samples, show_progress=True
-    )
-    log.info(f"Generated {len(generated_graphs)} graphs in {gen_time:.4f}s per sample")
+        log.info("Generating samples for evaluation...")
+        model.eval()
+        generated_graphs, gen_time = model.generate(
+            num_samples=cfg.sampling.num_samples, show_progress=True
+        )
+        log.info(f"Generated {len(generated_graphs)} graphs in {gen_time:.4f}s per sample")
 
-    # Convert generated graphs to SMILES for molecular metrics
-    # Use sentinel value for failed conversions to compute accurate metrics
-    INVALID_SMILES_SENTINEL = "INVALID"
-    generated_smiles = []
-    for g in tqdm(generated_graphs, desc="Converting to SMILES"):
-        smiles = graph_to_smiles(g)
-        generated_smiles.append(smiles if smiles else INVALID_SMILES_SENTINEL)
+        # Convert generated graphs to SMILES for molecular metrics
+        # Use sentinel value for failed conversions to compute accurate metrics
+        INVALID_SMILES_SENTINEL = "INVALID"
+        generated_smiles = []
+        for g in tqdm(generated_graphs, desc="Converting to SMILES"):
+            smiles = graph_to_smiles(g)
+            generated_smiles.append(smiles if smiles else INVALID_SMILES_SENTINEL)
 
-    valid_count = sum(1 for s in generated_smiles if s != INVALID_SMILES_SENTINEL)
-    log.info(
-        f"Successfully converted {valid_count}/{len(generated_smiles)} graphs to SMILES"
-    )
-
-    if wandb_logger is not None and cfg.wandb.log_graphs:
-        log.info("Logging generated molecules to WandB...")
-        # Simple molecule grid
-        log_generated_molecules_to_wandb(wandb_logger, generated_smiles, prefix="final")
-        # Enhanced visualization with color-coded motif highlighting
-        log_molecules_with_motifs_to_wandb(
-            wandb_logger,
-            generated_smiles,
-            prefix="final",
-            max_molecules=cfg.wandb.get("max_logged_molecules", 12),
+        valid_count = sum(1 for s in generated_smiles if s != INVALID_SMILES_SENTINEL)
+        log.info(
+            f"Successfully converted {valid_count}/{len(generated_smiles)} graphs to SMILES"
         )
 
-    # Log final validity and generation time
-    # Full metric computation is handled by the test script (scripts/test.py)
-    log_final_metrics_to_wandb(
-        wandb_logger,
-        {
-            "valid_fraction": valid_count / max(len(generated_smiles), 1),
-            "generation_time": gen_time,
-        },
-    )
+        if wandb_logger is not None and cfg.wandb.log_graphs:
+            log.info("Logging generated molecules to WandB...")
+            # Simple molecule grid
+            log_generated_molecules_to_wandb(wandb_logger, generated_smiles, prefix="final")
+            # Enhanced visualization with color-coded motif highlighting
+            log_molecules_with_motifs_to_wandb(
+                wandb_logger,
+                generated_smiles,
+                prefix="final",
+                max_molecules=cfg.wandb.get("max_logged_molecules", 12),
+            )
+
+        # Log final validity and generation time
+        # Full metric computation is handled by the test script (scripts/test.py)
+        log_final_metrics_to_wandb(
+            wandb_logger,
+            {
+                "valid_fraction": valid_count / max(len(generated_smiles), 1),
+                "generation_time": gen_time,
+            },
+        )
+    else:
+        log.info("Skipping test evaluation and generation (num_samples=0)")
 
     if wandb_logger is not None:
         import wandb
