@@ -1182,6 +1182,10 @@ def main(cfg: DictConfig) -> None:
 
     datamodule.setup()
 
+    # Determine training duration (epochs vs steps) - define early for use throughout
+    max_epochs = cfg.trainer.get("max_epochs")
+    max_steps = cfg.trainer.max_steps if max_epochs is None else -1
+
     # Calculate steps per epoch and adjust val_check_interval if needed
     # Skip this if validation is disabled (limit_val_batches=0)
     limit_val_batches = cfg.trainer.get("limit_val_batches", 1.0)
@@ -1304,10 +1308,6 @@ def main(cfg: DictConfig) -> None:
         log.info(
             f"Intermediate evaluation enabled every {eval_every_n_val} validation epochs"
         )
-
-    # Determine training duration (epochs vs steps)
-    max_epochs = cfg.trainer.get("max_epochs")
-    max_steps = cfg.trainer.max_steps if max_epochs is None else -1
 
     # Print DDP speedup estimation
     num_gpus = cfg.trainer.devices if cfg.trainer.devices > 1 else 1
