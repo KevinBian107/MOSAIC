@@ -1,4 +1,4 @@
-#W!/usr/bin/env python
+#!/usr/bin/env python
 """Training script for molecular graph generation models.
 
 This script trains a transformer model on molecular graph data using
@@ -10,6 +10,14 @@ Usage:
     python scripts/train.py tokenizer.type=hsent  # Use hierarchical tokenization
     python scripts/train.py model.model_name=llama-s trainer.max_steps=200000
     python scripts/train.py wandb.enabled=true wandb.project=my-project
+
+DDP multi-GPU (non-MIG):
+    python scripts/train.py trainer.devices=4 trainer.strategy=ddp ...
+
+DDP with MIG (use train_benchmarks.sh --ddp, or manually):
+    CUDA_VISIBLE_DEVICES=<MIG-UUID> MASTER_ADDR=localhost MASTER_PORT=29500 \\
+        WORLD_SIZE=4 RANK=0 LOCAL_RANK=0 GROUP_RANK=0 LOCAL_WORLD_SIZE=1 \\
+        python scripts/train.py trainer.devices=1 trainer.num_nodes=4 trainer.strategy=ddp ...
 """
 
 import logging
@@ -17,6 +25,26 @@ import os
 import sys
 from pathlib import Path
 from typing import Optional
+
+# MIG-aware CUDA device assignment for DDP with torchrun.
+# Must run BEFORE importing torch so that CUDA_VISIBLE_DEVICES is set
+# before the CUDA runtime initializes.  With MIG, each process can only
+# access one MIG instance.  When torchrun passes a comma-separated list
+# of MIG UUIDs via CUDA_VISIBLE_DEVICES, we slice it by LOCAL_RANK so
+# each process sees exactly one device.
+# NOTE: Only triggers for MIG UUIDs (MIG-xxx format), not regular GPU
+# indices, to avoid breaking non-MIG DDP where PL manages devices.
+_local_rank_env = os.environ.get("LOCAL_RANK")
+if _local_rank_env is not None:
+    _cuda_vis = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+    if _cuda_vis:
+        _device_list = [d.strip() for d in _cuda_vis.split(",")]
+        _is_mig = any(d.startswith("MIG-") for d in _device_list)
+        _lr = int(_local_rank_env)
+        if _is_mig and len(_device_list) > 1 and _lr < len(_device_list):
+            os.environ["CUDA_VISIBLE_DEVICES"] = _device_list[_lr]
+            # Each process now sees 1 device; LOCAL_RANK must be 0
+            os.environ["LOCAL_RANK"] = "0"
 
 import hydra
 import pytorch_lightning as pl
@@ -1186,6 +1214,12 @@ def main(cfg: DictConfig) -> None:
     max_epochs = cfg.trainer.get("max_epochs")
     max_steps = cfg.trainer.max_steps if max_epochs is None else -1
 
+    # DDP world size: prefer WORLD_SIZE env (set by torchrun) over config devices
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    if world_size <= 1:
+        devices_cfg = cfg.trainer.devices
+        world_size = devices_cfg if isinstance(devices_cfg, int) and devices_cfg > 1 else 1
+
     # Calculate steps per epoch and adjust val_check_interval if needed
     # Skip this if validation is disabled (limit_val_batches=0)
     limit_val_batches = cfg.trainer.get("limit_val_batches", 1.0)
@@ -1196,7 +1230,8 @@ def main(cfg: DictConfig) -> None:
         log.info("Validation disabled (limit_val_batches=0)")
     else:
         train_dataset_size = len(datamodule.train_dataset)
-        steps_per_epoch = train_dataset_size // cfg.data.batch_size
+        # In DDP each GPU gets 1/world_size of the data via DistributedSampler
+        steps_per_epoch = train_dataset_size // (cfg.data.batch_size * world_size)
         val_check_interval = cfg.trainer.val_check_interval
 
         # If val_check_interval exceeds steps per epoch, use steps per epoch (1 eval per epoch)
@@ -1208,6 +1243,8 @@ def main(cfg: DictConfig) -> None:
             val_check_interval = steps_per_epoch
 
         log.info(f"Training dataset size: {train_dataset_size:,} samples")
+        if world_size > 1:
+            log.info(f"DDP world size: {world_size} (steps per epoch adjusted)")
         log.info(f"Steps per epoch: {steps_per_epoch:,}")
         log.info(f"Validation check interval: {val_check_interval:,} steps")
 
@@ -1221,10 +1258,8 @@ def main(cfg: DictConfig) -> None:
     # If using max_epochs, estimate total steps; if using max_steps, use that directly
     if max_epochs is not None:
         train_dataset_size = len(datamodule.train_dataset)
-        steps_per_epoch = train_dataset_size // cfg.data.batch_size
         # Account for DDP: each GPU sees a fraction of the data
-        if cfg.trainer.devices > 1:
-            steps_per_epoch = steps_per_epoch // cfg.trainer.devices
+        steps_per_epoch = train_dataset_size // (cfg.data.batch_size * world_size)
         total_steps = steps_per_epoch * max_epochs
         log.info(f"Estimated total steps for {max_epochs} epochs: {total_steps:,}")
     else:
@@ -1310,7 +1345,7 @@ def main(cfg: DictConfig) -> None:
         )
 
     # Print DDP speedup estimation
-    num_gpus = cfg.trainer.devices if cfg.trainer.devices > 1 else 1
+    num_gpus = world_size
     current_batch_size = cfg.data.batch_size
     effective_batch_size = current_batch_size * num_gpus
 
@@ -1358,6 +1393,7 @@ def main(cfg: DictConfig) -> None:
         gradient_clip_val=cfg.trainer.gradient_clip_val,
         accelerator=cfg.trainer.accelerator,
         devices=cfg.trainer.devices,
+        num_nodes=cfg.trainer.get("num_nodes", 1),
         strategy=cfg.trainer.get("strategy", "auto"),
         logger=loggers,
         callbacks=callbacks,
