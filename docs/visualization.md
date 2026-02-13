@@ -80,6 +80,33 @@ python scripts/visualization/generation_demo.py \
     'models=[{name: my_hdtc, checkpoint_path: outputs/train/hdtc/best.ckpt, tokenizer_type: hdtc, labeled_graph: true}]'
 ```
 
+### Community Structure Comparison (HAC vs Spectral)
+
+Compare how HAC (Affinity Coarsening) and Spectral Coarsening partition molecules
+across MOSES (simple drug-like) and COCONUT (complex natural products) datasets.
+
+Produces two types of figures:
+- **Example progression figures**: configurable number of molecules with evenly-spaced atom counts (small→large), each a 2x2 grid showing molecule+community overlay and hierarchy tree for both HAC and Spectral.
+- **Aggregate statistics figure**: 2x3 grid comparing hierarchy depth, community count, largest community size, singleton fraction, non-singleton sizes, and depth vs atom count.
+
+Example molecules are automatically selected to span the full atom count range across both datasets using evenly-spaced targets. Use `--num-examples` to control how many.
+
+```bash
+# Default run (200 molecules/dataset, 4 examples, outputs to tmp/)
+python scripts/visualization/compare_community_structure.py --no-show
+
+# Generate 8 examples spanning the full atom count range (17→99 atoms)
+python scripts/visualization/compare_community_structure.py \
+    --num-examples 8 \
+    --no-show
+
+# Adjust coarsening granularity
+python scripts/visualization/compare_community_structure.py \
+    --min-community-size 6 \
+    --no-show
+```
+![community comparison](figure/community.png)
+
 ## References
 - [HiGen: Hierarchical Graph Generative Networks](https://arxiv.org/abs/2305.19337) - Hierarchical decomposition approach
 - [AutoGraph](https://arxiv.org/abs/2306.10310) - SENT tokenization scheme

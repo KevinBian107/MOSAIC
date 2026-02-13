@@ -31,7 +31,7 @@ min_community_size: 4       # Minimum nodes before stopping recursion
 #   - simple_spectral: Single-level spectral clustering (no recursion, deprecated)
 #   - motif_aware_spectral: Spectral clustering with motif preservation
 #   - motif_community: Direct motif-based community assignment (not yet implemented)
-#   - hac: Hierarchical agglomerative clustering with connectivity constraint
+#   - hac: Boruvka-based affinity clustering with modularity-optimal cut
 coarsening_strategy: spectral
 
 # Motif-aware coarsening settings (only used with motif-aware strategies)
@@ -43,10 +43,6 @@ motif_alpha: 1.0            # Weight for motif affinity (higher = stronger prese
 
 normalize_by_motif_size: false  # Normalize motif contribution by 1/motif_size
                                 # Prevents large motifs from dominating
-
-# HAC-specific settings (only used with coarsening_strategy: hac)
-hac_linkage: ward              # Options: ward, complete, average, single
-hac_feature_type: adjacency    # Node features: adjacency (adjacency matrix rows)
 
 # Labeled graph support (encode atom/bond types for molecules)
 labeled_graph: true

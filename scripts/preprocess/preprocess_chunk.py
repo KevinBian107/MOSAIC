@@ -84,18 +84,6 @@ def main():
         default="spectral",
         help="Coarsening strategy (default: spectral)",
     )
-    parser.add_argument(
-        "--hac-linkage",
-        default="ward",
-        choices=["ward", "complete", "average", "single"],
-        help="HAC linkage criterion (default: ward)",
-    )
-    parser.add_argument(
-        "--hac-feature-type",
-        default="adjacency",
-        choices=["adjacency"],
-        help="HAC node feature type (default: adjacency)",
-    )
     args = parser.parse_args()
 
     chunk_size = args.end - args.start
@@ -170,11 +158,6 @@ def main():
         "normalize_by_motif_size": False,
         "undirected": True,
     }
-    # Include HAC-specific params in config hash when using HAC
-    if args.coarsening_strategy == "hac":
-        tokenizer_config["hac_linkage"] = args.hac_linkage
-        tokenizer_config["hac_feature_type"] = args.hac_feature_type
-
     # Build common tokenizer kwargs
     tokenizer_kwargs = dict(
         max_length=-1,
@@ -186,10 +169,6 @@ def main():
         labeled_graph=True,
         seed=args.seed,
     )
-    if args.coarsening_strategy == "hac":
-        tokenizer_kwargs["hac_linkage"] = args.hac_linkage
-        tokenizer_kwargs["hac_feature_type"] = args.hac_feature_type
-
     # Initialize tokenizer
     if args.tokenizer == "hsent":
         tokenizer = HSENTTokenizer(**tokenizer_kwargs)
