@@ -123,8 +123,11 @@ fi
 cd "$PROJECT_ROOT"
 
 # DDP scaling: adjust hyperparameters for multi-GPU training
-# Steps are divided by NUM_DEVICES so total samples seen stays the same.
-# LR and warmup are scaled by sqrt(NUM_DEVICES) following linear scaling rule.
+# Per-GPU batch is reduced to 16 to fit MIG instances (~12GB VRAM each).
+# Effective batch = 16 × NUM_DEVICES. Scaling is relative to baseline batch=32:
+#   scale_factor = sqrt(effective_batch / 32)
+#   LR × scale_factor, warmup × scale_factor, steps × (32 / effective_batch)
+DDP_BATCH_SIZE=16
 SCALED_LR=""
 SCALED_WARMUP=""
 if [ "$NUM_DEVICES" -gt 1 ]; then
@@ -134,11 +137,13 @@ if [ "$NUM_DEVICES" -gt 1 ]; then
         BASE_LR="6e-4"
     fi
     BASE_WARMUP=1000
+    EFFECTIVE_BATCH=$((DDP_BATCH_SIZE * NUM_DEVICES))
 
     ORIG_STEPS=$MAX_STEPS
-    MAX_STEPS=$((MAX_STEPS / NUM_DEVICES))
-    SCALED_LR=$(awk "BEGIN {printf \"%.2e\", $BASE_LR * sqrt($NUM_DEVICES)}")
-    SCALED_WARMUP=$(awk "BEGIN {printf \"%d\", $BASE_WARMUP * sqrt($NUM_DEVICES)}")
+    # Scale steps so total samples seen = original_steps × 32
+    MAX_STEPS=$(awk "BEGIN {printf \"%d\", $MAX_STEPS * 32 / $EFFECTIVE_BATCH}")
+    SCALED_LR=$(awk "BEGIN {printf \"%.2e\", $BASE_LR * sqrt($EFFECTIVE_BATCH / 32)}")
+    SCALED_WARMUP=$(awk "BEGIN {printf \"%d\", $BASE_WARMUP * sqrt($EFFECTIVE_BATCH / 32)}")
 fi
 
 echo "========================================"
