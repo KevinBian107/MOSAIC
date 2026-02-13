@@ -1309,6 +1309,44 @@ def main(cfg: DictConfig) -> None:
     max_epochs = cfg.trainer.get("max_epochs")
     max_steps = cfg.trainer.max_steps if max_epochs is None else -1
 
+    # Print DDP speedup estimation
+    num_gpus = cfg.trainer.devices if cfg.trainer.devices > 1 else 1
+    current_batch_size = cfg.data.batch_size
+    effective_batch_size = current_batch_size * num_gpus
+
+    # Baseline: 1 GPU, batch_size=32, 20 epochs
+    baseline_batch = 32
+    baseline_gpus = 1
+    baseline_epochs = 20
+    baseline_effective_batch = baseline_batch * baseline_gpus
+
+    if max_epochs is not None:
+        current_epochs = max_epochs
+
+        # Calculate relative training time
+        # Time is proportional to: (epochs * data_size) / (effective_batch_size * num_gpus * gpu_efficiency)
+        # Speedup from batch size scaling
+        batch_speedup = effective_batch_size / baseline_effective_batch
+        # Speedup from epoch reduction
+        epoch_speedup = baseline_epochs / current_epochs
+        # DDP efficiency (typically 0.85-0.95 for 2-4 GPUs, accounting for communication overhead)
+        ddp_efficiency = 1.0 if num_gpus == 1 else (0.95 if num_gpus == 2 else 0.90 if num_gpus <= 4 else 0.85)
+
+        # Total expected speedup
+        total_speedup = batch_speedup * epoch_speedup * ddp_efficiency
+
+        log.info("=" * 80)
+        log.info("DDP SPEEDUP ESTIMATION")
+        log.info("=" * 80)
+        log.info(f"Baseline:  {baseline_gpus} GPU  × batch={baseline_batch}  × {baseline_epochs} epochs")
+        log.info(f"Current:   {num_gpus} GPU{'s' if num_gpus > 1 else ''}  × batch={current_batch_size}  × {current_epochs} epochs")
+        log.info(f"Effective batch size: {baseline_effective_batch} → {effective_batch_size} ({effective_batch_size/baseline_effective_batch:.1f}x)")
+        log.info(f"DDP efficiency factor: {ddp_efficiency:.2f}")
+        log.info(f"Expected speedup: {total_speedup:.2f}x faster than baseline")
+        if total_speedup > 1:
+            log.info(f"Estimated time reduction: {(1 - 1/total_speedup) * 100:.1f}%")
+        log.info("=" * 80)
+
     trainer = pl.Trainer(
         max_epochs=max_epochs if max_epochs is not None else 1000,
         max_steps=max_steps,
