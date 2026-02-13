@@ -153,11 +153,11 @@ echo ""
 echo "Settings:"
 echo "  Dataset: $DATASET"
 if [ "$NUM_DEVICES" -gt 1 ]; then
-    echo "  DDP: ${NUM_DEVICES} GPUs"
-    echo "  Max steps: $ORIG_STEPS → $MAX_STEPS (÷${NUM_DEVICES} for equivalent training)"
-    echo "  LR: $BASE_LR → $SCALED_LR (×√${NUM_DEVICES})"
-    echo "  Warmup: $BASE_WARMUP → $SCALED_WARMUP (×√${NUM_DEVICES})"
-    echo "  Effective batch: $((32 * NUM_DEVICES)) (32 × ${NUM_DEVICES})"
+    echo "  DDP: ${NUM_DEVICES} GPUs (batch=${DDP_BATCH_SIZE}/GPU)"
+    echo "  Max steps: $ORIG_STEPS → $MAX_STEPS (×32/${EFFECTIVE_BATCH} for equivalent training)"
+    echo "  LR: $BASE_LR → $SCALED_LR (×√(${EFFECTIVE_BATCH}/32))"
+    echo "  Warmup: $BASE_WARMUP → $SCALED_WARMUP (×√(${EFFECTIVE_BATCH}/32))"
+    echo "  Effective batch: ${EFFECTIVE_BATCH} (${DDP_BATCH_SIZE} × ${NUM_DEVICES})"
 else
     echo "  Max steps: $MAX_STEPS"
 fi
@@ -255,6 +255,7 @@ for tok_config in "${TOKENIZERS[@]}"; do
     if [ "$NUM_DEVICES" -gt 1 ]; then
         CMD="$CMD trainer.devices=$NUM_DEVICES"
         CMD="$CMD trainer.strategy=ddp"
+        CMD="$CMD data.batch_size=$DDP_BATCH_SIZE"
         CMD="$CMD model.learning_rate=$SCALED_LR"
         CMD="$CMD model.warmup_steps=$SCALED_WARMUP"
     fi
