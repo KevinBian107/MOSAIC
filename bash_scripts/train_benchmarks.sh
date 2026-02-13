@@ -254,7 +254,7 @@ for tok_config in "${TOKENIZERS[@]}"; do
     # Add DDP settings
     if [ "$NUM_DEVICES" -gt 1 ]; then
         CMD="$CMD trainer.devices=$NUM_DEVICES"
-        CMD="$CMD +trainer.strategy=ddp"
+        CMD="$CMD trainer.strategy=ddp"
         CMD="$CMD data.batch_size=$DDP_BATCH_SIZE"
         CMD="$CMD model.learning_rate=$SCALED_LR"
         CMD="$CMD model.warmup_steps=$SCALED_WARMUP"
