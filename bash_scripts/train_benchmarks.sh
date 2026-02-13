@@ -7,6 +7,8 @@
 # Usage:
 #   ./bash_scripts/train_benchmarks.sh              # Train on MOSES (default)
 #   ./bash_scripts/train_benchmarks.sh --coconut    # Train on COCONUT
+#   ./bash_scripts/train_benchmarks.sh --ddp        # Train with DDP on 4 GPUs
+#   ./bash_scripts/train_benchmarks.sh --devices=2  # Train with DDP on 2 GPUs
 #   ./bash_scripts/train_benchmarks.sh --skip-sc-hac  # Only train MC variants
 #   ./bash_scripts/train_benchmarks.sh --dry-run    # Show what would be run
 #   ./bash_scripts/train_benchmarks.sh --help       # Show help
@@ -28,6 +30,7 @@ WANDB_ENABLED=true
 DRY_RUN=false
 FORCE=false
 SKIP_SC_HAC=false
+NUM_DEVICES=1
 
 # Tokenizers to train
 # Format: "tokenizer:coarsening" where coarsening is "none", "mc", "sc", or "hac"
@@ -59,6 +62,12 @@ for arg in "$@"; do
             OUTPUT_DIR="$PROJECT_ROOT/outputs/benchmark_coconut"
             MAX_STEPS=50000  # Smaller dataset, fewer steps
             ;;
+        --ddp)
+            NUM_DEVICES=4  # Default to 4 GPUs
+            ;;
+        --devices=*)
+            NUM_DEVICES="${arg#*=}"
+            ;;
         --skip-sc-hac)
             SKIP_SC_HAC=true
             ;;
@@ -74,9 +83,11 @@ for arg in "$@"; do
             echo "  --dry-run         Show what would be run without executing"
             echo "  --force           Re-run even if output best.ckpt already exists"
             echo "  --coconut         Train on COCONUT instead of MOSES"
+            echo "  --ddp             Enable DDP multi-GPU training (default: 4 GPUs)"
+            echo "  --devices=N       Set number of GPUs (implies DDP when N > 1)"
             echo "  --skip-sc-hac     Only train MC variants (skip SC and HAC coarsening)"
             echo "  --no-wandb        Disable WandB logging"
-            echo "  --steps=N         Set max training steps (default: 500000 MOSES, 50000 COCONUT)"
+            echo "  --steps=N         Set max training steps before DDP scaling (default: 500000 MOSES, 50000 COCONUT)"
             echo ""
             echo "Tokenizers trained (default: all 8 variants):"
             echo "  - SENT (flat, no coarsening)"
@@ -111,13 +122,40 @@ fi
 
 cd "$PROJECT_ROOT"
 
+# DDP scaling: adjust hyperparameters for multi-GPU training
+# Steps are divided by NUM_DEVICES so total samples seen stays the same.
+# LR and warmup are scaled by sqrt(NUM_DEVICES) following linear scaling rule.
+SCALED_LR=""
+SCALED_WARMUP=""
+if [ "$NUM_DEVICES" -gt 1 ]; then
+    if [ "$DATASET" = "coconut" ]; then
+        BASE_LR="1e-5"
+    else
+        BASE_LR="6e-4"
+    fi
+    BASE_WARMUP=1000
+
+    ORIG_STEPS=$MAX_STEPS
+    MAX_STEPS=$((MAX_STEPS / NUM_DEVICES))
+    SCALED_LR=$(awk "BEGIN {printf \"%.2e\", $BASE_LR * sqrt($NUM_DEVICES)}")
+    SCALED_WARMUP=$(awk "BEGIN {printf \"%d\", $BASE_WARMUP * sqrt($NUM_DEVICES)}")
+fi
+
 echo "========================================"
 echo "Training Benchmark Models"
 echo "========================================"
 echo ""
 echo "Settings:"
 echo "  Dataset: $DATASET"
-echo "  Max steps: $MAX_STEPS"
+if [ "$NUM_DEVICES" -gt 1 ]; then
+    echo "  DDP: ${NUM_DEVICES} GPUs"
+    echo "  Max steps: $ORIG_STEPS → $MAX_STEPS (÷${NUM_DEVICES} for equivalent training)"
+    echo "  LR: $BASE_LR → $SCALED_LR (×√${NUM_DEVICES})"
+    echo "  Warmup: $BASE_WARMUP → $SCALED_WARMUP (×√${NUM_DEVICES})"
+    echo "  Effective batch: $((32 * NUM_DEVICES)) (32 × ${NUM_DEVICES})"
+else
+    echo "  Max steps: $MAX_STEPS"
+fi
 echo "  WandB: $WANDB_ENABLED"
 echo "  Output: $OUTPUT_DIR"
 echo "  Skip SC/HAC: $SKIP_SC_HAC"
@@ -207,6 +245,14 @@ for tok_config in "${TOKENIZERS[@]}"; do
     CMD="$CMD logs.run_name=$RUN_NAME"
     CMD="$CMD logs.base_dir=$OUTPUT_DIR"
     CMD="$CMD wandb.enabled=$WANDB_ENABLED"
+
+    # Add DDP settings
+    if [ "$NUM_DEVICES" -gt 1 ]; then
+        CMD="$CMD trainer.devices=$NUM_DEVICES"
+        CMD="$CMD trainer.strategy=ddp"
+        CMD="$CMD model.learning_rate=$SCALED_LR"
+        CMD="$CMD model.warmup_steps=$SCALED_WARMUP"
+    fi
 
     # Add coarsening for hierarchical tokenizers
     if [ -n "$COARSENING_FULL" ] && supports_coarsening "$TOKENIZER"; then

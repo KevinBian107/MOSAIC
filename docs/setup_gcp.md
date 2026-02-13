@@ -118,7 +118,7 @@ If this shows `0.0`, you cannot create any GPU VMs even if you have regional quo
 gcloud compute regions describe us-central1 --format="table(quotas.filter(metric:NVIDIA))"
 ```
 
-This shows per-GPU-type limits (T4, V100, etc.) for a specific region.
+This shows per-GPU-type limits (T4, A100, etc.) for a specific region.
 
 **If either quota is 0**, request an increase:
 1. Go to: https://console.cloud.google.com/iam-admin/quotas
@@ -157,26 +157,50 @@ gcloud compute instances create mosaic-t4 \
 
 If the image is not found, run the list command above to find current image names.
 
-### Option B: V100 GPU (Faster Training)
+### Option B: A100 GPU (Faster Training)
 
-**Note:** V100 GPUs have limited availability. Check which zones have V100:
+**Note:** A100 GPUs require the `a2-highgpu-*` machine family (not `n1-standard-*`). The `a2-highgpu-1g` provides 1 A100 (40GB), 12 vCPUs, and 85GB RAM.
+
+A100 GPUs have limited availability. Check which zones have A100:
 
 ```bash
-gcloud compute accelerator-types list --filter="name=nvidia-tesla-v100"
+gcloud compute accelerator-types list --filter="name=nvidia-tesla-a100"
 ```
 
-Common zones with V100: `us-west1-a`, `us-west1-b`, `us-east1-c`, `europe-west4-a`
+Common zones with A100:
+
+```
+nvidia-tesla-a100  us-central1-a      NVIDIA A100 40GB
+nvidia-tesla-a100  us-central1-b      NVIDIA A100 40GB
+nvidia-tesla-a100  us-central1-c      NVIDIA A100 40GB
+nvidia-tesla-a100  us-central1-f      NVIDIA A100 40GB
+nvidia-tesla-a100  us-west1-b         NVIDIA A100 40GB
+nvidia-tesla-a100  us-east1-b         NVIDIA A100 40GB
+nvidia-tesla-a100  asia-northeast1-a  NVIDIA A100 40GB
+nvidia-tesla-a100  asia-northeast1-c  NVIDIA A100 40GB
+nvidia-tesla-a100  asia-southeast1-b  NVIDIA A100 40GB
+nvidia-tesla-a100  asia-southeast1-c  NVIDIA A100 40GB
+nvidia-tesla-a100  europe-west4-b     NVIDIA A100 40GB
+nvidia-tesla-a100  europe-west4-a     NVIDIA A100 40GB
+nvidia-tesla-a100  asia-northeast3-a  NVIDIA A100 40GB
+nvidia-tesla-a100  asia-northeast3-b  NVIDIA A100 40GB
+nvidia-tesla-a100  us-west3-b         NVIDIA A100 40GB
+nvidia-tesla-a100  us-west4-b         NVIDIA A100 40GB
+nvidia-tesla-a100  me-west1-a         NVIDIA A100 40GB
+nvidia-tesla-a100  me-west1-c         NVIDIA A100 40GB
+```
 
 ```bash
-gcloud compute instances create mosaic-v100 \
+gcloud compute instances create mosaic-a100 \
   --zone=europe-west4-a \
-  --machine-type=n1-standard-8 \
-  --accelerator=type=nvidia-tesla-v100,count=1 \
+  --machine-type=a2-highgpu-1g \
+  --accelerator=type=nvidia-tesla-a100,count=1 \
   --image-family=pytorch-2-7-cu128-ubuntu-2204-nvidia-570 \
   --image-project=deeplearning-platform-release \
   --boot-disk-size=200GB \
   --boot-disk-type=pd-ssd \
   --maintenance-policy=TERMINATE \
+  --provisioning-model=SPOT \
   --metadata="install-nvidia-driver=True"
 ```
 
@@ -223,20 +247,20 @@ This shows all your VMs with name, zone, machine type, IPs, and status (RUNNING/
 ### SSH into the VM
 
 ```bash
-gcloud compute ssh mosaic-v100 --zone=europe-west4-a
+gcloud compute ssh mosaic-a100 --zone=europe-west4-a
 ```
 
 If you can't ssh into it, it's probably an meta-info loss issue, just reset:
 
 ```bash
-gcloud compute instances reset mosaic-v100 --zone=europe-west4-a
+gcloud compute instances reset mosaic-a100 --zone=europe-west4-a
 ```
 
 ### Verify GPU is Available
 
 ```bash
 nvidia-smi
-# Should show your GPU (T4, V100, etc.)
+# Should show your GPU (T4, A100, etc.)
 ```
 
 ---
@@ -504,7 +528,7 @@ gcloud compute instances list --filter="name~mosaic" --format="value(name,zone)"
 gcloud compute instances list --filter="status=RUNNING"
 
 # Stop all running MOSAIC VMs
-gcloud compute instances stop $(gcloud compute instances list --filter="name~mosaic AND status=RUNNING" --format="value(name)") --zone=us-central1-a
+gcloud compute instances stop $(gcloud compute instances list --filter="name~mosaic AND status=RUNNING" --format="value(name)") --zone=europe-west4-a
 ```
 
 ### 2. Use Spot/Preemptible VMs for Long Training
@@ -611,24 +635,24 @@ The requested GPU is not available in that zone. **Solution:**
 
 1. Check which zones have your GPU type:
    ```bash
-   # For V100
-   gcloud compute accelerator-types list --filter="name=nvidia-tesla-v100"
+   # For A100
+   gcloud compute accelerator-types list --filter="name=nvidia-tesla-a100"
 
    # For T4
    gcloud compute accelerator-types list --filter="name=nvidia-tesla-t4"
    ```
 
 2. Try a different zone from the list:
-   - V100 common zones: `us-west1-a`, `us-west1-b`, `us-east1-c`, `europe-west4-a`
+   - A100 common zones: `us-west1-a`, `us-west1-b`, `us-east1-c`, `europe-west4-a`
    - T4 is more widely available
 
-3. Or switch to a different GPU type (T4 is more available than V100)
+3. Or switch to a different GPU type (T4 is more available than A100)
 
 ### VM Won't Start (Spot Instance)
 
 Spot instances may not be available. Try:
 1. Different zone: `--zone=us-central1-b`
-2. Different GPU: `nvidia-tesla-t4` instead of `v100`
+2. Different GPU: `nvidia-tesla-t4` instead of `a100`
 3. Standard VM (more expensive): Remove `--provisioning-model=SPOT`
 
 ### SSH Connection Timeout
@@ -649,7 +673,7 @@ NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver.
 ```bash
 lspci | grep -i nvidia
 # Should show something like:
-# 00:04.0 3D controller: NVIDIA Corporation GV100GL [Tesla V100 SXM2 16GB]
+# 00:04.0 3D controller: NVIDIA Corporation GV100GL [Tesla A100 SXM2 16GB]
 ```
 
 If no output, the GPU is not attached to the VM. Recreate the VM with GPU attached.
@@ -727,8 +751,8 @@ sudo reboot
 After reboot, SSH back in and verify:
 
 ```bash
-gcloud compute ssh mosaic-v100 --zone=europe-west4-a
+gcloud compute ssh mosaic-a100 --zone=europe-west4-a
 conda activate mosaic
 python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
-# Should print: True and Tesla V100-SXM2-16GB
+# Should print: True and Tesla A100-SXM2-16GB
 ```
