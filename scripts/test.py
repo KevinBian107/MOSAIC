@@ -193,6 +193,7 @@ def main(cfg: DictConfig) -> None:
         tokenizer=tokenizer,
         batch_size=cfg.data.batch_size,
         num_workers=cfg.data.num_workers,
+        test_num_workers=cfg.data.get("test_num_workers", 0),
         num_train=cfg.data.num_train,
         num_val=cfg.data.num_val,
         num_test=cfg.data.num_test,

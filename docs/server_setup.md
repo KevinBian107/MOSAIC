@@ -14,6 +14,9 @@ ssh <username>@dsmlp-login.ucsd.edu
 # Create pod: 1 GPU, 8 CPU, 64GB Memory, A30
 launch-scipy-ml.sh -W DSC180A_FA25_A00 -g 1 -c 8 -m 64 -n 31 -b
 
+# Or if you want a pod with 4 * A5000s
+launch-scipy-ml.sh -W DSC180A_FA25_A00 -g 4 -p low -c 8 -m 64 -n 30 -b
+
 # List pods
 kubectl get pods
 
@@ -65,6 +68,76 @@ nohup python scripts/train.py tokenizer=hsent data.use_cache=true \
 nohup python scripts/train.py tokenizer=hdt data.use_cache=true \
     trainer.max_steps=100000 wandb.enabled=true > hdt.log 2>&1 &
 ```
+
+## Multi-GPU DDP Training Commands
+
+### 4 GPUs × batch_size=96 (effective batch=384)
+
+```bash
+python scripts/train.py \
+  model.model_name=gpt2-xs \
+  tokenizer=hsent \
+  data.num_train=500000 \
+  data.num_val=100 \
+  data.use_cache=true \
+  trainer.devices=4 \
+  trainer.strategy=ddp \
+  trainer.max_epochs=20 \
+  trainer.max_steps=-1 \
+  trainer.check_val_every_n_epoch=1 \
+  data.batch_size=96 \
+  model.learning_rate=1.2e-3 \
+  model.warmup_steps=2000 \
+  sampling.num_samples=0 \
+  wandb.enabled=true \
+  wandb.project=molecular-graph-gen \
+  wandb.name=hsent-500k-ddp-4gpu-bs96-20epochs \
+  wandb.log_model=true \
+  wandb.log_graphs=true \
+  wandb.eval_every_n_val=0
+```
+
+**Expected speedup: ~10.8x faster than baseline (1 GPU, batch=32, 20 epochs)**
+
+### 4 GPUs × batch_size=64 (effective batch=256)
+
+```bash
+python scripts/train.py \
+  model.model_name=gpt2-xs \
+  tokenizer=hsent \
+  data.num_train=500000 \
+  data.num_val=100 \
+  data.use_cache=true \
+  trainer.devices=4 \
+  trainer.strategy=ddp \
+  trainer.max_epochs=20 \
+  trainer.max_steps=-1 \
+  trainer.check_val_every_n_epoch=1 \
+  data.batch_size=64 \
+  model.learning_rate=1.7e-3 \
+  model.warmup_steps=2830 \
+  sampling.num_samples=0 \
+  wandb.enabled=true \
+  wandb.project=molecular-graph-gen \
+  wandb.name=hsent-500k-ddp-4gpu-bs64-20epochs \
+  wandb.log_model=true \
+  wandb.log_graphs=true \
+  wandb.eval_every_n_val=0
+```
+
+**Expected speedup: ~7.2x faster than baseline (1 GPU, batch=32, 20 epochs)**
+
+### Notes on DDP Training
+
+- **Effective batch size** = `batch_size × num_GPUs`
+- **Learning rate scaling**: Use √(effective_batch / baseline_batch) scaling
+  - Baseline: 1 GPU × batch=32 → LR=6e-4
+  - 4 GPUs × batch=96 → effective=384 → LR=6e-4 × √12 ≈ 1.2e-3
+  - 4 GPUs × batch=64 → effective=256 → LR=6e-4 × √8 ≈ 1.7e-3
+- **Warmup steps**: Scale proportionally with batch size increase
+- **DDP efficiency**: Expect ~90% efficiency with 4 GPUs (communication overhead)
+- **Tensor Cores**: Set via `torch.set_float32_matmul_precision('medium')` for A5000 speedup
+- **Validation**: Set to once per epoch to minimize overhead during training
 
 ## Evaluation Commands
 
