@@ -35,6 +35,7 @@ trainer:
   max_epochs: null  # Set this for epoch-based training (e.g., 20)
   max_steps: 250000  # Set to -1 when using max_epochs. Reduce proportionally with batch size (e.g., 62500 for batch=128)
   val_check_interval: 1000
+  check_val_every_n_epoch: null  # Set to 1 for validation every epoch (only used when max_epochs is set)
   precision: 32
   gradient_clip_val: 1.0
   accelerator: auto

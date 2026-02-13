@@ -14,6 +14,9 @@ ssh <username>@dsmlp-login.ucsd.edu
 # Create pod: 1 GPU, 8 CPU, 64GB Memory, A30
 launch-scipy-ml.sh -W DSC180A_FA25_A00 -g 1 -c 8 -m 64 -n 31 -b
 
+# Or if you want a pod with 4 * A5000s
+launch-scipy-ml.sh -W DSC180A_FA25_A00 -g 4 -p low -c 8 -m 64 -n 30 -b
+
 # List pods
 kubectl get pods
 
