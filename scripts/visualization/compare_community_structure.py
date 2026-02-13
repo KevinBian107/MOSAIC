@@ -896,8 +896,9 @@ def select_example_molecules(
 ) -> list[dict[str, Any]]:
     """Select molecules for example figures spanning atom count range.
 
-    Picks: small MOSES (~15 atoms), medium MOSES (~22 atoms),
-    medium COCONUT (~35 atoms), large COCONUT (~60-80 atoms).
+    Computes evenly-spaced atom count targets across the combined range
+    of both datasets, then picks the closest molecule from either dataset
+    for each target.
 
     Args:
         moses_analyses: MOSES analysis results.
@@ -905,34 +906,53 @@ def select_example_molecules(
         num_examples: Number of examples to select.
 
     Returns:
-        List of analysis dicts with 'dataset' field added.
+        List of analysis dicts with 'dataset' field added, sorted by
+        increasing atom count.
     """
-    targets = [
-        ("MOSES", moses_analyses, 15),
-        ("MOSES", moses_analyses, 22),
-        ("COCONUT", coconut_analyses, 35),
-        ("COCONUT", coconut_analyses, 65),
-    ]
+    # Pool all analyses with dataset labels
+    all_analyses = []
+    for a in moses_analyses:
+        entry = dict(a)
+        entry["dataset"] = "MOSES"
+        all_analyses.append(entry)
+    for a in coconut_analyses:
+        entry = dict(a)
+        entry["dataset"] = "COCONUT"
+        all_analyses.append(entry)
 
+    if not all_analyses:
+        return []
+
+    # Compute atom count range and evenly-spaced targets
+    atom_counts = [a["num_atoms"] for a in all_analyses]
+    min_atoms = min(atom_counts)
+    max_atoms = max(atom_counts)
+
+    if num_examples == 1:
+        targets = [(min_atoms + max_atoms) / 2]
+    else:
+        targets = np.linspace(min_atoms, max_atoms, num_examples).tolist()
+
+    # Greedily pick closest molecule to each target
     selected = []
-    used_smiles = set()
+    used_smiles: set[str] = set()
 
-    for dataset_name, analyses, target_atoms in targets[:num_examples]:
+    for target in targets:
         best = None
         best_dist = float("inf")
-        for a in analyses:
+        for a in all_analyses:
             if a["smiles"] in used_smiles:
                 continue
-            dist = abs(a["num_atoms"] - target_atoms)
+            dist = abs(a["num_atoms"] - target)
             if dist < best_dist:
                 best_dist = dist
                 best = a
         if best is not None:
-            best_copy = dict(best)
-            best_copy["dataset"] = dataset_name
-            selected.append(best_copy)
+            selected.append(best)
             used_smiles.add(best["smiles"])
 
+    # Sort by atom count for clean progression
+    selected.sort(key=lambda a: a["num_atoms"])
     return selected
 
 
