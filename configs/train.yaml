@@ -32,7 +32,8 @@ data:
 
 # Training configuration
 trainer:
-  max_steps: 250000  # Reduce proportionally with batch size (e.g., 62500 for batch=128)
+  max_epochs: null  # Set this for epoch-based training (e.g., 20)
+  max_steps: 250000  # Set to -1 when using max_epochs. Reduce proportionally with batch size (e.g., 62500 for batch=128)
   val_check_interval: 1000
   precision: 32
   gradient_clip_val: 1.0

@@ -1213,13 +1213,26 @@ def main(cfg: DictConfig) -> None:
         cfg.tokenizer.get("truncation_length", cfg.sampling.max_length),
     )
 
+    # Calculate total training steps for lr scheduler
+    # If using max_epochs, estimate total steps; if using max_steps, use that directly
+    if max_epochs is not None:
+        train_dataset_size = len(datamodule.train_dataset)
+        steps_per_epoch = train_dataset_size // cfg.data.batch_size
+        # Account for DDP: each GPU sees a fraction of the data
+        if cfg.trainer.devices > 1:
+            steps_per_epoch = steps_per_epoch // cfg.trainer.devices
+        total_steps = steps_per_epoch * max_epochs
+        log.info(f"Estimated total steps for {max_epochs} epochs: {total_steps:,}")
+    else:
+        total_steps = cfg.trainer.max_steps
+
     model = GraphGeneratorModule(
         tokenizer=tokenizer,
         model_name=cfg.model.model_name,
         learning_rate=cfg.model.learning_rate,
         weight_decay=cfg.model.weight_decay,
         warmup_steps=cfg.model.warmup_steps,
-        max_steps=cfg.model.max_steps,
+        max_steps=total_steps,
         sampling_top_k=cfg.sampling.top_k,
         sampling_temperature=cfg.sampling.temperature,
         sampling_max_length=model_max_length,
@@ -1292,8 +1305,13 @@ def main(cfg: DictConfig) -> None:
             f"Intermediate evaluation enabled every {eval_every_n_val} validation epochs"
         )
 
+    # Determine training duration (epochs vs steps)
+    max_epochs = cfg.trainer.get("max_epochs")
+    max_steps = cfg.trainer.max_steps if max_epochs is None else -1
+
     trainer = pl.Trainer(
-        max_steps=cfg.trainer.max_steps,
+        max_epochs=max_epochs if max_epochs is not None else 1000,
+        max_steps=max_steps,
         val_check_interval=val_check_interval if val_check_interval is not None else 1.0,
         limit_val_batches=limit_val_batches,
         num_sanity_val_steps=cfg.trainer.get("num_sanity_val_steps", 2),
