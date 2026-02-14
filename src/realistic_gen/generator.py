@@ -34,7 +34,7 @@ def generate_molecules(
     """
     model.eval()
     with torch.no_grad():
-        graphs, avg_time = model.generate(
+        graphs, avg_time, _ = model.generate(
             num_samples=num_samples,
             show_progress=show_progress,
         )

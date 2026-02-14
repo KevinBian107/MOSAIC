@@ -15,6 +15,7 @@ Usage:
 
 import json
 import logging
+import statistics
 import sys
 from pathlib import Path
 from typing import Optional
@@ -320,9 +321,18 @@ def main(cfg: DictConfig) -> None:
         num_samples = num_test
 
     log.info(f"Generating {num_samples} molecules...")
-    generated_graphs, gen_time = model.generate(num_samples=num_samples)
+    log.info("(Progress bar shows batches; slow because generation is autoregressive, one token per step.)")
+    gen_result = model.generate(num_samples=num_samples, show_progress=True)
+    generated_graphs = gen_result[0]
+    gen_time = gen_result[1]
+    token_lengths = gen_result[2] if len(gen_result) > 2 else None
     log.info(f"Generated {len(generated_graphs)} graphs")
     log.info(f"Average generation time: {gen_time:.4f}s per sample")
+    if token_lengths:
+        log.info(
+            f"Token lengths per generation: min={min(token_lengths)}, max={max(token_lengths)}, "
+            f"mean={statistics.mean(token_lengths):.1f}, median={statistics.median(token_lengths):.0f}"
+        )
 
     # Convert to SMILES using appropriate converter
     # IMPORTANT: Include all attempts (even failures) for accurate validity metric
@@ -364,12 +374,17 @@ def main(cfg: DictConfig) -> None:
         )
         log.info(f"Visualizations saved to {viz_dir}")
 
+    # Reference set for metrics that use a reference (FCD, molecular, motif)
+    ref_size = cfg.metrics.get("reference_size", 100000)
+    reference_smiles = datamodule.test_smiles[:ref_size]
+    log.info(f"Using up to {len(reference_smiles)} reference SMILES for metrics")
+
     log.info("\n" + "=" * 50)
     log.info("MOLECULAR METRICS")
     log.info("=" * 50)
 
     mol_metrics = MolecularMetrics(
-        reference_smiles=datamodule.test_smiles,
+        reference_smiles=reference_smiles,
     )
     mol_results = mol_metrics(generated_smiles)
 
@@ -386,7 +401,7 @@ def main(cfg: DictConfig) -> None:
     if cfg.metrics.get("compute_motif", True):  # Default enabled
         try:
             motif_metrics = MotifDistributionMetric(
-                reference_smiles=datamodule.test_smiles,
+                reference_smiles=reference_smiles,
             )
             motif_results = motif_metrics(generated_smiles)
 
@@ -415,7 +430,7 @@ def main(cfg: DictConfig) -> None:
         try:
             # Convert reference SMILES to graphs for PGD
             # Limit to max_reference_size for memory constraints
-            max_ref_size = cfg.metrics.get("pgd_reference_size", 10000)
+            max_ref_size = cfg.metrics.get("pgd_reference_size", 100)
             reference_smiles = datamodule.test_smiles[:max_ref_size]
 
             log.info(
@@ -469,7 +484,7 @@ def main(cfg: DictConfig) -> None:
     fcd_score = None
     if cfg.metrics.get("compute_fcd", True):  # Default enabled
         try:
-            fcd_score = compute_fcd(generated_smiles, datamodule.test_smiles)
+            fcd_score = compute_fcd(generated_smiles, reference_smiles)
             if not (fcd_score != fcd_score):  # Check for NaN
                 log.info(f"  FCD: {fcd_score:.6f}")
             else:
@@ -508,6 +523,11 @@ def main(cfg: DictConfig) -> None:
         "num_samples": num_samples,
         "num_valid_smiles": valid_count,
     }
+    if token_lengths:
+        all_results["token_lengths"] = token_lengths
+        all_results["token_length_mean"] = float(statistics.mean(token_lengths))
+        all_results["token_length_min"] = min(token_lengths)
+        all_results["token_length_max"] = max(token_lengths)
 
     # Add motif summary only if computed
     if len(motif_summary) > 0:

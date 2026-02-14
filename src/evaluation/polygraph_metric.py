@@ -30,7 +30,7 @@ class PolygraphMetric:
     def __init__(
         self,
         reference_graphs: list[Data | nx.Graph],
-        max_reference_size: int = 10000,
+        max_reference_size: int = 100,
     ) -> None:
         """Initialize PolyGraph Discrepancy metric.
 
