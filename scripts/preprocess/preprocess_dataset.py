@@ -29,7 +29,7 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.data.molecular import MolecularDataset
-from src.tokenizers import HDTTokenizer, HSENTTokenizer, SENTTokenizer
+from src.tokenizers import HDTCTokenizer, HDTTokenizer, HSENTTokenizer, SENTTokenizer
 
 log = logging.getLogger(__name__)
 
@@ -63,6 +63,64 @@ def get_cache_filename(
     return f"{dataset_name}_{split}_{tokenizer_type}_{num_samples}_{config_hash}.pt"
 
 
+def _load_coconut_split(
+    split: str,
+    num_samples: int | None,
+    include_hydrogens: bool,
+    labeled: bool,
+    data_file: str,
+    min_atoms: int,
+    max_atoms: int,
+    min_rings: int,
+    num_train: int,
+    num_val: int,
+) -> MolecularDataset:
+    """Load a COCONUT split with sequential ordering matching datamodule cache mode.
+
+    Args:
+        split: Dataset split (train, val, test).
+        num_samples: Expected number of samples for this split.
+        include_hydrogens: Whether to include explicit hydrogens.
+        labeled: Whether to include atom/bond labels.
+        data_file: Path to COCONUT SMILES file.
+        min_atoms: Minimum atom count filter.
+        max_atoms: Maximum atom count filter.
+        min_rings: Minimum ring count filter.
+        num_train: Total training samples (for split offset calculation).
+        num_val: Total validation samples (for split offset calculation).
+
+    Returns:
+        MolecularDataset for the requested split.
+    """
+    from src.data.coconut_loader import CoconutLoader
+
+    loader = CoconutLoader(
+        min_atoms=min_atoms,
+        max_atoms=max_atoms,
+        min_rings=min_rings,
+        data_file=data_file,
+    )
+
+    # Load ALL molecules in file order (no shuffle) for sequential splitting
+    all_smiles = loader.load_smiles()
+    log.info(f"Loaded {len(all_smiles)} COCONUT molecules passing filters")
+
+    # Sequential split matching datamodule cache-mode ordering
+    if split == "train":
+        smiles = all_smiles[:num_train]
+    elif split == "val":
+        smiles = all_smiles[num_train : num_train + num_val]
+    else:  # test
+        smiles = all_smiles[num_train + num_val : num_train + num_val + (num_samples or 500)]
+
+    return MolecularDataset(
+        smiles,
+        dataset_name=f"coconut_{split}",
+        include_hydrogens=include_hydrogens,
+        labeled=labeled,
+    )
+
+
 def preprocess_split(
     dataset_name: str,
     split: str,
@@ -72,6 +130,12 @@ def preprocess_split(
     tokenizer_type: str,
     tokenizer_config: dict[str, Any],
     include_hydrogens: bool = False,
+    data_file: str = "",
+    min_atoms: int = 0,
+    max_atoms: int = 100,
+    min_rings: int = 0,
+    num_train: int = 0,
+    num_val: int = 0,
 ) -> Path:
     """Preprocess and cache a single dataset split.
 
@@ -84,10 +148,26 @@ def preprocess_split(
         tokenizer_type: Type of tokenizer.
         tokenizer_config: Tokenizer configuration.
         include_hydrogens: Whether to include explicit hydrogens.
+        data_file: Path to data file (for COCONUT).
+        min_atoms: Minimum atom filter (for COCONUT).
+        max_atoms: Maximum atom filter (for COCONUT).
+        min_rings: Minimum ring filter (for COCONUT).
+        num_train: Training split size (for COCONUT split offsets).
+        num_val: Validation split size (for COCONUT split offsets).
 
     Returns:
         Path to saved cache file.
     """
+    # Check if cache already exists (skip reprocessing)
+    if num_samples is not None:
+        cache_filename = get_cache_filename(
+            dataset_name, split, tokenizer_type, num_samples, tokenizer_config
+        )
+        cache_path = cache_dir / cache_filename
+        if cache_path.exists():
+            log.info(f"Cache already exists for {split}: {cache_path} (skipping)")
+            return cache_path
+
     log.info(f"Preprocessing {split} split ({num_samples or 'all'} samples)...")
 
     # Load molecular dataset
@@ -107,6 +187,19 @@ def preprocess_split(
             max_molecules=num_samples,
             include_hydrogens=include_hydrogens,
             labeled=labeled,
+        )
+    elif dataset_name == "coconut":
+        mol_dataset = _load_coconut_split(
+            split=split,
+            num_samples=num_samples,
+            include_hydrogens=include_hydrogens,
+            labeled=labeled,
+            data_file=data_file,
+            min_atoms=min_atoms,
+            max_atoms=max_atoms,
+            min_rings=min_rings,
+            num_train=num_train,
+            num_val=num_val,
         )
     else:
         raise ValueError(f"Unknown dataset: {dataset_name}")
@@ -190,7 +283,26 @@ def main(cfg: DictConfig) -> None:
         "labeled_graph": cfg.tokenizer.get("labeled_graph", False),
     }
 
-    if tokenizer_type == "hdt":
+    if tokenizer_type == "hdtc":
+        tokenizer_config.update(
+            {
+                "node_order": cfg.tokenizer.get("node_order", "BFS"),
+                "include_rings": cfg.tokenizer.get("include_rings", True),
+            }
+        )
+
+        log.info("Using HDTC tokenizer")
+
+        tokenizer = HDTCTokenizer(
+            max_length=cfg.tokenizer.max_length,
+            truncation_length=cfg.tokenizer.truncation_length,
+            node_order=cfg.tokenizer.get("node_order", "BFS"),
+            include_rings=cfg.tokenizer.get("include_rings", True),
+            labeled_graph=cfg.tokenizer.get("labeled_graph", True),
+            seed=cfg.seed,
+        )
+
+    elif tokenizer_type == "hdt":
         coarsening_strategy = cfg.tokenizer.get("coarsening_strategy", "spectral")
         motif_aware = cfg.tokenizer.get("motif_aware", False)
         tokenizer_config.update(
@@ -291,6 +403,18 @@ def main(cfg: DictConfig) -> None:
         log.error("No splits specified! Set data.num_train, data.num_val, or data.num_test")
         return
 
+    # COCONUT-specific parameters for split offset calculation
+    coconut_kwargs = {}
+    if cfg.data.dataset_name == "coconut":
+        coconut_kwargs = {
+            "data_file": cfg.data.get("data_file", "data/coconut_complex.smi"),
+            "min_atoms": cfg.data.get("min_atoms", 20),
+            "max_atoms": cfg.data.get("max_atoms", 100),
+            "min_rings": cfg.data.get("min_rings", 3),
+            "num_train": cfg.data.num_train or 5000,
+            "num_val": cfg.data.num_val or 500,
+        }
+
     for split_name, num_samples in splits:
         preprocess_split(
             dataset_name=cfg.data.dataset_name,
@@ -301,6 +425,7 @@ def main(cfg: DictConfig) -> None:
             tokenizer_type=tokenizer_type,
             tokenizer_config=tokenizer_config,
             include_hydrogens=cfg.data.get("include_hydrogens", False),
+            **coconut_kwargs,
         )
 
     log.info("\n" + "=" * 50)

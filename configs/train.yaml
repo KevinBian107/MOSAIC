@@ -40,6 +40,7 @@ trainer:
   gradient_clip_val: 1.0
   accelerator: auto
   devices: 1  # Set to 2+ for multi-GPU DDP training
+  num_nodes: 1  # Set to N for MIG multi-instance GPU (each MIG instance = 1 "node")
   strategy: auto  # Use 'ddp' for multi-GPU. DDP automatically enabled when devices > 1
   # For DDP training examples:
   # - 2 GPUs × batch=32:  effective_batch=64,  LR=8.5e-4,  warmup=1414, steps=125K

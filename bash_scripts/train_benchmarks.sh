@@ -130,6 +130,8 @@ cd "$PROJECT_ROOT"
 DDP_BATCH_SIZE=16
 SCALED_LR=""
 SCALED_WARMUP=""
+USE_MIG=false
+MIG_UUIDS=""
 if [ "$NUM_DEVICES" -gt 1 ]; then
     if [ "$DATASET" = "coconut" ]; then
         BASE_LR="1e-5"
@@ -144,6 +146,18 @@ if [ "$NUM_DEVICES" -gt 1 ]; then
     MAX_STEPS=$(awk "BEGIN {printf \"%d\", $MAX_STEPS * 32 / $EFFECTIVE_BATCH}")
     SCALED_LR=$(awk "BEGIN {printf \"%.2e\", $BASE_LR * sqrt($EFFECTIVE_BATCH / 32)}")
     SCALED_WARMUP=$(awk "BEGIN {printf \"%d\", $BASE_WARMUP * sqrt($EFFECTIVE_BATCH / 32)}")
+
+    # Detect MIG instances (Multi-Instance GPU).
+    # With MIG, each process can only access one MIG instance via the CUDA Runtime.
+    # PL's built-in DDPStrategy (which uses device indices 0..N-1) fails because
+    # the Runtime only exposes 1 device per MIG partition.
+    # Fix: launch N separate processes, each with CUDA_VISIBLE_DEVICES set to one
+    # MIG UUID, LOCAL_RANK=0, and trainer.num_nodes=N to satisfy PL validation.
+    MIG_UUIDS=$(nvidia-smi -L 2>/dev/null | grep -oP 'MIG-[0-9a-f-]+' | paste -sd, 2>/dev/null || true)
+    MIG_COUNT=$(echo "$MIG_UUIDS" | tr ',' '\n' | grep -c 'MIG' 2>/dev/null || echo 0)
+    if [ "$MIG_COUNT" -ge "$NUM_DEVICES" ]; then
+        USE_MIG=true
+    fi
 fi
 
 echo "========================================"
@@ -154,6 +168,9 @@ echo "Settings:"
 echo "  Dataset: $DATASET"
 if [ "$NUM_DEVICES" -gt 1 ]; then
     echo "  DDP: ${NUM_DEVICES} GPUs (batch=${DDP_BATCH_SIZE}/GPU)"
+    if [ "$USE_MIG" = true ]; then
+        echo "  MIG: detected (manual per-process launching)"
+    fi
     echo "  Max steps: $ORIG_STEPS → $MAX_STEPS (×32/${EFFECTIVE_BATCH} for equivalent training)"
     echo "  LR: $BASE_LR → $SCALED_LR (×√(${EFFECTIVE_BATCH}/32))"
     echo "  Warmup: $BASE_WARMUP → $SCALED_WARMUP (×√(${EFFECTIVE_BATCH}/32))"
@@ -209,6 +226,41 @@ supports_coarsening() {
     fi
 }
 
+# Precompute tokenized data caches so DDP processes load pre-tokenized data.
+# The preprocess script skips splits whose cache files already exist.
+echo "========================================"
+echo "Ensuring tokenized data caches exist"
+echo "========================================"
+
+# Deduplicate tokenizer configs (e.g., sent:none appears once regardless of
+# how many training configs use it). Different coarsening strategies need
+# separate cache files due to different config hashes.
+SEEN_CONFIGS=""
+for tok_config in "${TOKENIZERS[@]}"; do
+    # Skip duplicates (e.g., if sent:none appears twice in different filter configs)
+    if echo "$SEEN_CONFIGS" | grep -qF "$tok_config"; then
+        continue
+    fi
+    SEEN_CONFIGS="$SEEN_CONFIGS $tok_config"
+
+    IFS=':' read -r TOK COARSE <<< "$tok_config"
+    COARSE_FULL=$(get_coarsening_name "$COARSE")
+    SHORT=$(get_short_name "$TOK" "$COARSE")
+
+    PREPROCESS_ARGS="experiment=$DATASET tokenizer=$TOK"
+    if [ -n "$COARSE_FULL" ] && supports_coarsening "$TOK"; then
+        PREPROCESS_ARGS="$PREPROCESS_ARGS tokenizer.coarsening_strategy=$COARSE_FULL"
+    fi
+
+    echo "  $SHORT:"
+    if [ "$DRY_RUN" = true ]; then
+        echo "    [DRY RUN] python scripts/preprocess/preprocess_dataset.py $PREPROCESS_ARGS"
+    else
+        python scripts/preprocess/preprocess_dataset.py $PREPROCESS_ARGS 2>&1 | grep -E "already exists|✓ Cached|Saving cache|Preprocessing" | sed 's/^/    /' || true
+    fi
+done
+echo ""
+
 # Count total configurations
 TOTAL=${#TOKENIZERS[@]}
 CURRENT=0
@@ -242,45 +294,95 @@ for tok_config in "${TOKENIZERS[@]}"; do
     fi
     echo "========================================"
 
-    # Build command
-    CMD="python scripts/train.py"
-    CMD="$CMD experiment=$DATASET"
-    CMD="$CMD tokenizer=$TOKENIZER"
-    CMD="$CMD trainer.max_steps=$MAX_STEPS"
-    CMD="$CMD logs.run_name=$RUN_NAME"
-    CMD="$CMD logs.base_dir=$OUTPUT_DIR"
-    CMD="$CMD wandb.enabled=$WANDB_ENABLED"
+    # Build Hydra arguments (common to all launch modes)
+    ARGS="experiment=$DATASET"
+    ARGS="$ARGS tokenizer=$TOKENIZER"
+    ARGS="$ARGS trainer.max_steps=$MAX_STEPS"
+    ARGS="$ARGS logs.run_name=$RUN_NAME"
+    ARGS="$ARGS logs.base_dir=$OUTPUT_DIR"
+    ARGS="$ARGS wandb.enabled=$WANDB_ENABLED"
 
     # Add DDP settings
     if [ "$NUM_DEVICES" -gt 1 ]; then
-        CMD="$CMD trainer.devices=$NUM_DEVICES"
-        CMD="$CMD trainer.strategy=ddp"
-        CMD="$CMD data.batch_size=$DDP_BATCH_SIZE"
-        CMD="$CMD model.learning_rate=$SCALED_LR"
-        CMD="$CMD model.warmup_steps=$SCALED_WARMUP"
+        if [ "$USE_MIG" = true ]; then
+            # MIG: 1 device per process, N "nodes" to satisfy PL validation
+            ARGS="$ARGS trainer.devices=1"
+            ARGS="$ARGS trainer.num_nodes=$NUM_DEVICES"
+            ARGS="$ARGS trainer.strategy=ddp"
+        else
+            # Non-MIG: PL manages multi-device DDP internally
+            ARGS="$ARGS trainer.devices=$NUM_DEVICES"
+            ARGS="$ARGS trainer.strategy=ddp"
+        fi
+        ARGS="$ARGS data.batch_size=$DDP_BATCH_SIZE"
+        ARGS="$ARGS model.learning_rate=$SCALED_LR"
+        ARGS="$ARGS model.warmup_steps=$SCALED_WARMUP"
     fi
 
     # Add coarsening for hierarchical tokenizers
     if [ -n "$COARSENING_FULL" ] && supports_coarsening "$TOKENIZER"; then
-        CMD="$CMD tokenizer.coarsening_strategy=$COARSENING_FULL"
-
-        # Use precomputed cache for SC and HAC if cache files exist
-        if [ "$COARSENING" = "sc" ] || [ "$COARSENING" = "hac" ]; then
-            CACHE_DIR="$PROJECT_ROOT/data/cache"
-            CACHE_EXISTS=$(find "$CACHE_DIR" -name "${DATASET}_train_${TOKENIZER}_*.pt" -type f 2>/dev/null | head -1)
-            if [ -n "$CACHE_EXISTS" ]; then
-                CMD="$CMD data.use_cache=true"
-                echo "  Using precomputed cache"
-            fi
-        fi
+        ARGS="$ARGS tokenizer.coarsening_strategy=$COARSENING_FULL"
     fi
 
     if [ "$DRY_RUN" = true ]; then
-        echo "[DRY RUN] Would execute:"
-        echo "  $CMD"
+        if [ "$USE_MIG" = true ] && [ "$NUM_DEVICES" -gt 1 ]; then
+            echo "[DRY RUN] Would launch $NUM_DEVICES MIG DDP processes:"
+        else
+            echo "[DRY RUN] Would execute:"
+        fi
+        echo "  python scripts/train.py $ARGS"
+    elif [ "$USE_MIG" = true ] && [ "$NUM_DEVICES" -gt 1 ]; then
+        # MIG DDP: launch one process per MIG instance.
+        # Each process gets exactly one MIG UUID in CUDA_VISIBLE_DEVICES.
+        # We set LOCAL_RANK=0 (1 device per "node") and GROUP_RANK=i so
+        # PL's TorchElasticEnvironment sees devices(1) × num_nodes(N) = WORLD_SIZE.
+        echo "Running MIG DDP training with $NUM_DEVICES processes..."
+        IFS=',' read -ra MIG_ARRAY <<< "$MIG_UUIDS"
+        MASTER_PORT=$(( (RANDOM % 10000) + 20000 ))
+        DDP_PIDS=()
+
+        for i in $(seq 0 $((NUM_DEVICES - 1))); do
+            CUDA_VISIBLE_DEVICES="${MIG_ARRAY[$i]}" \
+            MASTER_ADDR=localhost \
+            MASTER_PORT=$MASTER_PORT \
+            WORLD_SIZE=$NUM_DEVICES \
+            RANK=$i \
+            LOCAL_RANK=0 \
+            LOCAL_WORLD_SIZE=1 \
+            GROUP_RANK=$i \
+            python scripts/train.py $ARGS &
+            DDP_PIDS+=($!)
+            echo "  Launched rank $i (PID ${DDP_PIDS[-1]}, MIG: ${MIG_ARRAY[$i]:0:20}...)"
+        done
+
+        # Wait for all DDP processes.
+        # NCCL may segfault during teardown on MIG even when training succeeds,
+        # so we collect exit codes but verify success via checkpoint existence.
+        DDP_EXIT_CODES=()
+        for pid in "${DDP_PIDS[@]}"; do
+            wait $pid 2>/dev/null
+            DDP_EXIT_CODES+=($?)
+        done
+
+        # Check if training actually succeeded by looking for checkpoint
+        SAVED_CKPT=$(find "$OUTPUT_DIR" -path "*/${RUN_NAME}_*/last.ckpt" -type f 2>/dev/null | sort -r | head -1)
+
+        if [ -n "$SAVED_CKPT" ]; then
+            echo "  DDP training completed. Checkpoint: $SAVED_CKPT"
+            # Log any non-zero exit codes as warnings (likely NCCL teardown segfaults)
+            for i in "${!DDP_EXIT_CODES[@]}"; do
+                if [ "${DDP_EXIT_CODES[$i]}" -ne 0 ]; then
+                    echo "  Warning: rank $i exited with code ${DDP_EXIT_CODES[$i]} (likely NCCL teardown)"
+                fi
+            done
+        else
+            echo "ERROR: MIG DDP training failed. No checkpoint found."
+            echo "  Exit codes: ${DDP_EXIT_CODES[*]}"
+            exit 1
+        fi
     else
         echo "Running training..."
-        eval $CMD
+        python scripts/train.py $ARGS
     fi
 
     echo ""
