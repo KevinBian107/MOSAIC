@@ -32,17 +32,18 @@ python scripts/visualization/visualize_tokenization.py --list
 
 ![tokenization](figure/tokenization.png)
 
-### Visualization Panels
+### Visualization Panels (2x2 Layout)
 
-The comparison shows:
+The comparison shows four panels in a 2x2 grid:
 
 | Panel | Description |
 |-------|-------------|
-| **Molecule with Motifs** | Original graph with detected ring structures highlighted |
-| **SENT** | Random walk traversal with visit order on nodes |
-| **H-SENT** | Community structure with cross-community edges |
-| **HDT** | Hierarchical tree with bidirectional parent↔child arrows |
-| **HDTC** | Two-level functional hierarchy with ring/functional group communities |
+| **(A) H-SENT** | Community structure with cross-community edges (spectral coarsening) |
+| **(B) SENT** | Random walk traversal with visit order on nodes |
+| **(C) HDT** | Hierarchical tree with bidirectional parent↔child arrows |
+| **(D) HDTC** | Two-level functional hierarchy with ring/functional group communities |
+
+H-SENT and HDT share the same spectral coarsening so their community assignments are consistent.
 
 ### Generation Demo
 
@@ -80,32 +81,47 @@ python scripts/visualization/generation_demo.py \
     'models=[{name: my_hdtc, checkpoint_path: outputs/train/hdtc/best.ckpt, tokenizer_type: hdtc, labeled_graph: true}]'
 ```
 
-### Community Structure Comparison (HAC vs Spectral)
+### Community Structure Comparison (4 Coarsening Paradigms)
 
-Compare how HAC (Affinity Coarsening) and Spectral Coarsening partition molecules
-across MOSES (simple drug-like) and COCONUT (complex natural products) datasets.
+Compare four coarsening paradigms on the same molecule, each shown as a row
+with molecule graph (left) and hierarchy tree (right):
 
-Produces two types of figures:
-- **Example progression figures**: configurable number of molecules with evenly-spaced atom counts (small→large), each a 2x2 grid showing molecule+community overlay and hierarchy tree for both HAC and Spectral.
-- **Aggregate statistics figure**: 2x3 grid comparing hierarchy depth, community count, largest community size, singleton fraction, non-singleton sizes, and depth vs atom count.
+| Row | Paradigm | Coarsener | Description |
+|-----|----------|-----------|-------------|
+| **(A)** | Spectral Coarsening | `SpectralCoarsening` | Data-driven spectral clustering, no chemical knowledge |
+| **(B)** | HAC (Affinity) | `AffinityCoarsening` | Hierarchical agglomerative clustering |
+| **(C)** | Direct Motif | `MotifCommunityCoarsening` | Ring-based union-find, preserves ring motifs |
+| **(D)** | Motif + Functional Group | `FunctionalHierarchyBuilder` | Rings + functional groups + singletons |
 
-Example molecules are automatically selected to span the full atom count range across both datasets using evenly-spaced targets. Use `--num-examples` to control how many.
+Colors are aligned between the graph and tree panels in each row. Row (D) uses
+type-based coloring: red = ring, teal = functional group, gray = singleton.
+
+Both scripts include predefined molecules at two scales:
+
+| Scale | Examples |
+|-------|----------|
+| **Drug-like (MOSES)** | cholesterol, morphine, caffeine, aspirin, ibuprofen, dopamine, penicillin_g, estradiol, quercetin |
+| **Natural products (COCONUT)** | strychnine, camptothecin, artemisinin, vinblastine, reserpine, taxol, erythromycin |
+| **COCONUT diverse** | coconut_furanone, coconut_flavone, coconut_isoflavone, coconut_chromene, coconut_sesquiterpene, coconut_glycoside |
+
+By default (no arguments), the script runs on a list of COCONUT-scale natural
+products: vinblastine, reserpine, strychnine, coconut_sesquiterpene.
 
 ```bash
-# Default run (200 molecules/dataset, 4 examples, outputs to tmp/)
-python scripts/visualization/compare_community_structure.py --no-show
+# Default: run on COCONUT molecule list
+python scripts/visualization/compare_community_structure.py --output-dir ./figures
 
-# Generate 8 examples spanning the full atom count range (17→99 atoms)
-python scripts/visualization/compare_community_structure.py \
-    --num-examples 8 \
-    --no-show
+# Specific named molecule
+python scripts/visualization/compare_community_structure.py --name morphine --output-dir ./figures
 
-# Adjust coarsening granularity
+# COCONUT-scale natural product
+python scripts/visualization/compare_community_structure.py --name vinblastine --output-dir ./figures
+
+# Custom SMILES
 python scripts/visualization/compare_community_structure.py \
-    --min-community-size 6 \
-    --no-show
+    --smiles "CC(=O)OC1=CC=CC=C1C(=O)O" --no-show
 ```
-![community comparison](figure/community.png)
+![community comparison](figure/coarsening.png)
 
 ## References
 - [HiGen: Hierarchical Graph Generative Networks](https://arxiv.org/abs/2305.19337) - Hierarchical decomposition approach

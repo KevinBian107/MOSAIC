@@ -1,22 +1,25 @@
 #!/usr/bin/env python
-"""Compare HAC vs Spectral community structures on MOSES vs COCONUT.
+"""Compare 4 coarsening paradigms on the same molecule.
 
-Produces two types of figures:
-1. Example progression figures (4 molecules, small→large, 2x2 grid each)
-   showing molecule+community overlay and hierarchy tree for both HAC and Spectral.
-2. Aggregate statistics figure (2x3 grid) comparing distributions across
-   MOSES-HAC, MOSES-Spectral, COCONUT-HAC, COCONUT-Spectral.
+Produces a 4-row x 2-col figure:
+  Row A: Spectral Coarsening (data-driven, no chemical knowledge)
+  Row B: HAC / Affinity Coarsening (hierarchical agglomerative)
+  Row C: Direct Motif Identification (MotifCommunityCoarsening)
+  Row D: Motif + Functional Group (FunctionalHierarchyBuilder)
+
+Each row: [molecule graph with communities | hierarchy tree]
+
+By default, runs on a list of COCONUT-scale natural products.
 
 Usage:
     python scripts/visualization/compare_community_structure.py
-    python scripts/visualization/compare_community_structure.py --output-dir figures/
-    python scripts/visualization/compare_community_structure.py --num-stats-samples 500
+    python scripts/visualization/compare_community_structure.py --name vinblastine
+    python scripts/visualization/compare_community_structure.py --smiles "CC(=O)OC1=CC=CC=C1C(=O)O"
 """
 
 from __future__ import annotations
 
 import argparse
-import random
 import sys
 import warnings
 from pathlib import Path
@@ -25,7 +28,6 @@ from typing import Any
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
-import torch
 from matplotlib.gridspec import GridSpec
 from matplotlib.path import Path as MPath
 from rdkit import Chem, RDLogger
@@ -36,12 +38,64 @@ from torch_geometric.data import Data
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.data.molecular import smiles_to_graph  # noqa: E402
+from src.tokenizers.coarsening.functional_hierarchy import (  # noqa: E402
+    FunctionalHierarchyBuilder,
+)
 from src.tokenizers.coarsening.hac import AffinityCoarsening  # noqa: E402
+from src.tokenizers.coarsening.motif_community import (  # noqa: E402
+    MotifCommunityCoarsening,
+)
 from src.tokenizers.coarsening.spectral import SpectralCoarsening  # noqa: E402
-from src.tokenizers.structures import HierarchicalGraph, Partition  # noqa: E402
+from src.tokenizers.structures import (  # noqa: E402
+    Bipartite,
+    FunctionalCommunity,
+    HierarchicalGraph,
+    Partition,
+    TwoLevelHierarchy,
+)
 
 RDLogger.DisableLog("rdApp.*")
 warnings.filterwarnings("ignore", category=UserWarning)
+
+# ============================================================================
+# Predefined molecules
+# ============================================================================
+
+MOLECULES = {
+    # Drug-like (MOSES-scale)
+    "cholesterol": "CC(C)CCCC(C)C1CCC2C1(CCC3C2CC=C4C3(CCC(C4)O)C)C",
+    "morphine": "CN1CCC23C4C1CC5=C2C(=C(C=C5)O)OC3C(C=C4)O",
+    "caffeine": "CN1C=NC2=C1C(=O)N(C(=O)N2C)C",
+    "aspirin": "CC(=O)OC1=CC=CC=C1C(=O)O",
+    "ibuprofen": "CC(C)CC1=CC=C(C=C1)C(C)C(=O)O",
+    "dopamine": "NCCC1=CC(O)=C(O)C=C1",
+    "penicillin_g": "CC1(C)SC2C(NC(=O)CC3=CC=CC=C3)C(=O)N2C1C(=O)O",
+    "estradiol": "CC12CCC3C(C1CCC2O)CCC4=C3C=CC(=C4)O",
+    "quercetin": "O=C1C(O)=C(O)C(=O)C2=C1C=C(O)C(O)=C2C3=CC(O)=C(O)C=C3",
+    # Natural products (COCONUT-scale)
+    "strychnine": "O=C1C[C@H]2OCC=C3CN4CC[C@@]56[C@@H]4C[C@H]3[C@H]2[C@H]5N1c1ccccc16",
+    "camptothecin": "CCC1(O)C(=O)OCc2c1cc1n(c2=O)Cc2cc3ccccc3nc2-1",
+    "vinblastine": "CCC1(O)[C@H]2CC3(CC)c4c(cc5c(c4OC)N(C=O)c4cc6c(cc4[C@H]5[C@@H]3[C@H](OC(C)=O)[C@@]1(O2)C(=O)OC)OCO6)C",
+    "reserpine": "CO[C@H]1[C@@H](CC2CN3CCC4=C([C@H]3C[C@@H]2[C@@H]1C(=O)OC)NC5=CC(OC)=C(OC)C(OC)=C45)OC(=O)C6=CC(OC)=C(OC)C(OC)=C6",
+    "taxol": "CC1=C2C(C(=O)C3(C)C(CC4OC(=O)C(C(c5ccccc5)NC(=O)c5ccccc5)O4)C3C2(C)C)C(OC(=O)C)C1OC(=O)c1ccccc1",
+    "erythromycin": "CCC1OC(=O)C(C)C(OC2CC(C)(OC)C(O)C(C)O2)C(C)C(OC2OC(C)CC(N(C)C)C2O)C(C)(O)CC(C)C(=O)C(C)C(O)C1(C)O",
+    "artemisinin": "C[C@@H]1CC[C@H]2[C@@H](C)C(=O)O[C@@H]3O[C@@]4(C)CC[C@@H]1[C@@]23OO4",
+    # COCONUT diverse (small / medium / large)
+    "coconut_furanone": "COc1cc2[nH]c(=O)c(C(=O)NCc3ccco3)c(O)c2cc1OC",
+    "coconut_flavone": "COc1ccc2c(=O)c(O)c(-c3cc(OC)c(O)c(OC)c3)oc2c1",
+    "coconut_isoflavone": "O=C1C[C@@H](c2ccc(O[C@@H]3O[C@H](CO)[C@@H](O)[C@H](O)[C@H]3O)cc2)Oc2cc(O)ccc21",
+    "coconut_chromene": "CC1(C)C=CC2=C(C=C[C@@]3(O)[C@@H]2O[C@@H]2c4ccc(O)cc4OC[C@@H]23)O1",
+    "coconut_sesquiterpene": "CC(=O)O[C@H]1C[C@H]2OC[C@@]2(OC(C)=O)[C@H]2[C@H](OC(=O)c3ccccc3)[C@]3(C)[C@@H](OC(C)=O)C(=O)[C@@H](OC(C)=O)[C@@]3(C)[C@H](OC(C)=O)[C@H]12",
+    "coconut_glycoside": "O=C(O)CC(=O)OCC1OC(Oc2cc(O)c3c(=O)c(-c4ccc(OC5OC(CO)C(O)C(O)C5O)cc4)coc3c2)C(O)C(O)C1O",
+}
+
+# Default molecules to run when no --name or --smiles is given
+DEFAULT_MOLECULES = [
+    "vinblastine",
+    "reserpine",
+    "strychnine",
+    "coconut_sesquiterpene",
+]
 
 # ============================================================================
 # Color palette
@@ -65,257 +119,137 @@ COMMUNITY_COLORS = [
     "#c5b0d5",  # Light purple
 ]
 
-GROUP_COLORS = {
-    "MOSES-HAC": "#1f77b4",
-    "MOSES-Spectral": "#aec7e8",
-    "COCONUT-HAC": "#d62728",
-    "COCONUT-Spectral": "#ff9896",
+# Type-based colors for functional hierarchy
+TYPE_COLORS = {
+    "ring": "#FF6B6B",
+    "functional": "#4ECDC4",
+    "singleton": "#B0B0B0",
 }
 
 SINGLETON_COLOR = "#D3D3D3"
 
-# ============================================================================
-# Section 1: Data Loading
-# ============================================================================
-
-
-def load_smiles_from_cache(cache_path: str) -> list[str]:
-    """Load SMILES strings from a .pt cache file.
-
-    Args:
-        cache_path: Path to the .pt cache file.
-
-    Returns:
-        List of SMILES strings.
-    """
-    data = torch.load(cache_path, map_location="cpu", weights_only=False)
-    return data["smiles"]
-
-
-def analyze_molecule(
-    smiles: str,
-    coarsener: AffinityCoarsening | SpectralCoarsening,
-) -> dict[str, Any] | None:
-    """Convert SMILES to graph, build hierarchy, and compute stats.
-
-    Args:
-        smiles: SMILES string.
-        coarsener: Coarsening strategy (HAC or Spectral).
-
-    Returns:
-        Dictionary with analysis results, or None if conversion fails.
-    """
-    data = smiles_to_graph(smiles, labeled=True)
-    if data is None or data.num_nodes < 4:
-        return None
-
-    try:
-        hg = coarsener.build_hierarchy(data)
-    except Exception:
-        return None
-
-    stats = compute_hierarchy_stats(hg)
-    return {
-        "smiles": smiles,
-        "data": data,
-        "hg": hg,
-        "num_atoms": data.num_nodes,
-        **stats,
-    }
-
-
-def analyze_dataset(
-    smiles_list: list[str],
-    coarsener: AffinityCoarsening | SpectralCoarsening,
-    max_samples: int = 200,
-    seed: int = 42,
-) -> list[dict[str, Any]]:
-    """Analyze a batch of molecules with a given coarsener.
-
-    Args:
-        smiles_list: List of SMILES strings.
-        coarsener: Coarsening strategy.
-        max_samples: Maximum number of molecules to analyze.
-        seed: Random seed for sampling.
-
-    Returns:
-        List of analysis result dictionaries.
-    """
-    rng = random.Random(seed)
-    sample = (
-        rng.sample(smiles_list, min(max_samples, len(smiles_list)))
-        if len(smiles_list) > max_samples
-        else list(smiles_list)
-    )
-
-    results = []
-    for smiles in sample:
-        result = analyze_molecule(smiles, coarsener)
-        if result is not None:
-            results.append(result)
-
-    return results
-
 
 # ============================================================================
-# Section 2: Hierarchy Utilities
+# TwoLevelHierarchy -> HierarchicalGraph adapter
 # ============================================================================
 
 
-def compute_hierarchy_stats(hg: HierarchicalGraph) -> dict[str, Any]:
-    """Compute recursive statistics for a hierarchical graph.
+def functional_hierarchy_to_hg(
+    hierarchy: TwoLevelHierarchy,
+    data: Data,
+) -> HierarchicalGraph:
+    """Convert a TwoLevelHierarchy to a HierarchicalGraph for rendering.
+
+    Each FunctionalCommunity becomes a Partition. Super-edges become Bipartite
+    objects.
 
     Args:
-        hg: HierarchicalGraph object.
+        hierarchy: TwoLevelHierarchy from FunctionalHierarchyBuilder.
+        data: Original PyG Data object.
 
     Returns:
-        Dictionary with depth, num_communities, singleton_fraction,
-        largest_community_size, community_sizes, non_singleton_sizes.
+        HierarchicalGraph with one level of partitions.
     """
-    depth = hg.depth + 1  # +1 because depth=0 means single-level
-    num_communities = hg.num_communities
-    sizes = [p.num_nodes for p in hg.partitions]
-    singletons = sum(1 for s in sizes if s == 1)
-    singleton_fraction = singletons / max(num_communities, 1)
-    largest = max(sizes) if sizes else 0
-    non_singleton_sizes = [s for s in sizes if s > 1]
+    import torch
 
-    return {
-        "depth": depth,
-        "num_communities": num_communities,
-        "singleton_fraction": singleton_fraction,
-        "largest_community_size": largest,
-        "community_sizes": sizes,
-        "non_singleton_sizes": non_singleton_sizes,
-    }
-
-
-def flatten_hierarchy_tree(
-    hg: HierarchicalGraph, max_depth: int = 4
-) -> list[dict[str, Any]]:
-    """Flatten nested hierarchy into renderable tree nodes.
-
-    Args:
-        hg: HierarchicalGraph object.
-        max_depth: Maximum depth to render.
-
-    Returns:
-        List of node dicts with keys: id, label, size, children,
-        level, x, y, color, is_singleton_group.
-    """
-    nodes: list[dict[str, Any]] = []
-    node_id_counter = [0]
-
-    def _recurse(partition: Partition, level: int, parent_id: int | None) -> int:
-        nid = node_id_counter[0]
-        node_id_counter[0] += 1
-
-        is_leaf = partition.child_hierarchy is None
-        children_ids = []
-
-        if not is_leaf and level < max_depth:
-            child_hg = partition.child_hierarchy
-            # Group singletons
-            singleton_nodes = []
-            for cp in child_hg.partitions:
-                if cp.num_nodes == 1:
-                    singleton_nodes.append(cp)
-                else:
-                    cid = _recurse(cp, level + 1, nid)
-                    children_ids.append(cid)
-
-            if singleton_nodes:
-                # Create singleton group node
-                sg_id = node_id_counter[0]
-                node_id_counter[0] += 1
-                nodes.append(
-                    {
-                        "id": sg_id,
-                        "label": f"S x{len(singleton_nodes)}",
-                        "size": len(singleton_nodes),
-                        "level": level + 1,
-                        "parent_id": nid,
-                        "children": [],
-                        "is_singleton_group": True,
-                        "color": SINGLETON_COLOR,
-                    }
-                )
-                children_ids.append(sg_id)
-
-        nodes.append(
-            {
-                "id": nid,
-                "label": f"C{nid}" if partition.num_nodes > 1 else "s",
-                "size": partition.num_nodes,
-                "level": level,
-                "parent_id": parent_id,
-                "children": children_ids,
-                "is_singleton_group": False,
-                "color": COMMUNITY_COLORS[nid % len(COMMUNITY_COLORS)],
-            }
-        )
-        return nid
-
-    # Root node
-    root_id = node_id_counter[0]
-    node_id_counter[0] += 1
-    root_children = []
-
-    # Group top-level singletons
-    top_singletons = []
-    for part in hg.partitions:
-        if part.num_nodes == 1:
-            top_singletons.append(part)
+    partitions: list[Partition] = []
+    for comm in hierarchy.communities:
+        if comm.internal_edges:
+            global_to_local = {g: i for i, g in enumerate(comm.atom_indices)}
+            edges_local = []
+            for src, dst in comm.internal_edges:
+                if src in global_to_local and dst in global_to_local:
+                    edges_local.append(
+                        (global_to_local[src], global_to_local[dst])
+                    )
+                    edges_local.append(
+                        (global_to_local[dst], global_to_local[src])
+                    )
+            if edges_local:
+                edge_index = torch.tensor(edges_local, dtype=torch.long).t()
+            else:
+                edge_index = torch.zeros((2, 0), dtype=torch.long)
         else:
-            cid = _recurse(part, 1, root_id)
-            root_children.append(cid)
+            edge_index = torch.zeros((2, 0), dtype=torch.long)
 
-    if top_singletons:
-        sg_id = node_id_counter[0]
-        node_id_counter[0] += 1
-        nodes.append(
-            {
-                "id": sg_id,
-                "label": f"S x{len(top_singletons)}",
-                "size": len(top_singletons),
-                "level": 1,
-                "parent_id": root_id,
-                "children": [],
-                "is_singleton_group": True,
-                "color": SINGLETON_COLOR,
-            }
+        partitions.append(
+            Partition(
+                part_id=comm.community_id,
+                global_node_indices=list(comm.atom_indices),
+                edge_index=edge_index,
+            )
         )
-        root_children.append(sg_id)
 
-    nodes.append(
-        {
-            "id": root_id,
-            "label": "Root",
-            "size": hg.num_nodes,
-            "level": 0,
-            "parent_id": None,
-            "children": root_children,
-            "is_singleton_group": False,
-            "color": "white",
+    bipartites: list[Bipartite] = []
+    pair_edges: dict[tuple[int, int], list[tuple[int, int]]] = {}
+    for se in hierarchy.super_edges:
+        key = (
+            min(se.source_community, se.target_community),
+            max(se.source_community, se.target_community),
+        )
+        if key not in pair_edges:
+            pair_edges[key] = []
+        pair_edges[key].append((se.source_atom, se.target_atom))
+
+    part_map = {p.part_id: p for p in partitions}
+    for (left_id, right_id), edges in pair_edges.items():
+        left_part = part_map[left_id]
+        right_part = part_map[right_id]
+        left_g2l = {
+            g: i for i, g in enumerate(left_part.global_node_indices)
         }
+        right_g2l = {
+            g: i for i, g in enumerate(right_part.global_node_indices)
+        }
+
+        local_edges = []
+        for src_atom, dst_atom in edges:
+            if src_atom in left_g2l and dst_atom in right_g2l:
+                local_edges.append(
+                    (left_g2l[src_atom], right_g2l[dst_atom])
+                )
+            elif src_atom in right_g2l and dst_atom in left_g2l:
+                local_edges.append(
+                    (left_g2l[dst_atom], right_g2l[src_atom])
+                )
+
+        if local_edges:
+            edge_index = torch.tensor(local_edges, dtype=torch.long).t()
+        else:
+            edge_index = torch.zeros((2, 0), dtype=torch.long)
+
+        bipartites.append(
+            Bipartite(
+                left_part_id=left_id,
+                right_part_id=right_id,
+                edge_index=edge_index,
+            )
+        )
+
+    community_assignment = list(hierarchy.atom_to_community)
+
+    return HierarchicalGraph(
+        partitions=partitions,
+        bipartites=bipartites,
+        community_assignment=community_assignment,
     )
 
-    return nodes
-
 
 # ============================================================================
-# Section 3: Layout
+# Layout
 # ============================================================================
 
 
-def compute_rdkit_2d_layout(smiles: str) -> dict[int, tuple[float, float]] | None:
+def compute_rdkit_2d_layout(
+    smiles: str,
+) -> dict[int, tuple[float, float]] | None:
     """Compute 2D molecular layout using RDKit.
 
     Args:
         smiles: SMILES string.
 
     Returns:
-        Dictionary mapping atom index to (x, y) coordinates, or None on failure.
+        Dictionary mapping atom index to (x, y) coordinates, or None.
     """
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
@@ -333,7 +267,6 @@ def compute_rdkit_2d_layout(smiles: str) -> dict[int, tuple[float, float]] | Non
         if not pos:
             return None
 
-        # Normalize to [-1, 1] range
         x_coords = [p[0] for p in pos.values()]
         y_coords = [p[1] for p in pos.values()]
         x_range = max(x_coords) - min(x_coords) if len(x_coords) > 1 else 1
@@ -352,7 +285,9 @@ def compute_rdkit_2d_layout(smiles: str) -> dict[int, tuple[float, float]] | Non
         return None
 
 
-def compute_spring_layout(data: Data, seed: int = 42) -> dict[int, tuple[float, float]]:
+def compute_spring_layout(
+    data: Data, seed: int = 42
+) -> dict[int, tuple[float, float]]:
     """Fallback spring layout using networkx.
 
     Args:
@@ -370,7 +305,7 @@ def compute_spring_layout(data: Data, seed: int = 42) -> dict[int, tuple[float, 
 
 
 # ============================================================================
-# Section 4: Drawing Utilities
+# Drawing Utilities
 # ============================================================================
 
 
@@ -394,7 +329,7 @@ def draw_curved_edge(
         color: Edge color.
         linewidth: Line width.
         alpha: Transparency.
-        linestyle: Line style ("-", "--", etc.).
+        linestyle: Line style.
         curve_amount: Curvature factor.
         zorder: Z-order for rendering.
     """
@@ -454,12 +389,11 @@ def draw_community_hull(
     """
     valid = [i for i in node_indices if i in positions]
     if len(valid) < 2:
-        return  # Skip singletons and missing nodes
+        return
 
     pts = np.array([positions[i] for i in valid])
 
     if len(valid) == 2:
-        # Draw an ellipse between 2 points
         cx, cy = pts.mean(axis=0)
         dx, dy = pts[1] - pts[0]
         width = np.sqrt(dx**2 + dy**2) + pad * 4
@@ -480,12 +414,9 @@ def draw_community_hull(
         ax.add_patch(ellipse)
         return
 
-    # 3+ points: convex hull with padding
     try:
         hull = ConvexHull(pts)
         hull_pts = pts[hull.vertices]
-
-        # Pad outward
         centroid = hull_pts.mean(axis=0)
         padded = []
         for pt in hull_pts:
@@ -509,11 +440,11 @@ def draw_community_hull(
         )
         ax.add_patch(polygon)
     except Exception:
-        pass  # Degenerate hull (collinear points)
+        pass
 
 
 # ============================================================================
-# Section 5: Molecule + Community Overlay
+# Molecule + Community Overlay
 # ============================================================================
 
 
@@ -523,15 +454,9 @@ def plot_molecule_with_communities(
     smiles: str,
     hg: HierarchicalGraph,
     pos: dict[int, tuple[float, float]],
-    title: str,
-    max_hull_depth: int = 2,
+    part_colors: list[str] | None = None,
 ) -> None:
     """Plot molecule structure with community overlay hulls.
-
-    Level-1 hulls: solid border, alpha=0.15
-    Level-2 sub-hulls: dashed border, alpha=0.08
-    Intra-community edges: colored. Inter-community edges: gray dashed.
-    Singletons: gray nodes without hull.
 
     Args:
         ax: Matplotlib axes.
@@ -539,13 +464,18 @@ def plot_molecule_with_communities(
         smiles: SMILES string.
         hg: HierarchicalGraph object.
         pos: Node positions.
-        title: Subplot title.
-        max_hull_depth: Maximum hull nesting depth to display.
+        part_colors: Optional explicit color per partition index.
     """
-    # Layer 1: Level-1 hulls
+    if part_colors is None:
+        part_colors = [
+            COMMUNITY_COLORS[i % len(COMMUNITY_COLORS)]
+            for i in range(len(hg.partitions))
+        ]
+
+    # Layer 1: Hulls
     for part_idx, part in enumerate(hg.partitions):
         if part.num_nodes >= 2:
-            color = COMMUNITY_COLORS[part_idx % len(COMMUNITY_COLORS)]
+            color = part_colors[part_idx]
             draw_community_hull(
                 ax,
                 pos,
@@ -558,34 +488,14 @@ def plot_molecule_with_communities(
                 zorder=0,
             )
 
-            # Layer 2: Level-2 sub-hulls if child hierarchy exists
-            if (
-                max_hull_depth >= 2
-                and part.child_hierarchy is not None
-                and part.child_hierarchy.num_communities > 1
-            ):
-                for sub_part in part.child_hierarchy.partitions:
-                    if sub_part.num_nodes >= 2:
-                        draw_community_hull(
-                            ax,
-                            pos,
-                            sub_part.global_node_indices,
-                            color=color,
-                            alpha=0.08,
-                            pad=0.04,
-                            linestyle="--",
-                            linewidth=1.0,
-                            zorder=0,
-                        )
-
     # Build node-to-community mapping
     node_to_comm = {}
     for part_idx, part in enumerate(hg.partitions):
         for node in part.global_node_indices:
             node_to_comm[node] = part_idx
 
-    # Layer 3: Edges
-    drawn_edges = set()
+    # Layer 2: Edges
+    drawn_edges: set[tuple[int, int]] = set()
     edge_index = data.edge_index.numpy()
     for i in range(edge_index.shape[1]):
         u, v = int(edge_index[0, i]), int(edge_index[1, i])
@@ -601,7 +511,7 @@ def plot_molecule_with_communities(
         comm_v = node_to_comm.get(v, -1)
 
         if comm_u == comm_v and comm_u >= 0:
-            color = COMMUNITY_COLORS[comm_u % len(COMMUNITY_COLORS)]
+            color = part_colors[comm_u]
             draw_curved_edge(
                 ax,
                 pos[u],
@@ -625,20 +535,22 @@ def plot_molecule_with_communities(
                 zorder=1,
             )
 
-    # Layer 4: Nodes
+    # Layer 3: Nodes
     for node in range(data.num_nodes):
         if node not in pos:
             continue
         x, y = pos[node]
         comm = node_to_comm.get(node, -1)
         part_size = (
-            hg.partitions[comm].num_nodes if 0 <= comm < len(hg.partitions) else 1
+            hg.partitions[comm].num_nodes
+            if 0 <= comm < len(hg.partitions)
+            else 1
         )
 
         if part_size == 1:
             node_color = SINGLETON_COLOR
         else:
-            node_color = COMMUNITY_COLORS[comm % len(COMMUNITY_COLORS)]
+            node_color = part_colors[comm]
 
         circle = plt.Circle(
             (x, y),
@@ -650,8 +562,8 @@ def plot_molecule_with_communities(
         )
         ax.add_patch(circle)
 
-    # Layer 5: Labels for smaller molecules
-    if data.num_nodes <= 40:
+    # Layer 4: Labels
+    if data.num_nodes <= 60:
         for node in range(data.num_nodes):
             if node not in pos:
                 continue
@@ -667,25 +579,6 @@ def plot_molecule_with_communities(
                 zorder=4,
             )
 
-    # Stats annotation
-    stats = compute_hierarchy_stats(hg)
-    stats_text = (
-        f"comms={stats['num_communities']}, "
-        f"depth={stats['depth']}, "
-        f"sing={stats['singleton_fraction']:.0%}"
-    )
-    ax.text(
-        0.02,
-        0.02,
-        stats_text,
-        transform=ax.transAxes,
-        fontsize=7,
-        color="gray",
-        va="bottom",
-        bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.7),
-    )
-
-    ax.set_title(title, fontsize=10, fontweight="bold")
     ax.set_aspect("equal")
     ax.axis("off")
 
@@ -697,30 +590,150 @@ def plot_molecule_with_communities(
 
 
 # ============================================================================
-# Section 6: Hierarchy Tree
+# Hierarchy Tree
 # ============================================================================
+
+
+def flatten_hierarchy_tree(
+    hg: HierarchicalGraph,
+    part_colors: list[str] | None = None,
+    max_depth: int = 4,
+) -> list[dict[str, Any]]:
+    """Flatten nested hierarchy into renderable tree nodes.
+
+    Args:
+        hg: HierarchicalGraph object.
+        part_colors: Explicit color per top-level partition.
+        max_depth: Maximum depth to render.
+
+    Returns:
+        List of node dicts.
+    """
+    nodes: list[dict[str, Any]] = []
+    node_id_counter = [0]
+
+    if part_colors is None:
+        part_colors = [
+            COMMUNITY_COLORS[i % len(COMMUNITY_COLORS)]
+            for i in range(len(hg.partitions))
+        ]
+
+    def _recurse(
+        partition: Partition,
+        level: int,
+        parent_id: int | None,
+        color: str,
+    ) -> int:
+        nid = node_id_counter[0]
+        node_id_counter[0] += 1
+
+        is_leaf = partition.child_hierarchy is None
+        children_ids = []
+
+        if not is_leaf and level < max_depth:
+            child_hg = partition.child_hierarchy
+            singleton_nodes = []
+            for cp in child_hg.partitions:
+                if cp.num_nodes == 1:
+                    singleton_nodes.append(cp)
+                else:
+                    cid = _recurse(cp, level + 1, nid, color)
+                    children_ids.append(cid)
+
+            if singleton_nodes:
+                sg_id = node_id_counter[0]
+                node_id_counter[0] += 1
+                nodes.append(
+                    {
+                        "id": sg_id,
+                        "label": f"S x{len(singleton_nodes)}",
+                        "size": len(singleton_nodes),
+                        "level": level + 1,
+                        "parent_id": nid,
+                        "children": [],
+                        "is_singleton_group": True,
+                        "color": SINGLETON_COLOR,
+                    }
+                )
+                children_ids.append(sg_id)
+
+        nodes.append(
+            {
+                "id": nid,
+                "label": f"C{nid}" if partition.num_nodes > 1 else "s",
+                "size": partition.num_nodes,
+                "level": level,
+                "parent_id": parent_id,
+                "children": children_ids,
+                "is_singleton_group": False,
+                "color": color,
+            }
+        )
+        return nid
+
+    root_id = node_id_counter[0]
+    node_id_counter[0] += 1
+    root_children = []
+
+    top_singletons = []
+    for part_idx, part in enumerate(hg.partitions):
+        if part.num_nodes == 1:
+            top_singletons.append(part)
+        else:
+            color = part_colors[part_idx]
+            cid = _recurse(part, 1, root_id, color)
+            root_children.append(cid)
+
+    if top_singletons:
+        sg_id = node_id_counter[0]
+        node_id_counter[0] += 1
+        nodes.append(
+            {
+                "id": sg_id,
+                "label": f"S x{len(top_singletons)}",
+                "size": len(top_singletons),
+                "level": 1,
+                "parent_id": root_id,
+                "children": [],
+                "is_singleton_group": True,
+                "color": SINGLETON_COLOR,
+            }
+        )
+        root_children.append(sg_id)
+
+    nodes.append(
+        {
+            "id": root_id,
+            "label": "Root",
+            "size": hg.num_nodes,
+            "level": 0,
+            "parent_id": None,
+            "children": root_children,
+            "is_singleton_group": False,
+            "color": "white",
+        }
+    )
+
+    return nodes
 
 
 def plot_hierarchy_tree(
     ax: plt.Axes,
     hg: HierarchicalGraph,
-    title: str,
+    part_colors: list[str] | None = None,
     max_depth: int = 4,
-    max_singletons_shown: int = 3,
 ) -> None:
     """Plot hierarchical community tree with proportional-width layout.
-
-    Root at top, proportional-width layout, singletons collapsed,
-    node radius proportional to sqrt(size), color-coded, level labels.
 
     Args:
         ax: Matplotlib axes.
         hg: HierarchicalGraph object.
-        title: Subplot title.
+        part_colors: Explicit color list aligned with graph panel.
         max_depth: Maximum tree depth to display.
-        max_singletons_shown: Maximum individual singletons before grouping.
     """
-    tree_nodes = flatten_hierarchy_tree(hg, max_depth=max_depth)
+    tree_nodes = flatten_hierarchy_tree(
+        hg, part_colors=part_colors, max_depth=max_depth
+    )
     if not tree_nodes:
         ax.text(
             0.5,
@@ -733,7 +746,6 @@ def plot_hierarchy_tree(
         ax.axis("off")
         return
 
-    # Build lookup
     node_map = {n["id"]: n for n in tree_nodes}
     root = None
     for n in tree_nodes:
@@ -743,19 +755,22 @@ def plot_hierarchy_tree(
 
     if root is None:
         ax.text(
-            0.5, 0.5, "No root found", ha="center", va="center", transform=ax.transAxes
+            0.5,
+            0.5,
+            "No root found",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
         )
         ax.axis("off")
         return
 
-    # Compute leaf counts for proportional layout
     def count_leaves(nid: int) -> int:
         node = node_map[nid]
         if not node["children"]:
             return 1
         return sum(count_leaves(cid) for cid in node["children"])
 
-    # Layout: proportional width allocation
     positions: dict[int, tuple[float, float]] = {}
     level_height = 1.0
 
@@ -769,7 +784,6 @@ def plot_hierarchy_tree(
         if not children:
             return
 
-        # Proportional width allocation
         total_leaves = sum(count_leaves(cid) for cid in children)
         if total_leaves == 0:
             total_leaves = len(children)
@@ -784,7 +798,6 @@ def plot_hierarchy_tree(
 
     layout(root["id"], 0, 10, 0)
 
-    # Determine max level rendered
     max_level = max(node_map[nid]["level"] for nid in positions)
 
     # Draw edges
@@ -810,8 +823,6 @@ def plot_hierarchy_tree(
         if n["id"] not in positions:
             continue
         x, y = positions[n["id"]]
-
-        # Radius proportional to sqrt(size)
         radius = 0.1 + 0.25 * np.sqrt(n["size"] / max(max_size, 1))
         radius = min(radius, 0.4)
 
@@ -829,7 +840,6 @@ def plot_hierarchy_tree(
         )
         ax.add_patch(circle)
 
-        # Label
         label = n["label"]
         fontsize = 6 if len(label) > 4 else 7
         ax.text(
@@ -857,22 +867,6 @@ def plot_hierarchy_tree(
             color="#666666",
         )
 
-    # Depth overflow indicator
-    actual_depth = hg.depth + 1
-    if actual_depth > max_depth:
-        ax.text(
-            0.98,
-            0.02,
-            f"... (+{actual_depth - max_depth} levels)",
-            transform=ax.transAxes,
-            fontsize=7,
-            ha="right",
-            va="bottom",
-            color="gray",
-            style="italic",
-        )
-
-    ax.set_title(title, fontsize=10, fontweight="bold")
     ax.set_aspect("equal")
     ax.axis("off")
 
@@ -885,572 +879,335 @@ def plot_hierarchy_tree(
 
 
 # ============================================================================
-# Section 7: Example Figure Generation
+# Color helpers for functional hierarchy
 # ============================================================================
 
 
-def select_example_molecules(
-    moses_analyses: list[dict[str, Any]],
-    coconut_analyses: list[dict[str, Any]],
-    num_examples: int = 4,
-) -> list[dict[str, Any]]:
-    """Select molecules for example figures spanning atom count range.
-
-    Computes evenly-spaced atom count targets across the combined range
-    of both datasets, then picks the closest molecule from either dataset
-    for each target.
+def get_functional_partition_colors(
+    hierarchy: TwoLevelHierarchy,
+) -> list[str]:
+    """Get colors for each partition based on community type.
 
     Args:
-        moses_analyses: MOSES analysis results.
-        coconut_analyses: COCONUT analysis results.
-        num_examples: Number of examples to select.
+        hierarchy: TwoLevelHierarchy.
 
     Returns:
-        List of analysis dicts with 'dataset' field added, sorted by
-        increasing atom count.
+        List of color strings, one per community.
     """
-    # Pool all analyses with dataset labels
-    all_analyses = []
-    for a in moses_analyses:
-        entry = dict(a)
-        entry["dataset"] = "MOSES"
-        all_analyses.append(entry)
-    for a in coconut_analyses:
-        entry = dict(a)
-        entry["dataset"] = "COCONUT"
-        all_analyses.append(entry)
-
-    if not all_analyses:
-        return []
-
-    # Compute atom count range and evenly-spaced targets
-    atom_counts = [a["num_atoms"] for a in all_analyses]
-    min_atoms = min(atom_counts)
-    max_atoms = max(atom_counts)
-
-    if num_examples == 1:
-        targets = [(min_atoms + max_atoms) / 2]
-    else:
-        targets = np.linspace(min_atoms, max_atoms, num_examples).tolist()
-
-    # Greedily pick closest molecule to each target
-    selected = []
-    used_smiles: set[str] = set()
-
-    for target in targets:
-        best = None
-        best_dist = float("inf")
-        for a in all_analyses:
-            if a["smiles"] in used_smiles:
-                continue
-            dist = abs(a["num_atoms"] - target)
-            if dist < best_dist:
-                best_dist = dist
-                best = a
-        if best is not None:
-            selected.append(best)
-            used_smiles.add(best["smiles"])
-
-    # Sort by atom count for clean progression
-    selected.sort(key=lambda a: a["num_atoms"])
-    return selected
+    return [
+        TYPE_COLORS.get(comm.community_type, SINGLETON_COLOR)
+        for comm in hierarchy.communities
+    ]
 
 
-def create_example_figure(
+# ============================================================================
+# Figure generation
+# ============================================================================
+
+
+def create_comparison_figure(
     smiles: str,
     data: Data,
-    hac_hg: HierarchicalGraph,
     spectral_hg: HierarchicalGraph,
-    idx: int,
-    dataset: str,
-    output_path: str,
+    hac_hg: HierarchicalGraph,
+    motif_hg: HierarchicalGraph,
+    functional_hierarchy: TwoLevelHierarchy,
+    functional_hg: HierarchicalGraph,
+    pos: dict[int, tuple[float, float]],
+    title: str,
+    output_path: str | None = None,
     dpi: int = 150,
 ) -> plt.Figure:
-    """Create a 2x2 example figure for a single molecule.
-
-    Layout:
-        [HAC Communities]     [Spectral Communities]
-        [HAC Hierarchy Tree]  [Spectral Hierarchy Tree]
+    """Create a 4-row x 2-col comparison figure.
 
     Args:
         smiles: SMILES string.
         data: PyG Data object.
-        hac_hg: HAC HierarchicalGraph.
-        spectral_hg: Spectral HierarchicalGraph.
-        idx: Example index.
-        dataset: Dataset name ("MOSES" or "COCONUT").
-        output_path: Path to save the figure.
+        spectral_hg: HierarchicalGraph from SpectralCoarsening.
+        hac_hg: HierarchicalGraph from AffinityCoarsening.
+        motif_hg: HierarchicalGraph from MotifCommunityCoarsening.
+        functional_hierarchy: TwoLevelHierarchy from FunctionalHierarchyBuilder.
+        functional_hg: Adapted HierarchicalGraph from functional_hierarchy.
+        pos: Node positions.
+        title: Figure title.
+        output_path: Path to save the figure, or None.
         dpi: Output DPI.
 
     Returns:
         Matplotlib Figure.
     """
-    pos = compute_rdkit_2d_layout(smiles)
-    if pos is None:
-        pos = compute_spring_layout(data)
-
-    fig = plt.figure(figsize=(20, 16))
+    fig = plt.figure(figsize=(16, 22))
     gs = GridSpec(
-        3,
+        4,
         2,
         figure=fig,
-        height_ratios=[3, 3, 0.3],
-        hspace=0.25,
-        wspace=0.2,
+        height_ratios=[1, 1, 1, 1],
+        hspace=0.30,
+        wspace=0.15,
     )
 
-    # Row 1: Molecule + communities
-    ax_hac_mol = fig.add_subplot(gs[0, 0])
-    plot_molecule_with_communities(
-        ax_hac_mol,
-        data,
-        smiles,
-        hac_hg,
-        pos,
-        "HAC Communities",
-    )
-
-    ax_spec_mol = fig.add_subplot(gs[0, 1])
-    plot_molecule_with_communities(
-        ax_spec_mol,
-        data,
-        smiles,
-        spectral_hg,
-        pos,
-        "Spectral Communities",
-    )
-
-    # Row 2: Hierarchy trees
-    ax_hac_tree = fig.add_subplot(gs[1, 0])
-    plot_hierarchy_tree(ax_hac_tree, hac_hg, "HAC Hierarchy Tree")
-
-    ax_spec_tree = fig.add_subplot(gs[1, 1])
-    plot_hierarchy_tree(ax_spec_tree, spectral_hg, "Spectral Hierarchy Tree")
-
-    # Row 3: Stats bar
-    ax_stats = fig.add_subplot(gs[2, :])
-    ax_stats.axis("off")
-
-    hac_stats = compute_hierarchy_stats(hac_hg)
-    spec_stats = compute_hierarchy_stats(spectral_hg)
-    stats_text = (
-        f"atoms={data.num_nodes}  |  "
-        f"HAC: comms={hac_stats['num_communities']}, "
-        f"depth={hac_stats['depth']}, "
-        f"singleton={hac_stats['singleton_fraction']:.0%}  |  "
-        f"Spectral: comms={spec_stats['num_communities']}, "
-        f"depth={spec_stats['depth']}, "
-        f"singleton={spec_stats['singleton_fraction']:.0%}"
-    )
-    ax_stats.text(
-        0.5,
-        0.5,
-        stats_text,
-        ha="center",
-        va="center",
-        fontsize=11,
-        style="italic",
-        bbox=dict(boxstyle="round,pad=0.4", facecolor="#f8f9fa", edgecolor="#dee2e6"),
-        transform=ax_stats.transAxes,
-    )
-
-    # Truncate SMILES for title
-    smiles_display = smiles[:50] + "..." if len(smiles) > 50 else smiles
-    fig.suptitle(
-        f"Example {idx + 1}: {dataset} ({data.num_nodes} atoms)\n{smiles_display}",
-        fontsize=13,
-        fontweight="bold",
-    )
-
-    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  Saved: {output_path}")
-    return fig
-
-
-# ============================================================================
-# Section 8: Aggregate Statistics
-# ============================================================================
-
-
-def create_aggregate_figure(
-    moses_hac: list[dict[str, Any]],
-    moses_spectral: list[dict[str, Any]],
-    coconut_hac: list[dict[str, Any]],
-    coconut_spectral: list[dict[str, Any]],
-    output_path: str,
-    dpi: int = 150,
-) -> plt.Figure:
-    """Create aggregate statistics comparison figure.
-
-    2x3 grid:
-        Row 1: Hierarchy Depth | Num Communities | Largest Community Size
-        Row 2: Singleton Fraction | Non-singleton Sizes | Depth vs Atom Count
-
-    Args:
-        moses_hac: MOSES HAC analysis results.
-        moses_spectral: MOSES Spectral analysis results.
-        coconut_hac: COCONUT HAC analysis results.
-        coconut_spectral: COCONUT Spectral analysis results.
-        output_path: Path to save the figure.
-        dpi: Output DPI.
-
-    Returns:
-        Matplotlib Figure.
-    """
-    fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-
-    groups = {
-        "MOSES-HAC": moses_hac,
-        "MOSES-Spectral": moses_spectral,
-        "COCONUT-HAC": coconut_hac,
-        "COCONUT-Spectral": coconut_spectral,
-    }
-
-    # Row 1, Col 1: Hierarchy Depth
-    _plot_comparison_histogram(
-        axes[0, 0],
-        {k: [a["depth"] for a in v] for k, v in groups.items()},
-        "Hierarchy Depth",
-        "Depth",
-        bins=range(0, 8),
-    )
-
-    # Row 1, Col 2: Num Communities
-    _plot_comparison_histogram(
-        axes[0, 1],
-        {k: [a["num_communities"] for a in v] for k, v in groups.items()},
-        "Number of Communities",
-        "Communities",
-        bins=20,
-    )
-
-    # Row 1, Col 3: Largest Community Size
-    _plot_comparison_histogram(
-        axes[0, 2],
-        {k: [a["largest_community_size"] for a in v] for k, v in groups.items()},
-        "Largest Community Size",
-        "Nodes",
-        bins=20,
-    )
-
-    # Row 2, Col 1: Singleton Fraction
-    _plot_comparison_histogram(
-        axes[1, 0],
-        {k: [a["singleton_fraction"] for a in v] for k, v in groups.items()},
-        "Singleton Fraction",
-        "Fraction",
-        bins=np.linspace(0, 1, 21),
-    )
-
-    # Row 2, Col 2: Non-singleton Sizes box plot
-    _plot_non_singleton_boxplot(
-        axes[1, 1],
+    row_configs = [
         {
-            k: [s for a in v for s in a["non_singleton_sizes"]]
-            for k, v in groups.items()
+            "label": "(A)",
+            "title_graph": "Spectral Coarsening",
+            "title_tree": "Hierarchy Tree",
+            "hg": spectral_hg,
+            "colors": None,
         },
-    )
+        {
+            "label": "(B)",
+            "title_graph": "HAC (Affinity Coarsening)",
+            "title_tree": "Hierarchy Tree",
+            "hg": hac_hg,
+            "colors": None,
+        },
+        {
+            "label": "(C)",
+            "title_graph": "Direct Motif Identification",
+            "title_tree": "Hierarchy Tree",
+            "hg": motif_hg,
+            "colors": None,
+        },
+        {
+            "label": "(D)",
+            "title_graph": "Motif + Functional Group",
+            "title_tree": "Hierarchy Tree",
+            "hg": functional_hg,
+            "colors": get_functional_partition_colors(functional_hierarchy),
+        },
+    ]
 
-    # Row 2, Col 3: Depth vs Atom Count scatter
-    _plot_depth_vs_atoms_scatter(axes[1, 2], groups)
+    for row_idx, cfg in enumerate(row_configs):
+        hg = cfg["hg"]
+        colors = cfg["colors"]
 
-    fig.suptitle(
-        "Community Structure: HAC vs Spectral on MOSES vs COCONUT",
-        fontsize=14,
-        fontweight="bold",
-        y=1.01,
-    )
-    fig.tight_layout()
-    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  Saved: {output_path}")
-    return fig
-
-
-def _plot_comparison_histogram(
-    ax: plt.Axes,
-    values_dict: dict[str, list[float]],
-    title: str,
-    xlabel: str,
-    bins: Any = 20,
-) -> None:
-    """Plot overlapping histograms for 4 groups.
-
-    Args:
-        ax: Matplotlib axes.
-        values_dict: Dict mapping group name to list of values.
-        title: Plot title.
-        xlabel: X-axis label.
-        bins: Histogram bin specification.
-    """
-    for group_name, values in values_dict.items():
-        if not values:
-            continue
-        ax.hist(
-            values,
-            bins=bins,
-            alpha=0.4,
-            label=f"{group_name} (n={len(values)})",
-            color=GROUP_COLORS[group_name],
-            edgecolor=GROUP_COLORS[group_name],
-            linewidth=1.0,
+        # Left: molecule graph with communities
+        ax_graph = fig.add_subplot(gs[row_idx, 0])
+        plot_molecule_with_communities(
+            ax_graph, data, smiles, hg, pos, part_colors=colors
+        )
+        ax_graph.set_title(
+            cfg["title_graph"], fontsize=10, fontweight="bold"
         )
 
-    ax.set_title(title, fontsize=10, fontweight="bold")
-    ax.set_xlabel(xlabel, fontsize=9)
-    ax.set_ylabel("Count", fontsize=9)
-    ax.legend(fontsize=7, loc="upper right")
-    ax.grid(alpha=0.3)
+        # Row label
+        ax_graph.text(
+            -0.05,
+            1.05,
+            cfg["label"],
+            transform=ax_graph.transAxes,
+            fontsize=14,
+            fontweight="bold",
+            va="bottom",
+            ha="right",
+        )
+
+        # Stats annotation
+        n_comm = len(hg.partitions)
+        n_singleton = sum(1 for p in hg.partitions if p.num_nodes == 1)
+        stats_text = f"comms={n_comm}, singletons={n_singleton}"
+        ax_graph.text(
+            0.02,
+            0.02,
+            stats_text,
+            transform=ax_graph.transAxes,
+            fontsize=7,
+            color="gray",
+            va="bottom",
+            bbox=dict(
+                boxstyle="round,pad=0.2", facecolor="white", alpha=0.7
+            ),
+        )
+
+        # Right: hierarchy tree
+        ax_tree = fig.add_subplot(gs[row_idx, 1])
+        plot_hierarchy_tree(ax_tree, hg, part_colors=colors)
+        ax_tree.set_title(
+            cfg["title_tree"], fontsize=10, fontweight="bold"
+        )
+
+    # Add type legend for row D
+    legend_patches = [
+        mpatches.Patch(color=TYPE_COLORS["ring"], label="Ring"),
+        mpatches.Patch(color=TYPE_COLORS["functional"], label="Functional"),
+        mpatches.Patch(color=TYPE_COLORS["singleton"], label="Singleton"),
+    ]
+    fig.legend(
+        handles=legend_patches,
+        loc="lower right",
+        fontsize=9,
+        title="Community types (D)",
+        title_fontsize=9,
+        framealpha=0.9,
+        bbox_to_anchor=(0.98, 0.01),
+    )
+
+    fig.suptitle(title, fontsize=13, fontweight="bold")
+
+    if output_path:
+        fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+        print(f"  Saved: {output_path}")
+
+    return fig
 
 
-def _plot_non_singleton_boxplot(
-    ax: plt.Axes,
-    sizes_dict: dict[str, list[int]],
+# ============================================================================
+# Single-molecule pipeline
+# ============================================================================
+
+
+def process_molecule(
+    name: str,
+    smiles: str,
+    output_dir: Path,
+    seed: int = 42,
+    dpi: int = 150,
+    show: bool = False,
 ) -> None:
-    """Box plot of non-singleton community sizes.
+    """Build all 4 hierarchies and generate comparison figure for one molecule.
 
     Args:
-        ax: Matplotlib axes.
-        sizes_dict: Dict mapping group name to list of community sizes.
+        name: Display name.
+        smiles: SMILES string.
+        output_dir: Output directory.
+        seed: Random seed.
+        dpi: Output DPI.
+        show: Whether to show the figure.
     """
-    data_list = []
-    labels = []
-    colors = []
-    for group_name, sizes in sizes_dict.items():
-        if sizes:
-            data_list.append(sizes)
-            labels.append(group_name.replace("-", "\n"))
-            colors.append(GROUP_COLORS[group_name])
-
-    if not data_list:
-        ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
-        ax.axis("off")
+    data = smiles_to_graph(smiles, labeled=True)
+    if data is None:
+        print(f"  Failed to convert SMILES: {smiles}")
         return
 
-    bp = ax.boxplot(
-        data_list,
-        labels=labels,
-        patch_artist=True,
-        showfliers=False,
-        widths=0.6,
+    pos = compute_rdkit_2d_layout(smiles)
+    if pos is None:
+        pos = compute_spring_layout(data, seed=seed)
+
+    print(f"Analyzing: {name} ({data.num_nodes} atoms)")
+    print(f"  SMILES: {smiles}")
+
+    print("  Building Spectral hierarchy...")
+    spectral = SpectralCoarsening(min_community_size=4, seed=seed)
+    spectral_hg = spectral.build_hierarchy(data)
+
+    print("  Building HAC hierarchy...")
+    hac = AffinityCoarsening(min_community_size=4, seed=seed)
+    hac_hg = hac.build_hierarchy(data)
+
+    print("  Building Motif Community hierarchy...")
+    motif = MotifCommunityCoarsening(min_community_size=4, seed=seed)
+    motif_hg = motif.build_hierarchy(data)
+
+    print("  Building Functional hierarchy...")
+    functional = FunctionalHierarchyBuilder()
+    functional_hierarchy = functional.build(data)
+    functional_hg = functional_hierarchy_to_hg(functional_hierarchy, data)
+
+    safe_name = name.lower().replace(" ", "_")
+    output_path = str(output_dir / f"{safe_name}_coarsening_comparison.png")
+
+    smiles_short = smiles[:50] + "..." if len(smiles) > 50 else smiles
+    title = f"{name} ({data.num_nodes} atoms): {smiles_short}"
+
+    fig = create_comparison_figure(
+        smiles=smiles,
+        data=data,
+        spectral_hg=spectral_hg,
+        hac_hg=hac_hg,
+        motif_hg=motif_hg,
+        functional_hierarchy=functional_hierarchy,
+        functional_hg=functional_hg,
+        pos=pos,
+        title=title,
+        output_path=output_path,
+        dpi=dpi,
     )
-    for patch, color in zip(bp["boxes"], colors):
-        patch.set_facecolor(color)
-        patch.set_alpha(0.6)
 
-    ax.set_title("Non-singleton Community Sizes", fontsize=10, fontweight="bold")
-    ax.set_ylabel("Nodes per Community", fontsize=9)
-    ax.grid(alpha=0.3, axis="y")
-    ax.tick_params(axis="x", labelsize=7)
-
-
-def _plot_depth_vs_atoms_scatter(
-    ax: plt.Axes,
-    groups: dict[str, list[dict[str, Any]]],
-) -> None:
-    """Scatter plot of hierarchy depth vs atom count with trend lines.
-
-    Args:
-        ax: Matplotlib axes.
-        groups: Dict mapping group name to analysis results.
-    """
-    for group_name, analyses in groups.items():
-        if not analyses:
-            continue
-        atoms = [a["num_atoms"] for a in analyses]
-        depths = [a["depth"] for a in analyses]
-
-        ax.scatter(
-            atoms,
-            depths,
-            alpha=0.3,
-            s=15,
-            color=GROUP_COLORS[group_name],
-            label=group_name,
-        )
-
-        # Trend line
-        if len(atoms) > 5:
-            z = np.polyfit(atoms, depths, 1)
-            p = np.poly1d(z)
-            x_range = np.linspace(min(atoms), max(atoms), 50)
-            ax.plot(
-                x_range,
-                p(x_range),
-                color=GROUP_COLORS[group_name],
-                linewidth=2,
-                linestyle="--",
-                alpha=0.8,
-            )
-
-    ax.set_title("Depth vs Atom Count", fontsize=10, fontweight="bold")
-    ax.set_xlabel("Number of Atoms", fontsize=9)
-    ax.set_ylabel("Hierarchy Depth", fontsize=9)
-    ax.legend(fontsize=7)
-    ax.grid(alpha=0.3)
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
 
 
 # ============================================================================
-# Section 9: CLI
+# CLI
 # ============================================================================
 
 
 def main() -> None:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Compare HAC vs Spectral community structures on MOSES vs COCONUT",
+        description="Compare 4 coarsening paradigms on the same molecule",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=f"Available molecules: {', '.join(sorted(MOLECULES.keys()))}",
+    )
+    parser.add_argument("--smiles", type=str, help="SMILES string")
+    parser.add_argument(
+        "--name",
+        type=str,
+        help="Predefined molecule name",
     )
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="tmp/feature/hac-improvement/community_comparison",
+        default="tmp/community_comparison",
         help="Output directory for figures",
     )
-    parser.add_argument(
-        "--num-examples",
-        type=int,
-        default=4,
-        help="Number of example molecules to visualize",
-    )
-    parser.add_argument(
-        "--num-stats-samples",
-        type=int,
-        default=200,
-        help="Number of molecules per dataset for aggregate statistics",
-    )
-    parser.add_argument(
-        "--moses-cache",
-        type=str,
-        default="data/cache/moses_train_hdt_1000_d111408d.pt",
-        help="Path to MOSES cache .pt file",
-    )
-    parser.add_argument(
-        "--coconut-cache",
-        type=str,
-        default="data/cache/coconut_train_hdt_5000_d111408d.pt",
-        help="Path to COCONUT cache .pt file",
-    )
-    parser.add_argument(
-        "--min-community-size",
-        type=int,
-        default=4,
-        help="Minimum community size for coarsening",
-    )
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--no-show", action="store_true", help="Don't display figures")
+    parser.add_argument(
+        "--no-show", action="store_true", help="Don't display figures"
+    )
     parser.add_argument("--dpi", type=int, default=150, help="Output DPI")
 
     args = parser.parse_args()
 
-    # Create output directory
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Load SMILES
-    print("Loading SMILES from cache files...")
-    moses_smiles = load_smiles_from_cache(args.moses_cache)
-    coconut_smiles = load_smiles_from_cache(args.coconut_cache)
-    print(f"  MOSES: {len(moses_smiles)} molecules")
-    print(f"  COCONUT: {len(coconut_smiles)} molecules")
+    # Single molecule mode
+    if args.smiles or args.name:
+        smiles = args.smiles
+        display_name = "Custom"
+        if args.name:
+            key = args.name.lower()
+            if key not in MOLECULES:
+                print(f"Unknown molecule: {args.name}")
+                print(
+                    f"Available: {', '.join(sorted(MOLECULES.keys()))}"
+                )
+                return
+            smiles = MOLECULES[key]
+            display_name = args.name.replace("_", " ").title()
 
-    # Create coarseners
-    hac = AffinityCoarsening(
-        min_community_size=args.min_community_size,
-        seed=args.seed,
-    )
-    spectral = SpectralCoarsening(
-        min_community_size=args.min_community_size,
-        seed=args.seed,
-    )
-
-    # Analyze datasets for aggregate statistics
-    print(f"\nAnalyzing {args.num_stats_samples} molecules per dataset...")
-
-    print("  MOSES + HAC...")
-    moses_hac = analyze_dataset(moses_smiles, hac, args.num_stats_samples, args.seed)
-    print(f"    {len(moses_hac)} successful")
-
-    print("  MOSES + Spectral...")
-    moses_spectral = analyze_dataset(
-        moses_smiles,
-        spectral,
-        args.num_stats_samples,
-        args.seed,
-    )
-    print(f"    {len(moses_spectral)} successful")
-
-    print("  COCONUT + HAC...")
-    coconut_hac = analyze_dataset(
-        coconut_smiles,
-        hac,
-        args.num_stats_samples,
-        args.seed,
-    )
-    print(f"    {len(coconut_hac)} successful")
-
-    print("  COCONUT + Spectral...")
-    coconut_spectral = analyze_dataset(
-        coconut_smiles,
-        spectral,
-        args.num_stats_samples,
-        args.seed,
-    )
-    print(f"    {len(coconut_spectral)} successful")
-
-    # Generate example figures
-    print("\nSelecting example molecules...")
-    examples = select_example_molecules(
-        moses_hac,
-        coconut_hac,
-        num_examples=args.num_examples,
-    )
-
-    print(f"\nGenerating {len(examples)} example figures...")
-    for idx, example in enumerate(examples):
-        smiles = example["smiles"]
-        dataset = example["dataset"]
-        num_atoms = example["num_atoms"]
-        data = example["data"]
-
-        print(f"  Example {idx + 1}: {dataset}, {num_atoms} atoms")
-
-        # Build hierarchies with both coarseners
-        hac_hg = hac.build_hierarchy(data)
-        try:
-            spectral_hg = spectral.build_hierarchy(data)
-        except Exception:
-            print("    Spectral failed, skipping")
-            continue
-
-        filename = f"example_{idx + 1}_{dataset.lower()}_{num_atoms}atoms.png"
-        create_example_figure(
-            smiles,
-            data,
-            hac_hg,
-            spectral_hg,
-            idx,
-            dataset,
-            str(output_dir / filename),
+        process_molecule(
+            name=display_name,
+            smiles=smiles,
+            output_dir=output_dir,
+            seed=args.seed,
             dpi=args.dpi,
+            show=not args.no_show,
         )
+        return
 
-    # Generate aggregate statistics figure
-    print("\nGenerating aggregate statistics figure...")
-    create_aggregate_figure(
-        moses_hac,
-        moses_spectral,
-        coconut_hac,
-        coconut_spectral,
-        str(output_dir / "aggregate_stats.png"),
-        dpi=args.dpi,
+    # Default: run on list of COCONUT molecules
+    print(
+        f"No molecule specified, running on {len(DEFAULT_MOLECULES)} "
+        "default COCONUT molecules...\n"
     )
+    for mol_name in DEFAULT_MOLECULES:
+        smiles = MOLECULES[mol_name]
+        display_name = mol_name.replace("_", " ").title()
+        process_molecule(
+            name=display_name,
+            smiles=smiles,
+            output_dir=output_dir,
+            seed=args.seed,
+            dpi=args.dpi,
+            show=not args.no_show,
+        )
+        print()
 
-    print(f"\nAll figures saved to {output_dir}/")
-
-    if not args.no_show:
-        print("(Use --no-show to suppress display)")
+    print(f"All figures saved to {output_dir}/")
 
 
 if __name__ == "__main__":
