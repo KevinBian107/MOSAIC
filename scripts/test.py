@@ -321,7 +321,9 @@ def main(cfg: DictConfig) -> None:
         num_samples = num_test
 
     log.info(f"Generating {num_samples} molecules...")
-    log.info("(Progress bar shows batches; slow because generation is autoregressive, one token per step.)")
+    log.info(
+        "(Progress bar shows batches; slow because generation is autoregressive, one token per step.)"
+    )
     gen_result = model.generate(num_samples=num_samples, show_progress=True)
     generated_graphs = gen_result[0]
     gen_time = gen_result[1]
@@ -431,13 +433,15 @@ def main(cfg: DictConfig) -> None:
             # Convert reference SMILES to graphs for PGD
             # Limit to max_reference_size for memory constraints
             max_ref_size = cfg.metrics.get("pgd_reference_size", 100)
-            reference_smiles = datamodule.test_smiles[:max_ref_size]
+            pgd_reference_smiles = datamodule.test_smiles[:max_ref_size]
 
             log.info(
-                f"Converting {len(reference_smiles)} reference SMILES to graphs..."
+                f"Converting {len(pgd_reference_smiles)} reference SMILES to graphs..."
             )
             reference_graphs = []
-            for smi in tqdm(reference_smiles, desc="Converting reference to graphs"):
+            for smi in tqdm(
+                pgd_reference_smiles, desc="Converting reference to graphs"
+            ):
                 try:
                     g = smiles_to_graph(smi)
                     if g is not None and g.num_nodes > 0:

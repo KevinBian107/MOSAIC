@@ -109,7 +109,7 @@ def weighted_graph() -> Data:
     # |            |
     # 2 --triple-- 3
     edges = [(0, 1), (1, 0), (0, 2), (2, 0), (1, 3), (3, 1), (2, 3), (3, 2)]
-    edge_attr = [2, 2, 0, 0, 0, 0, 3, 3]  # double, single, single, triple
+    edge_attr = [1, 1, 0, 0, 0, 0, 2, 2]  # double, single, single, triple
     edge_index = torch.tensor(edges, dtype=torch.long).t()
     return Data(
         edge_index=edge_index,
@@ -229,10 +229,10 @@ class TestBondWeightAffinity:
     def test_bond_weight_map_values(self) -> None:
         """Verify the BOND_WEIGHT_MAP has correct entries."""
         assert BOND_WEIGHT_MAP[0] == 1.0  # single
-        assert BOND_WEIGHT_MAP[1] == 1.0  # single alias
-        assert BOND_WEIGHT_MAP[2] == 2.0  # double
-        assert BOND_WEIGHT_MAP[3] == 3.0  # triple
-        assert BOND_WEIGHT_MAP[4] == 1.5  # aromatic
+        assert BOND_WEIGHT_MAP[1] == 2.0  # double
+        assert BOND_WEIGHT_MAP[2] == 3.0  # triple
+        assert BOND_WEIGHT_MAP[3] == 1.5  # aromatic
+        assert BOND_WEIGHT_MAP[4] == 1.0  # unknown
 
     def test_weighted_adjacency_uses_bond_types(self, weighted_graph: Data) -> None:
         """Weighted adjacency should reflect bond types."""
