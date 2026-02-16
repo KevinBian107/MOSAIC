@@ -400,6 +400,7 @@ class MolecularDataModule(pl.LightningDataModule):
                     max_molecules=val_size,
                     include_hydrogens=self.include_hydrogens,
                     labeled=labeled,
+                    seed=137,  # Different seed from test (42) to avoid overlap
                 )
                 self.val_smiles = val_mol.smiles_list
                 self.max_num_nodes = max(self.max_num_nodes, val_mol.max_num_nodes)

@@ -928,11 +928,36 @@ class HSENTTokenizer(Tokenizer):
             if bipart is not None:
                 bipartites.append(bipart)
 
+                # Propagate bipartite edge features to global edge_features_dict
+                if self.labeled_graph and bipart.edge_features is not None:
+                    if bipart.left_part_id < len(
+                        partitions
+                    ) and bipart.right_part_id < len(partitions):
+                        left_part = partitions[bipart.left_part_id]
+                        right_part = partitions[bipart.right_part_id]
+
+                        ei = bipart.edge_index.numpy()
+                        for e in range(ei.shape[1]):
+                            left_local = int(ei[0, e])
+                            right_local = int(ei[1, e])
+                            if (
+                                left_local < left_part.num_nodes
+                                and right_local < right_part.num_nodes
+                            ):
+                                left_global = left_part.local_to_global(left_local)
+                                right_global = right_part.local_to_global(right_local)
+                                bond_type = int(bipart.edge_features[e])
+
+                                edge_features_dict[(left_global, right_global)] = (
+                                    bond_type
+                                )
+                                edge_features_dict[(right_global, left_global)] = (
+                                    bond_type
+                                )
+
         # Build community assignment for child
         community_assignment = self._build_community_assignment(partitions)
 
-        # Note: node_features and edge_features are already populated in the dictionaries
-        # The parent HierarchicalGraph will use these dictionaries
         return HierarchicalGraph(partitions, bipartites, community_assignment), idx
 
     def _parse_bipartite(
