@@ -18,7 +18,7 @@ import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -37,6 +37,7 @@ from src.tokenizers import HDTCTokenizer, HDTTokenizer, HSENTTokenizer, SENTToke
 
 # Common molecules for demos
 MOLECULES = {
+    # Simple / drug-like (MOSES-scale)
     "benzene": "c1ccccc1",
     "naphthalene": "c1ccc2ccccc2c1",
     "phenol": "Oc1ccccc1",
@@ -47,13 +48,20 @@ MOLECULES = {
     "morphine": "CN1CCC23C4C1CC5=C2C(=C(C=C5)O)OC3C(C=C4)O",
     "dopamine": "NCCC1=CC(O)=C(O)C=C1",
     "penicillin_g": "CC1(C)SC2C(NC(=O)CC3=CC=CC=C3)C(=O)N2C1C(=O)O",
-    # Complex molecules with multiple motifs
     "quercetin": "O=C1C(O)=C(O)C(=O)C2=C1C=C(O)C(O)=C2C3=CC(O)=C(O)C=C3",
     "resveratrol": "OC1=CC=C(C=C1)/C=C/C2=CC(O)=CC(O)=C2",
     "estradiol": "CC12CCC3C(C1CCC2O)CCC4=C3C=CC(=C4)O",
     "testosterone": "CC12CCC3C(C1CCC2O)CCC4=CC(=O)CCC34C",
-    "indole_benzene": "c1ccc2[nH]ccc2c1-c3ccccc3",  # Indole linked to benzene
+    "indole_benzene": "c1ccc2[nH]ccc2c1-c3ccccc3",
     "biphenyl": "c1ccc(-c2ccccc2)cc1",
+    # Natural products (COCONUT-scale)
+    "strychnine": "O=C1C[C@H]2OCC=C3CN4CC[C@@]56[C@@H]4C[C@H]3[C@H]2[C@H]5N1c1ccccc16",
+    "camptothecin": "CCC1(O)C(=O)OCc2c1cc1n(c2=O)Cc2cc3ccccc3nc2-1",
+    "vinblastine": "CCC1(O)[C@H]2CC3(CC)c4c(cc5c(c4OC)N(C=O)c4cc6c(cc4[C@H]5[C@@H]3[C@H](OC(C)=O)[C@@]1(O2)C(=O)OC)OCO6)C",
+    "reserpine": "CO[C@H]1[C@@H](CC2CN3CCC4=C([C@H]3C[C@@H]2[C@@H]1C(=O)OC)NC5=CC(OC)=C(OC)C(OC)=C45)OC(=O)C6=CC(OC)=C(OC)C(OC)=C6",
+    "taxol": "CC1=C2C(C(=O)C3(C)C(CC4OC(=O)C(C(c5ccccc5)NC(=O)c5ccccc5)O4)C3C2(C)C)C(OC(=O)C)C1OC(=O)c1ccccc1",
+    "erythromycin": "CCC1OC(=O)C(C)C(OC2CC(C)(OC)C(O)C(C)O2)C(C)C(OC2OC(C)CC(N(C)C)C2O)C(C)(O)CC(C)C(=O)C(C)C(O)C1(C)O",
+    "artemisinin": "C[C@@H]1CC[C@H]2[C@@H](C)C(=O)O[C@@H]3O[C@@]4(C)CC[C@@H]1[C@@]23OO4",
 }
 
 # SMARTS patterns for common motifs
@@ -357,7 +365,7 @@ def plot_sent_walks(
                     draw_curved_edge(
                         ax, pos[u], pos[v],
                         color=color, linewidth=3,
-                        curve_amount=curve, arrow=True, zorder=10
+                        curve_amount=curve, arrow=True, zorder=2
                     )
 
     # Draw nodes with visit order numbers on top
@@ -1096,11 +1104,11 @@ def compare_all_tokenizations(
     show: bool = True,
     seed: int = 42,
 ) -> plt.Figure | None:
-    """Create comparison of molecule, SENT, H-SENT, HDT, and HDTC tokenization.
+    """Create comparison of H-SENT, SENT, HDT, and HDTC tokenization.
 
-    Layout:
-    - Row 1: Molecule structure, SENT walks, H-SENT communities (3 columns)
-    - Row 2: HDT tree (large), HDTC functional hierarchy (large) (2 columns)
+    Layout (2x2 grid):
+        (A) H-SENT community graph  |  (B) SENT walks
+        (C) HDT tree                 |  (D) HDTC functional hierarchy
     """
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
@@ -1121,41 +1129,37 @@ def compare_all_tokenizations(
     hsent_tokenizer = HSENTTokenizer(seed=seed)
     hsent_tokenizer.set_num_nodes(max(100, data.num_nodes + 20))
 
-    # Use motif_community coarsening for HDT to avoid spectral coarsening bugs
-    hdt_tokenizer = HDTTokenizer(
-        seed=seed, min_community_size=2, coarsening_strategy="motif_community"
-    )
+    # HDT uses spectral coarsening (same as HSENT) for consistency
+    hdt_tokenizer = HDTTokenizer(seed=seed, min_community_size=2)
     hdt_tokenizer.set_num_nodes(max(100, data.num_nodes + 20))
 
-    # HDTC tokenizer with functional hierarchy
     hdtc_tokenizer = HDTCTokenizer(seed=seed)
     hdtc_tokenizer.set_num_nodes(max(100, data.num_nodes + 20))
+
+    # Build shared spectral hierarchy for HSENT and HDT
+    shared_hg = hsent_tokenizer.coarsener.build_hierarchy(data)
 
     # Tokenize
     sent_tokens = sent_tokenizer.tokenize(data).tolist()
 
-    # H-SENT may fail on some molecules due to spectral coarsening issues
     hsent_tokens = None
     hsent_hg = None
     try:
         hsent_tokens = hsent_tokenizer.tokenize(data).tolist()
-        hsent_hg = hsent_tokenizer.coarsener.build_hierarchy(data)
+        hsent_hg = shared_hg
     except (IndexError, ValueError) as e:
         print(f"  Warning: H-SENT failed ({e}), skipping H-SENT visualization")
 
     hdt_tokens = hdt_tokenizer.tokenize(data).tolist()
     hdtc_tokens = hdtc_tokenizer.tokenize(data).tolist()
 
-    # Get hierarchies
-    hdt_hg = hdt_tokenizer.coarsener.build_hierarchy(data)
+    # Use shared hierarchy for HDT tree rendering (same communities as HSENT)
+    hdt_hg = shared_hg
     hdtc_hierarchy = hdtc_tokenizer.hierarchy_builder.build(data)
 
-    # Create figure: 3 columns x 2 rows
-    # Row 1: Molecule, SENT, H-SENT (smaller, graph-based views)
-    # Row 2: HDT tree, HDTC hierarchy (larger, tree/hierarchy views)
-    fig = plt.figure(figsize=(24, 16))
+    # Create 2x2 figure
+    fig = plt.figure(figsize=(20, 18))
 
-    # Title
     title = name or smiles[:35]
     if len(smiles) > 35:
         title += "..."
@@ -1164,40 +1168,53 @@ def compare_all_tokenizations(
         fontsize=14, fontweight="bold"
     )
 
-    # Use GridSpec for better control
     from matplotlib.gridspec import GridSpec
     gs = GridSpec(
-        2, 6, figure=fig,
-        height_ratios=[1, 2],  # Second row much taller for wide tree structures
-        width_ratios=[1, 1, 1, 1, 1, 1],
+        2, 2, figure=fig,
+        height_ratios=[1, 2],
         hspace=0.25, wspace=0.15
     )
 
-    # Row 1: Graph visualizations (3 panels, each spanning 2 columns)
-    ax1 = fig.add_subplot(gs[0, 0:2])
-    plot_molecule_with_motifs(ax1, data, smiles, pos)
-
-    ax2 = fig.add_subplot(gs[0, 2:4])
-    plot_sent_walks(ax2, data, sent_tokens, sent_tokenizer, pos)
-
-    ax3 = fig.add_subplot(gs[0, 4:6])
+    # (A) Top-left: H-SENT community graph
+    ax_a = fig.add_subplot(gs[0, 0])
     if hsent_hg is not None and hsent_tokens is not None:
-        plot_hsent_structure(ax3, data, hsent_hg, hsent_tokens, hsent_tokenizer, pos)
+        plot_hsent_structure(ax_a, data, hsent_hg, hsent_tokens, hsent_tokenizer, pos)
     else:
-        ax3.text(
+        ax_a.text(
             0.5, 0.5, "H-SENT failed\n(spectral coarsening error)",
             ha="center", va="center", fontsize=10, color="gray", style="italic",
-            transform=ax3.transAxes
+            transform=ax_a.transAxes
         )
-        ax3.set_title("H-SENT: Error", fontsize=11, fontweight="bold")
-        ax3.axis("off")
+        ax_a.set_title("H-SENT: Error", fontsize=11, fontweight="bold")
+        ax_a.axis("off")
+    ax_a.text(
+        -0.02, 1.05, "(A)", transform=ax_a.transAxes,
+        fontsize=14, fontweight="bold", va="bottom", ha="right"
+    )
 
-    # Row 2: Tree/hierarchy structures (2 panels, each spanning 3 columns)
-    ax4 = fig.add_subplot(gs[1, 0:3])
-    plot_hdt_tree(ax4, data, hdt_hg, hdt_tokens, hdt_tokenizer)
+    # (B) Top-right: SENT walks
+    ax_b = fig.add_subplot(gs[0, 1])
+    plot_sent_walks(ax_b, data, sent_tokens, sent_tokenizer, pos)
+    ax_b.text(
+        -0.02, 1.05, "(B)", transform=ax_b.transAxes,
+        fontsize=14, fontweight="bold", va="bottom", ha="right"
+    )
 
-    ax5 = fig.add_subplot(gs[1, 3:6])
-    plot_hdtc_structure(ax5, data, hdtc_hierarchy, hdtc_tokens, hdtc_tokenizer)
+    # (C) Bottom-left: HDT tree
+    ax_c = fig.add_subplot(gs[1, 0])
+    plot_hdt_tree(ax_c, data, hdt_hg, hdt_tokens, hdt_tokenizer)
+    ax_c.text(
+        -0.02, 1.03, "(C)", transform=ax_c.transAxes,
+        fontsize=14, fontweight="bold", va="bottom", ha="right"
+    )
+
+    # (D) Bottom-right: HDTC functional hierarchy
+    ax_d = fig.add_subplot(gs[1, 1])
+    plot_hdtc_structure(ax_d, data, hdtc_hierarchy, hdtc_tokens, hdtc_tokenizer)
+    ax_d.text(
+        -0.02, 1.03, "(D)", transform=ax_d.transAxes,
+        fontsize=14, fontweight="bold", va="bottom", ha="right"
+    )
 
     # Stats at bottom
     hdtc_info = hdtc_hierarchy.get_level_info()

@@ -1,4 +1,4 @@
-#W!/usr/bin/env python
+#!/usr/bin/env python
 """Training script for molecular graph generation models.
 
 This script trains a transformer model on molecular graph data using
@@ -10,6 +10,14 @@ Usage:
     python scripts/train.py tokenizer.type=hsent  # Use hierarchical tokenization
     python scripts/train.py model.model_name=llama-s trainer.max_steps=200000
     python scripts/train.py wandb.enabled=true wandb.project=my-project
+
+DDP multi-GPU (non-MIG):
+    python scripts/train.py trainer.devices=4 trainer.strategy=ddp ...
+
+DDP with MIG (use train_benchmarks.sh --ddp, or manually):
+    CUDA_VISIBLE_DEVICES=<MIG-UUID> MASTER_ADDR=localhost MASTER_PORT=29500 \\
+        WORLD_SIZE=4 RANK=0 LOCAL_RANK=0 GROUP_RANK=0 LOCAL_WORLD_SIZE=1 \\
+        python scripts/train.py trainer.devices=1 trainer.num_nodes=4 trainer.strategy=ddp ...
 """
 
 import logging
@@ -17,6 +25,26 @@ import os
 import sys
 from pathlib import Path
 from typing import Optional
+
+# MIG-aware CUDA device assignment for DDP with torchrun.
+# Must run BEFORE importing torch so that CUDA_VISIBLE_DEVICES is set
+# before the CUDA runtime initializes.  With MIG, each process can only
+# access one MIG instance.  When torchrun passes a comma-separated list
+# of MIG UUIDs via CUDA_VISIBLE_DEVICES, we slice it by LOCAL_RANK so
+# each process sees exactly one device.
+# NOTE: Only triggers for MIG UUIDs (MIG-xxx format), not regular GPU
+# indices, to avoid breaking non-MIG DDP where PL manages devices.
+_local_rank_env = os.environ.get("LOCAL_RANK")
+if _local_rank_env is not None:
+    _cuda_vis = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+    if _cuda_vis:
+        _device_list = [d.strip() for d in _cuda_vis.split(",")]
+        _is_mig = any(d.startswith("MIG-") for d in _device_list)
+        _lr = int(_local_rank_env)
+        if _is_mig and len(_device_list) > 1 and _lr < len(_device_list):
+            os.environ["CUDA_VISIBLE_DEVICES"] = _device_list[_lr]
+            # Each process now sees 1 device; LOCAL_RANK must be 0
+            os.environ["LOCAL_RANK"] = "0"
 
 import hydra
 import pytorch_lightning as pl
@@ -1004,6 +1032,10 @@ class IntermediateEvaluationCallback(Callback):
         if self.wandb_logger is None:
             return
 
+        # Skip on non-rank-0 processes (generation is not DDP-synchronized)
+        if trainer.global_rank != 0:
+            return
+
         log.info(
             f"Running intermediate evaluation (val epoch {self._val_epoch_count})..."
         )
@@ -1186,6 +1218,14 @@ def main(cfg: DictConfig) -> None:
     max_epochs = cfg.trainer.get("max_epochs")
     max_steps = cfg.trainer.max_steps if max_epochs is None else -1
 
+    # DDP world size: prefer WORLD_SIZE env (set by torchrun) over config devices
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    if world_size <= 1:
+        devices_cfg = cfg.trainer.devices
+        world_size = (
+            devices_cfg if isinstance(devices_cfg, int) and devices_cfg > 1 else 1
+        )
+
     # Calculate steps per epoch and adjust val_check_interval if needed
     # Skip this if validation is disabled (limit_val_batches=0)
     limit_val_batches = cfg.trainer.get("limit_val_batches", 1.0)
@@ -1196,7 +1236,8 @@ def main(cfg: DictConfig) -> None:
         log.info("Validation disabled (limit_val_batches=0)")
     else:
         train_dataset_size = len(datamodule.train_dataset)
-        steps_per_epoch = train_dataset_size // cfg.data.batch_size
+        # In DDP each GPU gets 1/world_size of the data via DistributedSampler
+        steps_per_epoch = train_dataset_size // (cfg.data.batch_size * world_size)
         val_check_interval = cfg.trainer.val_check_interval
 
         # If val_check_interval exceeds steps per epoch, use steps per epoch (1 eval per epoch)
@@ -1208,6 +1249,8 @@ def main(cfg: DictConfig) -> None:
             val_check_interval = steps_per_epoch
 
         log.info(f"Training dataset size: {train_dataset_size:,} samples")
+        if world_size > 1:
+            log.info(f"DDP world size: {world_size} (steps per epoch adjusted)")
         log.info(f"Steps per epoch: {steps_per_epoch:,}")
         log.info(f"Validation check interval: {val_check_interval:,} steps")
 
@@ -1221,10 +1264,8 @@ def main(cfg: DictConfig) -> None:
     # If using max_epochs, estimate total steps; if using max_steps, use that directly
     if max_epochs is not None:
         train_dataset_size = len(datamodule.train_dataset)
-        steps_per_epoch = train_dataset_size // cfg.data.batch_size
         # Account for DDP: each GPU sees a fraction of the data
-        if cfg.trainer.devices > 1:
-            steps_per_epoch = steps_per_epoch // cfg.trainer.devices
+        steps_per_epoch = train_dataset_size // (cfg.data.batch_size * world_size)
         total_steps = steps_per_epoch * max_epochs
         log.info(f"Estimated total steps for {max_epochs} epochs: {total_steps:,}")
     else:
@@ -1310,7 +1351,7 @@ def main(cfg: DictConfig) -> None:
         )
 
     # Print DDP speedup estimation
-    num_gpus = cfg.trainer.devices if cfg.trainer.devices > 1 else 1
+    num_gpus = world_size
     current_batch_size = cfg.data.batch_size
     effective_batch_size = current_batch_size * num_gpus
 
@@ -1330,7 +1371,11 @@ def main(cfg: DictConfig) -> None:
         # Speedup from epoch reduction
         epoch_speedup = baseline_epochs / current_epochs
         # DDP efficiency (typically 0.85-0.95 for 2-4 GPUs, accounting for communication overhead)
-        ddp_efficiency = 1.0 if num_gpus == 1 else (0.95 if num_gpus == 2 else 0.90 if num_gpus <= 4 else 0.85)
+        ddp_efficiency = (
+            1.0
+            if num_gpus == 1
+            else (0.95 if num_gpus == 2 else 0.90 if num_gpus <= 4 else 0.85)
+        )
 
         # Total expected speedup
         total_speedup = batch_speedup * epoch_speedup * ddp_efficiency
@@ -1338,19 +1383,27 @@ def main(cfg: DictConfig) -> None:
         log.info("=" * 80)
         log.info("DDP SPEEDUP ESTIMATION")
         log.info("=" * 80)
-        log.info(f"Baseline:  {baseline_gpus} GPU  × batch={baseline_batch}  × {baseline_epochs} epochs")
-        log.info(f"Current:   {num_gpus} GPU{'s' if num_gpus > 1 else ''}  × batch={current_batch_size}  × {current_epochs} epochs")
-        log.info(f"Effective batch size: {baseline_effective_batch} → {effective_batch_size} ({effective_batch_size/baseline_effective_batch:.1f}x)")
+        log.info(
+            f"Baseline:  {baseline_gpus} GPU  × batch={baseline_batch}  × {baseline_epochs} epochs"
+        )
+        log.info(
+            f"Current:   {num_gpus} GPU{'s' if num_gpus > 1 else ''}  × batch={current_batch_size}  × {current_epochs} epochs"
+        )
+        log.info(
+            f"Effective batch size: {baseline_effective_batch} → {effective_batch_size} ({effective_batch_size / baseline_effective_batch:.1f}x)"
+        )
         log.info(f"DDP efficiency factor: {ddp_efficiency:.2f}")
         log.info(f"Expected speedup: {total_speedup:.2f}x faster than baseline")
         if total_speedup > 1:
-            log.info(f"Estimated time reduction: {(1 - 1/total_speedup) * 100:.1f}%")
+            log.info(f"Estimated time reduction: {(1 - 1 / total_speedup) * 100:.1f}%")
         log.info("=" * 80)
 
     trainer = pl.Trainer(
         max_epochs=max_epochs if max_epochs is not None else 1000,
         max_steps=max_steps,
-        val_check_interval=val_check_interval if val_check_interval is not None else 1.0,
+        val_check_interval=val_check_interval
+        if val_check_interval is not None
+        else 1.0,
         check_val_every_n_epoch=cfg.trainer.get("check_val_every_n_epoch"),
         limit_val_batches=limit_val_batches,
         num_sanity_val_steps=cfg.trainer.get("num_sanity_val_steps", 2),
@@ -1358,6 +1411,7 @@ def main(cfg: DictConfig) -> None:
         gradient_clip_val=cfg.trainer.gradient_clip_val,
         accelerator=cfg.trainer.accelerator,
         devices=cfg.trainer.devices,
+        num_nodes=cfg.trainer.get("num_nodes", 1),
         strategy=cfg.trainer.get("strategy", "auto"),
         logger=loggers,
         callbacks=callbacks,
@@ -1385,47 +1439,56 @@ def main(cfg: DictConfig) -> None:
         log.info("Running evaluation on test set...")
         trainer.test(model, datamodule)
 
-        log.info("Generating samples for evaluation...")
-        model.eval()
-        generated_graphs, gen_time, _ = model.generate(
-            num_samples=cfg.sampling.num_samples, show_progress=True
-        )
-        log.info(f"Generated {len(generated_graphs)} graphs in {gen_time:.4f}s per sample")
-
-        # Convert generated graphs to SMILES for molecular metrics
-        # Use sentinel value for failed conversions to compute accurate metrics
-        INVALID_SMILES_SENTINEL = "INVALID"
-        generated_smiles = []
-        for g in tqdm(generated_graphs, desc="Converting to SMILES"):
-            smiles = graph_to_smiles(g)
-            generated_smiles.append(smiles if smiles else INVALID_SMILES_SENTINEL)
-
-        valid_count = sum(1 for s in generated_smiles if s != INVALID_SMILES_SENTINEL)
-        log.info(
-            f"Successfully converted {valid_count}/{len(generated_smiles)} graphs to SMILES"
-        )
-
-        if wandb_logger is not None and cfg.wandb.log_graphs:
-            log.info("Logging generated molecules to WandB...")
-            # Simple molecule grid
-            log_generated_molecules_to_wandb(wandb_logger, generated_smiles, prefix="final")
-            # Enhanced visualization with color-coded motif highlighting
-            log_molecules_with_motifs_to_wandb(
-                wandb_logger,
-                generated_smiles,
-                prefix="final",
-                max_molecules=cfg.wandb.get("max_logged_molecules", 12),
+        # Generation is autoregressive and not DDP-synchronized.
+        # Only rank 0 generates and logs to avoid deadlocks.
+        if trainer.global_rank == 0:
+            log.info("Generating samples for evaluation...")
+            model.eval()
+            generated_graphs, gen_time, *_ = model.generate(
+                num_samples=cfg.sampling.num_samples, show_progress=True
+            )
+            log.info(
+                f"Generated {len(generated_graphs)} graphs in {gen_time:.4f}s per sample"
             )
 
-        # Log final validity and generation time
-        # Full metric computation is handled by the test script (scripts/test.py)
-        log_final_metrics_to_wandb(
-            wandb_logger,
-            {
-                "valid_fraction": valid_count / max(len(generated_smiles), 1),
-                "generation_time": gen_time,
-            },
-        )
+            # Convert generated graphs to SMILES for molecular metrics
+            # Use sentinel value for failed conversions to compute accurate metrics
+            INVALID_SMILES_SENTINEL = "INVALID"
+            generated_smiles = []
+            for g in tqdm(generated_graphs, desc="Converting to SMILES"):
+                smiles = graph_to_smiles(g)
+                generated_smiles.append(smiles if smiles else INVALID_SMILES_SENTINEL)
+
+            valid_count = sum(
+                1 for s in generated_smiles if s != INVALID_SMILES_SENTINEL
+            )
+            log.info(
+                f"Successfully converted {valid_count}/{len(generated_smiles)} graphs to SMILES"
+            )
+
+            if wandb_logger is not None and cfg.wandb.log_graphs:
+                log.info("Logging generated molecules to WandB...")
+                # Simple molecule grid
+                log_generated_molecules_to_wandb(
+                    wandb_logger, generated_smiles, prefix="final"
+                )
+                # Enhanced visualization with color-coded motif highlighting
+                log_molecules_with_motifs_to_wandb(
+                    wandb_logger,
+                    generated_smiles,
+                    prefix="final",
+                    max_molecules=cfg.wandb.get("max_logged_molecules", 12),
+                )
+
+            # Log final validity and generation time
+            # Full metric computation is handled by the test script (scripts/test.py)
+            log_final_metrics_to_wandb(
+                wandb_logger,
+                {
+                    "valid_fraction": valid_count / max(len(generated_smiles), 1),
+                    "generation_time": gen_time,
+                },
+            )
     else:
         log.info("Skipping test evaluation and generation (num_samples=0)")
 
