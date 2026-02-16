@@ -146,10 +146,7 @@ class BatchConverter:
 
         for i, seq in enumerate(batch):
             if self.truncation_length is not None and len(seq) > self.truncation_length:
-                start_idx = torch.randint(
-                    0, len(seq) - self.truncation_length, (1,)
-                ).item()
-                seq = seq[start_idx : start_idx + self.truncation_length]
+                seq = seq[: self.truncation_length]
             batched[i, : len(seq)] = seq
 
         return batched

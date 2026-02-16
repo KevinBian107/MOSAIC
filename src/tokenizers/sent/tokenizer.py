@@ -89,7 +89,9 @@ class SENTTokenizer(Tokenizer):
         if self.max_num_nodes is None or self.max_num_nodes < max_num_nodes:
             self.max_num_nodes = max_num_nodes
 
-    def set_num_node_and_edge_types(self, num_node_types: int, num_edge_types: int) -> None:
+    def set_num_node_and_edge_types(
+        self, num_node_types: int, num_edge_types: int
+    ) -> None:
         """Set number of node and edge types for labeled graphs.
 
         Args:
@@ -109,7 +111,9 @@ class SENTTokenizer(Tokenizer):
             raise ValueError("Call set_num_nodes() first")
         if self.labeled_graph:
             if self.edge_idx_offset is None:
-                raise ValueError("Call set_num_node_and_edge_types() first for labeled graphs")
+                raise ValueError(
+                    "Call set_num_node_and_edge_types() first for labeled graphs"
+                )
             return self.edge_idx_offset + self.num_edge_types
         return self.idx_offset + self.max_num_nodes
 
@@ -192,9 +196,7 @@ class SENTTokenizer(Tokenizer):
 
         return adj
 
-    def _sample_walk(
-        self, adj: dict[int, set[int]], num_nodes: int
-    ) -> list[int]:
+    def _sample_walk(self, adj: dict[int, set[int]], num_nodes: int) -> list[int]:
         """Sample a SENT walk through the graph.
 
         Args:
@@ -236,9 +238,7 @@ class SENTTokenizer(Tokenizer):
                 current_idx += 1
 
                 back_edges = sorted(
-                    node_map[n]
-                    for n in neighbors
-                    if n in visited and n != prev
+                    node_map[n] for n in adj[next_node] if n in visited and n != current
                 )
                 if back_edges:
                     tokens.append(self.ladj)
@@ -291,7 +291,10 @@ class SENTTokenizer(Tokenizer):
                 undirected=self.undirected,
             )
 
-            num_nodes = max(edge_index.flatten().max() + 1 if edge_index.numel() > 0 else 0, len(node_labels))
+            num_nodes = max(
+                edge_index.flatten().max() + 1 if edge_index.numel() > 0 else 0,
+                len(node_labels),
+            )
 
             return Data(
                 x=node_labels,

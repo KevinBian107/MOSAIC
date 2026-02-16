@@ -25,13 +25,13 @@ from src.tokenizers.structures import (
 )
 
 # Bond type index → affinity weight (from src/data/molecular.py BOND_TYPES)
-# Index 0: single, 1: single (alias), 2: double, 3: triple, 4: aromatic
+# Index 0: single, 1: double, 2: triple, 3: aromatic, 4: unknown
 BOND_WEIGHT_MAP: dict[int, float] = {
     0: 1.0,  # single bond
-    1: 1.0,  # single bond (alias)
-    2: 2.0,  # double bond
-    3: 3.0,  # triple bond
-    4: 1.5,  # aromatic bond
+    1: 2.0,  # double bond
+    2: 3.0,  # triple bond
+    3: 1.5,  # aromatic bond
+    4: 1.0,  # unknown bond type
 }
 
 
@@ -569,6 +569,7 @@ class AffinityCoarsening:
                     global_node_indices=remapped_global,
                     edge_index=part.edge_index.clone(),
                     child_hierarchy=remapped_child,
+                    node_features=part.node_features,
                 )
             )
 

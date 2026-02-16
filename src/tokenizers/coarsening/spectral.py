@@ -28,10 +28,9 @@ class SpectralCoarsening:
     Adapted from HiGen's graph_corsening.py. Uses spectral clustering
     to find communities that maximize modularity.
 
-    Conservative optimizations applied (7-8x speedup vs original):
+    Conservative optimizations applied (vs original):
     - n_init=10 (vs 100): 99% quality with 5.6x speedup
     - Vectorized modularity computation (vs NetworkX): ~1.2x speedup
-    - assign_labels='discretize' (vs 'kmeans'): ~1.2x speedup
 
     Attributes:
         k_min_factor: Factor for minimum cluster count (k_min = sqrt(n) * factor).
@@ -66,9 +65,7 @@ class SpectralCoarsening:
         self.min_community_size = min_community_size
         self.seed = seed
 
-    def _compute_modularity(
-        self, adj: np.ndarray, partition: dict[int, int]
-    ) -> float:
+    def _compute_modularity(self, adj: np.ndarray, partition: dict[int, int]) -> float:
         """Compute modularity score for a partition.
 
         Optimized vectorized implementation for speed.
@@ -153,7 +150,7 @@ class SpectralCoarsening:
                     affinity="precomputed",
                     n_init=self.n_init,
                     random_state=self.seed,
-                    assign_labels="discretize",
+                    assign_labels="kmeans",
                 )
                 # Add small diagonal for numerical stability
                 labels = sc.fit_predict(adj + np.eye(n) * 1e-6)
@@ -383,9 +380,7 @@ class SpectralCoarsening:
 
                 # Find edges from left to right community
                 bipart_edges = []
-                bipart_edge_features = (
-                    [] if edge_features_global is not None else None
-                )
+                bipart_edge_features = [] if edge_features_global is not None else None
 
                 for e in range(edge_index_np.shape[1]):
                     src, dst = int(edge_index_np[0, e]), int(edge_index_np[1, e])
@@ -402,9 +397,7 @@ class SpectralCoarsening:
                             bipart_edge_features.append(bond_type)
 
                 if bipart_edges:
-                    bipart_edge_index = torch.tensor(
-                        bipart_edges, dtype=torch.long
-                    ).t()
+                    bipart_edge_index = torch.tensor(bipart_edges, dtype=torch.long).t()
 
                     # Convert edge features to tensor if present
                     bipart_edge_attr = None
@@ -429,50 +422,47 @@ class SpectralCoarsening:
         child_hg: HierarchicalGraph,
         parent_node_list: list[int],
     ) -> HierarchicalGraph:
-        """Remap a child hierarchy's top-level indices to parent's coordinate system.
+        """Remap a child hierarchy's indices to parent's coordinate system.
 
-        When we recursively build a hierarchy for a subgraph, the child uses indices
-        0..k-1. This function remaps only the top-level partition indices to the
-        parent's coordinate system. Nested child hierarchies remain in their local
-        coordinate systems.
+        Recursively remaps all levels of nesting so that global_node_indices
+        at every depth use the parent's coordinate system.
 
         Args:
             child_hg: Child hierarchy with local indices 0..k-1.
             parent_node_list: Parent's global node indices (sorted, length k).
 
         Returns:
-            Child hierarchy with remapped top-level indices.
+            Child hierarchy with fully remapped indices at all depths.
         """
-        # Remap partitions
         remapped_partitions = []
         for part in child_hg.partitions:
-            # Child's global indices are 0..k-1, map to parent's global indices
-
             remapped_global = [
                 parent_node_list[idx] for idx in part.global_node_indices
             ]
-            # Child hierarchies should remain in their local coordinate system
-            # They should NOT be recursively remapped - only top-level indices are remapped
+
+            # Recursively remap nested child hierarchies
+            remapped_child = None
+            if part.child_hierarchy is not None:
+                remapped_child = self._remap_child_hierarchy(
+                    part.child_hierarchy, parent_node_list
+                )
+
             remapped_partitions.append(
                 Partition(
                     part_id=part.part_id,
                     global_node_indices=remapped_global,
                     edge_index=part.edge_index.clone(),
-                    child_hierarchy=part.child_hierarchy,  # Keep in local coords
+                    child_hierarchy=remapped_child,
+                    node_features=part.node_features,
                 )
             )
 
         # Remap community assignment
-        remapped_assignment = [
-            child_hg.community_assignment[
-                parent_node_list.index(parent_node_list[i])
-            ]
-            for i in range(len(parent_node_list))
-        ]
+        remapped_assignment = list(child_hg.community_assignment)
 
         return HierarchicalGraph(
             partitions=remapped_partitions,
-            bipartites=child_hg.bipartites,  # Bipartites use local indices, no change
+            bipartites=child_hg.bipartites,
             community_assignment=remapped_assignment,
         )
 
@@ -510,9 +500,7 @@ class SimpleSpectralCoarsening:
         self.n_init = n_init
         self.seed = seed
 
-    def _compute_modularity(
-        self, adj: np.ndarray, partition: dict[int, int]
-    ) -> float:
+    def _compute_modularity(self, adj: np.ndarray, partition: dict[int, int]) -> float:
         """Compute modularity score for a partition.
 
         Args:
@@ -628,7 +616,9 @@ class SimpleSpectralCoarsening:
         n = data.num_nodes
 
         # Extract node features if present
-        node_features_global = data.x if hasattr(data, "x") and data.x is not None else None
+        node_features_global = (
+            data.x if hasattr(data, "x") and data.x is not None else None
+        )
 
         # Extract edge features if present
         edge_features_global: dict[tuple[int, int], int] | None = None
@@ -730,9 +720,7 @@ class SimpleSpectralCoarsening:
                             bipart_edge_features.append(bond)
 
                 if bipart_edges:
-                    bipart_edge_index = torch.tensor(
-                        bipart_edges, dtype=torch.long
-                    ).t()
+                    bipart_edge_index = torch.tensor(bipart_edges, dtype=torch.long).t()
 
                     bipart_edge_attr = None
                     if bipart_edge_features:
