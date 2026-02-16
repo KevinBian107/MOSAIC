@@ -140,7 +140,7 @@ def main(cfg: DictConfig) -> None:
             # Generate a few molecules
             pl_module.eval()
             try:
-                generated_graphs, gen_time = pl_module.generate(
+                generated_graphs, gen_time, _ = pl_module.generate(
                     num_samples=self.num_samples, show_progress=False
                 )
 
@@ -644,7 +644,7 @@ def main(cfg: DictConfig) -> None:
     # Evaluate
     log.info("Evaluating fine-tuned model...")
     model.eval()
-    generated_graphs, gen_time = model.generate(
+    generated_graphs, gen_time, _ = model.generate(
         num_samples=cfg.sampling.num_samples, show_progress=True
     )
     log.info(f"Generated {len(generated_graphs)} graphs in {gen_time:.4f}s per sample")

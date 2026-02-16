@@ -1042,7 +1042,7 @@ class IntermediateEvaluationCallback(Callback):
 
         # Generate samples
         pl_module.eval()
-        generated_graphs, gen_time = pl_module.generate(
+        generated_graphs, gen_time, _ = pl_module.generate(
             num_samples=self.num_samples, show_progress=True
         )
 
@@ -1444,7 +1444,11 @@ def main(cfg: DictConfig) -> None:
         if trainer.global_rank == 0:
             log.info("Generating samples for evaluation...")
             model.eval()
+<<<<<<< HEAD
+            generated_graphs, gen_time, *_ = model.generate(
+=======
             generated_graphs, gen_time = model.generate(
+>>>>>>> main
                 num_samples=cfg.sampling.num_samples, show_progress=True
             )
             log.info(

@@ -5,6 +5,9 @@ generation models using next-token prediction.
 """
 
 import logging
+import sys
+import threading
+import time
 from timeit import default_timer as timer
 from typing import Any, Optional
 
@@ -182,8 +185,8 @@ class TransformerLM(nn.Module):
         temperature: float = 1.0,
         max_length: Optional[int] = None,
         return_tokens: bool = False,
-    ) -> list:
-        """Generate graphs autoregressively.
+    ) -> tuple[list, list[int]]:
+        """Generate graphs autoregressively using the underlying HF model.
 
         Args:
             input_ids: Initial token sequence [batch_size, seq_len].
@@ -193,7 +196,7 @@ class TransformerLM(nn.Module):
             return_tokens: If True, return tokens instead of Data objects.
 
         Returns:
-            List of generated Data objects or token sequences.
+            Tuple of (list of generated Data/token sequences, token length per sequence).
         """
         batch_size = input_ids.shape[0]
         max_length = max_length or self.max_length
@@ -208,7 +211,15 @@ class TransformerLM(nn.Module):
 
         results = []
         decode_failures = 0
+        eos_id = getattr(self.tokenizer, "eos", None)
+        token_lengths = []
         for i in range(batch_size):
+            if eos_id is not None:
+                eos_pos = (generated[i] == eos_id).nonzero(as_tuple=True)[0]
+                length = (eos_pos[0].item() + 1) if len(eos_pos) > 0 else generated.shape[1]
+            else:
+                length = generated.shape[1]
+            token_lengths.append(length)
             if return_tokens:
                 results.append(generated[i])
             else:
@@ -216,8 +227,6 @@ class TransformerLM(nn.Module):
                     results.append(self.tokenizer.decode(generated[i]))
                 except Exception:
                     decode_failures += 1
-                    # Return empty graph so failed decodes are counted as
-                    # invalid in downstream metrics (not silently dropped)
                     results.append(
                         Data(
                             edge_index=torch.zeros(2, 0, dtype=torch.long),
@@ -230,7 +239,35 @@ class TransformerLM(nn.Module):
                 f"Decode failed for {decode_failures}/{batch_size} sequences"
             )
 
-        return results
+        return results, token_lengths
+
+
+def _run_with_heartbeat(
+    fn,
+    desc: str = "Generating",
+    interval: float = 2.0,
+):
+    """Run a blocking call in a thread and print elapsed time from the main thread."""
+    result = [None]
+    exception = [None]
+
+    def worker():
+        try:
+            result[0] = fn()
+        except Exception as e:
+            exception[0] = e
+
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
+    start = time.monotonic()
+    while t.is_alive():
+        time.sleep(interval)
+        elapsed = time.monotonic() - start
+        print(f"\r  {desc}: {elapsed:.0f}s elapsed...", end="", flush=True, file=sys.stderr)
+    print(file=sys.stderr)
+    if exception[0] is not None:
+        raise exception[0]
+    return result[0]
 
 
 class GraphGeneratorModule(pl.LightningModule):
@@ -337,7 +374,7 @@ class GraphGeneratorModule(pl.LightningModule):
         num_samples: Optional[int] = None,
         input_ids: Optional[torch.Tensor] = None,
         show_progress: bool = False,
-    ) -> tuple[list, float]:
+    ) -> tuple[list, float, list[int]]:
         """Generate graphs.
 
         Args:
@@ -346,24 +383,23 @@ class GraphGeneratorModule(pl.LightningModule):
             show_progress: Whether to show a progress bar.
 
         Returns:
-            Tuple of (list of Data objects, average time per sample).
+            Tuple of (list of Data objects, average time per sample, token lengths per sample).
         """
         num_samples = num_samples or self.sampling_num_samples
         if input_ids is not None:
             num_samples = input_ids.shape[0]
 
         graphs = []
+        all_token_lengths: list[int] = []
         total_time = 0
 
-        batch_indices = range(0, num_samples, self.sampling_batch_size)
+        batch_indices = list(range(0, num_samples, self.sampling_batch_size))
+        num_batches = len(batch_indices)
+        batch_iter = enumerate(batch_indices)
         if show_progress:
-            batch_indices = tqdm(
-                batch_indices,
-                desc="Generating molecules",
-                total=(num_samples + self.sampling_batch_size - 1) // self.sampling_batch_size,
-            )
+            batch_iter = enumerate(tqdm(batch_indices, desc="Generating molecules", unit="batch"))
 
-        for i in batch_indices:
+        for batch_idx, i in batch_iter:
             batch_size = min(self.sampling_batch_size, num_samples - i)
 
             if input_ids is not None:
@@ -376,20 +412,35 @@ class GraphGeneratorModule(pl.LightningModule):
                     device=self.device,
                 )
 
+            def do_generate():
+                return self.model.generate(
+                    init_ids,
+                    top_k=self.sampling_top_k,
+                    temperature=self.sampling_temperature,
+                    max_length=self.sampling_max_length,
+                )
+
             tic = timer()
-            batch_graphs = self.model.generate(
-                init_ids,
-                top_k=self.sampling_top_k,
-                temperature=self.sampling_temperature,
-                max_length=self.sampling_max_length,
-            )
+            if show_progress:
+                batch_graphs, batch_lengths = _run_with_heartbeat(
+                    do_generate,
+                    desc=f"Batch {batch_idx + 1}/{num_batches}",
+                    interval=2.0,
+                )
+            else:
+                batch_graphs, batch_lengths = do_generate()
             toc = timer()
 
+            if show_progress:
+                max_tok = max(batch_lengths) if batch_lengths else 0
+                print(f"  Batch {batch_idx + 1}/{num_batches} done in {toc - tic:.1f}s (max tokens: {max_tok})", file=sys.stderr)
+
             graphs.extend(batch_graphs)
+            all_token_lengths.extend(batch_lengths)
             total_time += toc - tic
 
         avg_time = total_time / num_samples
-        return graphs, avg_time
+        return graphs, avg_time, all_token_lengths
 
     def configure_optimizers(self) -> dict:
         """Configure optimizer and scheduler."""

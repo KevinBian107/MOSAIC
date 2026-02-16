@@ -605,6 +605,7 @@ def create_table_image(
     metrics: list[str],
     output_path: Path,
     title: str = "Model Comparison Results",
+    col_labels: list[str] | None = None,
 ) -> None:
     """Create a table image comparing runs with section separators.
 
@@ -613,13 +614,17 @@ def create_table_image(
         metrics: List of metric names to display.
         output_path: Path to save the image.
         title: Title for the table.
+        col_labels: Optional list of column labels (one per run). If None, uses tokenizer_display.
     """
     if not runs:
         print("No runs to display.")
         return
 
     num_cols = len(runs)
-    col_labels = [get_run_info(r)["tokenizer_display"] for r in runs]
+    if col_labels is not None and len(col_labels) == num_cols:
+        col_labels = list(col_labels)
+    else:
+        col_labels = [get_run_info(r)["tokenizer_display"] for r in runs]
 
     # Build table data with section headers
     cell_data = []
@@ -773,6 +778,7 @@ def save_csv(
     runs: list[dict],
     metrics: list[str],
     output_path: Path,
+    col_labels: list[str] | None = None,
 ) -> None:
     """Save comparison to CSV file.
 
@@ -780,14 +786,20 @@ def save_csv(
         runs: List of run data dictionaries.
         metrics: List of metric names to include.
         output_path: Path to save CSV.
+        col_labels: Optional list of column labels (one per run). If None, uses tokenizer_display.
     """
     import csv
+
+    if col_labels is not None and len(col_labels) == len(runs):
+        headers = col_labels
+    else:
+        headers = [get_run_info(r)["tokenizer_display"] for r in runs]
 
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
 
         # Header
-        header = ["metric"] + [get_run_info(r)["tokenizer_display"] for r in runs]
+        header = ["metric"] + headers
         writer.writerow(header)
 
         # Metrics
@@ -880,6 +892,12 @@ Examples:
         nargs="+",
         default=None,
         help="Specific run directory names to compare",
+    )
+    parser.add_argument(
+        "--column-labels",
+        type=str,
+        default=None,
+        help="Comma-separated column labels (one per run, same order as --runs)",
     )
 
     args = parser.parse_args()
@@ -990,12 +1008,19 @@ Examples:
     # Create output directory if needed
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
+    # Parse optional column labels (comma-separated, same order as runs)
+    col_labels = None
+    if args.column_labels:
+        col_labels = [s.strip() for s in args.column_labels.split(",")]
+
     # Create table image
-    create_table_image(runs, available_metrics, args.output, title=title)
+    create_table_image(
+        runs, available_metrics, args.output, title=title, col_labels=col_labels
+    )
 
     # Save CSV if requested
     if args.csv:
-        save_csv(runs, available_metrics, args.csv)
+        save_csv(runs, available_metrics, args.csv, col_labels=col_labels)
 
 
 if __name__ == "__main__":

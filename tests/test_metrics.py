@@ -122,7 +122,7 @@ class TestPolygraphMetric:
         try:
             metric = PolygraphMetric(sample_graph_list)
             assert len(metric.reference_graphs) == len(sample_graph_list)
-            assert metric.max_reference_size == 10000
+            assert metric.max_reference_size == 100
         except ImportError:
             pytest.skip("polygraph-benchmark not installed")
 

@@ -26,7 +26,7 @@ data:
 
 # Sampling configuration
 sampling:
-  num_samples: 100  # -1 to use all test set
+  num_samples: 500  # -1 to use all test set (number of molecules to generate for metrics)
   batch_size: 32
   top_k: 10
   temperature: 1.0
@@ -37,7 +37,8 @@ metrics:
   compute_motif: true  # Compute motif distribution metrics (MSC, MFD)
   compute_fcd: true  # Requires moses or fcd package
   compute_pgd: true  # Requires polygraph-benchmark package
-  pgd_reference_size: 10000  # Max number of reference molecules for PGD (memory constraint)
+  pgd_reference_size: 100  # Max number of reference molecules for PGD (memory constraint)
+  reference_size: 100000  # Max reference set size for FCD, molecular, and motif metrics
 
 # Visualization configuration
 visualization:

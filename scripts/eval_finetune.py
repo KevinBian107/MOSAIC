@@ -206,7 +206,7 @@ def main(cfg: DictConfig) -> None:
 
     # Generate molecules
     log.info(f"Generating {cfg.generation.num_samples} molecules...")
-    generated_graphs, gen_time = model.generate(
+    generated_graphs, gen_time, _ = model.generate(
         num_samples=cfg.generation.num_samples, show_progress=True
     )
     log.info(f"Generated {len(generated_graphs)} graphs in {gen_time:.4f}s per sample")
