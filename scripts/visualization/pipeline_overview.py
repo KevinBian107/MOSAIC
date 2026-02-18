@@ -111,11 +111,14 @@ SUPEREDGE_COLOR = "#888888"
 
 def compute_rdkit_2d_layout(
     smiles: str,
+    coord_scale: float = 1.8,
 ) -> dict[int, tuple[float, float]] | None:
     """Compute 2D molecular layout using RDKit.
 
     Args:
         smiles: SMILES string.
+        coord_scale: Scale factor for coordinates. Values > 1 spread atoms
+            further apart (default 1.8 gives good spacing for 3D atoms).
 
     Returns:
         Dictionary mapping atom index to (x, y) coordinates, or None.
@@ -146,7 +149,10 @@ def compute_rdkit_2d_layout(
 
         for node_id in pos:
             x, y = pos[node_id]
-            pos[node_id] = ((x - x_center) / scale, (y - y_center) / scale)
+            pos[node_id] = (
+                (x - x_center) / scale * coord_scale,
+                (y - y_center) / scale * coord_scale,
+            )
 
         return pos
 
@@ -196,7 +202,8 @@ def compute_exploded_layout(
                 bx, by = base_positions[atom_idx]
                 new_positions[atom_idx] = (bx + shift[0], by + shift[1])
 
-    # Renormalize to [-1, 1]
+    # Renormalize to [-coord_scale, coord_scale]
+    coord_scale = 1.8
     if new_positions:
         xs = [p[0] for p in new_positions.values()]
         ys = [p[1] for p in new_positions.values()]
@@ -209,8 +216,8 @@ def compute_exploded_layout(
         for node_id in new_positions:
             x, y = new_positions[node_id]
             new_positions[node_id] = (
-                (x - x_center) / scale,
-                (y - y_center) / scale,
+                (x - x_center) / scale * coord_scale,
+                (y - y_center) / scale * coord_scale,
             )
 
     return new_positions
@@ -427,6 +434,121 @@ def draw_community_hull(
         pass
 
 
+def _darken_color(hex_color: str, factor: float = 0.6) -> str:
+    """Darken a hex color by a factor.
+
+    Args:
+        hex_color: Hex color string (e.g. "#FF6B6B").
+        factor: Darkening factor (0=black, 1=unchanged).
+
+    Returns:
+        Darkened hex color string.
+    """
+    hex_color = hex_color.lstrip("#")
+    r, g, b = (int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
+    r, g, b = int(r * factor), int(g * factor), int(b * factor)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _lighten_color(hex_color: str, factor: float = 0.4) -> str:
+    """Lighten a hex color by blending toward white.
+
+    Args:
+        hex_color: Hex color string.
+        factor: Blend factor (0=unchanged, 1=white).
+
+    Returns:
+        Lightened hex color string.
+    """
+    hex_color = hex_color.lstrip("#")
+    r, g, b = (int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
+    r = int(r + (255 - r) * factor)
+    g = int(g + (255 - g) * factor)
+    b = int(b + (255 - b) * factor)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _draw_3d_atom(
+    ax: plt.Axes,
+    x: float,
+    y: float,
+    radius: float,
+    color: str,
+    label: str,
+    label_fontsize: float = 5,
+    zorder_base: int = 3,
+) -> None:
+    """Draw a 3D-looking atom sphere with shadow and specular highlight.
+
+    Args:
+        ax: Matplotlib axes.
+        x: X position.
+        y: Y position.
+        radius: Sphere radius.
+        color: Base element color.
+        label: Element symbol label.
+        label_fontsize: Font size for the label.
+        zorder_base: Base z-order (shadow is -1, highlight is +1).
+    """
+    # Drop shadow (offset down-right, dark, blurred)
+    shadow = plt.Circle(
+        (x + radius * 0.12, y - radius * 0.12),
+        radius * 1.08,
+        facecolor="#000000",
+        alpha=0.18,
+        edgecolor="none",
+        zorder=zorder_base - 1,
+    )
+    ax.add_patch(shadow)
+
+    # Main sphere body with dark edge for depth
+    dark_edge = _darken_color(color, 0.5)
+    sphere = plt.Circle(
+        (x, y),
+        radius,
+        facecolor=color,
+        edgecolor=dark_edge,
+        linewidth=0.6,
+        zorder=zorder_base,
+    )
+    ax.add_patch(sphere)
+
+    # Gradient ring: slightly lighter inner area
+    inner = plt.Circle(
+        (x - radius * 0.1, y + radius * 0.1),
+        radius * 0.75,
+        facecolor=_lighten_color(color, 0.2),
+        edgecolor="none",
+        alpha=0.5,
+        zorder=zorder_base,
+    )
+    ax.add_patch(inner)
+
+    # Specular highlight (upper-left, white)
+    highlight = plt.Circle(
+        (x - radius * 0.28, y + radius * 0.28),
+        radius * 0.35,
+        facecolor="white",
+        alpha=0.55,
+        edgecolor="none",
+        zorder=zorder_base + 1,
+    )
+    ax.add_patch(highlight)
+
+    # Element label
+    ax.text(
+        x,
+        y,
+        label,
+        ha="center",
+        va="center",
+        fontsize=label_fontsize,
+        fontweight="bold",
+        color="white",
+        zorder=zorder_base + 2,
+    )
+
+
 def _draw_bond(
     ax: plt.Axes,
     pos1: tuple[float, float],
@@ -435,7 +557,10 @@ def _draw_bond(
     color: str = "#333333",
     zorder: int = 1,
 ) -> None:
-    """Draw a bond between two atoms with appropriate style.
+    """Draw a 3D tube-like bond between two atoms.
+
+    Renders a dark base line with a lighter highlight stripe on top
+    to simulate cylindrical depth.
 
     Args:
         ax: Matplotlib axes.
@@ -452,65 +577,67 @@ def _draw_bond(
     if dist < 0.001:
         return
 
+    highlight = _lighten_color(color, 0.5)
+
     # Perpendicular offset for double/triple bonds
     px, py = -dy / dist, dx / dist
     offset = 0.025
 
-    if bond_type == 0:
-        # Single bond
+    def _tube(x1: float, y1: float, x2: float, y2: float, lw: float) -> None:
+        """Draw a single tube-like bond line."""
+        # Dark base
         ax.plot(
             [x1, x2],
             [y1, y2],
             color=color,
-            linewidth=1.5,
+            linewidth=lw,
             solid_capstyle="round",
             zorder=zorder,
         )
+        # Light highlight stripe
+        ax.plot(
+            [x1, x2],
+            [y1, y2],
+            color=highlight,
+            linewidth=max(lw * 0.35, 0.5),
+            solid_capstyle="round",
+            alpha=0.6,
+            zorder=zorder,
+        )
+
+    if bond_type == 0:
+        _tube(x1, y1, x2, y2, 2.2)
     elif bond_type == 1:
-        # Double bond
         for sign in (-1, 1):
             ox, oy = sign * px * offset, sign * py * offset
-            ax.plot(
-                [x1 + ox, x2 + ox],
-                [y1 + oy, y2 + oy],
-                color=color,
-                linewidth=1.2,
-                solid_capstyle="round",
-                zorder=zorder,
-            )
+            _tube(x1 + ox, y1 + oy, x2 + ox, y2 + oy, 1.8)
     elif bond_type == 2:
-        # Triple bond
         for sign in (-1, 0, 1):
             ox, oy = sign * px * offset, sign * py * offset
-            ax.plot(
-                [x1 + ox, x2 + ox],
-                [y1 + oy, y2 + oy],
-                color=color,
-                linewidth=1.0,
-                solid_capstyle="round",
-                zorder=zorder,
-            )
+            _tube(x1 + ox, y1 + oy, x2 + ox, y2 + oy, 1.4)
     elif bond_type == 3:
-        # Aromatic (dashed)
+        # Aromatic: dashed base + highlight
         ax.plot(
             [x1, x2],
             [y1, y2],
             color=color,
-            linewidth=1.5,
+            linewidth=2.2,
             linestyle="--",
             solid_capstyle="round",
             zorder=zorder,
         )
-    else:
-        # Fallback: single
         ax.plot(
             [x1, x2],
             [y1, y2],
-            color=color,
-            linewidth=1.5,
+            color=highlight,
+            linewidth=0.8,
+            linestyle="--",
             solid_capstyle="round",
+            alpha=0.5,
             zorder=zorder,
         )
+    else:
+        _tube(x1, y1, x2, y2, 2.2)
 
 
 # ============================================================================
@@ -552,37 +679,15 @@ def draw_molecule(
             bt = _get_bond_type(data, u, v)
             _draw_bond(ax, positions[u], positions[v], bt, zorder=1)
 
-    # Draw atoms
-    node_radius = 0.055
+    # Draw 3D atoms
+    node_radius = 0.042
     for node in range(data.num_nodes):
         if node not in positions:
             continue
         x, y = positions[node]
         elem = _get_element_symbol(data, node)
         color = ELEMENT_COLORS.get(elem, DEFAULT_ELEMENT_COLOR)
-
-        circle = plt.Circle(
-            (x, y),
-            node_radius,
-            facecolor=color,
-            edgecolor="white",
-            linewidth=1.0,
-            zorder=3,
-        )
-        ax.add_patch(circle)
-
-        # Element label
-        ax.text(
-            x,
-            y,
-            elem,
-            ha="center",
-            va="center",
-            fontsize=5,
-            fontweight="bold",
-            color="white",
-            zorder=4,
-        )
+        _draw_3d_atom(ax, x, y, node_radius, color, elem, label_fontsize=5)
 
     ax.set_aspect("equal")
     ax.axis("off")
@@ -626,7 +731,7 @@ def draw_decomposed_communities(
             list(comm.atom_indices),
             color=color,
             alpha=0.20,
-            pad=0.10,
+            pad=0.12,
             linewidth=1.5,
             zorder=0,
         )
@@ -672,8 +777,8 @@ def draw_decomposed_communities(
                 zorder=1,
             )
 
-    # Layer 4: Atoms
-    node_radius = 0.050
+    # Layer 4: 3D Atoms
+    node_radius = 0.038
     for comm in hierarchy.communities:
         for atom_idx in comm.atom_indices:
             if atom_idx not in positions:
@@ -681,28 +786,7 @@ def draw_decomposed_communities(
             x, y = positions[atom_idx]
             elem = _get_element_symbol(data, atom_idx)
             color = ELEMENT_COLORS.get(elem, DEFAULT_ELEMENT_COLOR)
-
-            circle = plt.Circle(
-                (x, y),
-                node_radius,
-                facecolor=color,
-                edgecolor="white",
-                linewidth=0.8,
-                zorder=3,
-            )
-            ax.add_patch(circle)
-
-            ax.text(
-                x,
-                y,
-                elem,
-                ha="center",
-                va="center",
-                fontsize=4.5,
-                fontweight="bold",
-                color="white",
-                zorder=4,
-            )
+            _draw_3d_atom(ax, x, y, node_radius, color, elem, label_fontsize=4.5)
 
     # Layer 5: Community type labels
     for comm in hierarchy.communities:
