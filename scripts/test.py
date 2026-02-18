@@ -15,6 +15,7 @@ Usage:
 
 import json
 import logging
+import random
 import statistics
 import sys
 from pathlib import Path
@@ -377,12 +378,31 @@ def main(cfg: DictConfig) -> None:
         log.info(f"Visualizations saved to {viz_dir}")
 
     # Reference sets for metrics
-    # Distributional metrics (FCD, SNN, Frag, Scaf) use test set per MOSES protocol
-    # Novelty uses training set (measures memorization)
+    # Distributional metrics (FCD, SNN, Frag, Scaf) use test or train+test as reference
+    # Novelty always uses training set (measures memorization)
     ref_size = cfg.metrics.get("reference_size", 100000)
-    reference_smiles = datamodule.test_smiles[:ref_size]
+    reference_split = cfg.metrics.get("reference_split", "test")
     train_smiles = datamodule.train_smiles
-    log.info(f"Using {len(reference_smiles)} test SMILES for distributional metrics")
+
+    if reference_split == "full":
+        if len(train_smiles) == 0:
+            log.warning(
+                "reference_split='full' but train_smiles is empty; "
+                "falling back to test-only reference"
+            )
+            reference_smiles = datamodule.test_smiles[:ref_size]
+        else:
+            combined = list(train_smiles) + list(datamodule.test_smiles)
+            random.Random(cfg.seed).shuffle(combined)
+            reference_smiles = combined[:ref_size]
+        ref_label = "train+test"
+    else:
+        reference_smiles = datamodule.test_smiles[:ref_size]
+        ref_label = "test"
+
+    log.info(
+        f"Using {len(reference_smiles)} {ref_label} SMILES for distributional metrics"
+    )
     log.info(f"Using {len(train_smiles)} train SMILES for novelty")
 
     log.info("\n" + "=" * 50)
@@ -438,7 +458,10 @@ def main(cfg: DictConfig) -> None:
             # Convert reference SMILES to graphs for PGD
             # Limit to max_reference_size for memory constraints
             max_ref_size = cfg.metrics.get("pgd_reference_size", 100)
-            pgd_reference_smiles = datamodule.test_smiles[:max_ref_size]
+            if reference_split == "full":
+                pgd_reference_smiles = reference_smiles[:max_ref_size]
+            else:
+                pgd_reference_smiles = datamodule.test_smiles[:max_ref_size]
 
             log.info(
                 f"Converting {len(pgd_reference_smiles)} reference SMILES to graphs..."
@@ -531,6 +554,7 @@ def main(cfg: DictConfig) -> None:
         "generation_time": gen_time,
         "num_samples": num_samples,
         "num_valid_smiles": valid_count,
+        "reference_split": reference_split,
     }
     if token_lengths:
         all_results["token_lengths"] = token_lengths

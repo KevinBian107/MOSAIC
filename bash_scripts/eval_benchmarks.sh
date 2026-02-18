@@ -7,6 +7,7 @@
 # Usage:
 #   ./bash_scripts/eval_benchmarks.sh              # Evaluate MOSES benchmarks
 #   ./bash_scripts/eval_benchmarks.sh --coconut    # Evaluate COCONUT benchmarks
+#   ./bash_scripts/eval_benchmarks.sh --full-ref   # Use train+test as reference population
 #   ./bash_scripts/eval_benchmarks.sh --test-only  # Skip realistic_gen
 #   ./bash_scripts/eval_benchmarks.sh --gen-only   # Skip test, only realistic_gen
 
@@ -17,14 +18,13 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Default settings
 DATASET="moses"
-BENCHMARK_DIR="$PROJECT_ROOT/outputs/benchmark"
-TEST_OUTPUT_DIR="outputs/test"
-REALISTIC_GEN_OUTPUT_DIR="outputs/realistic_gen"
-COMPARISON_OUTPUT="outputs/test/comparison.png"
+REFERENCE_SPLIT="test"
 
 # Parse arguments
 RUN_TEST=true
 RUN_GEN=true
+USE_COCONUT=false
+USE_FULL_REF=false
 
 for arg in "$@"; do
     case $arg in
@@ -35,28 +35,49 @@ for arg in "$@"; do
             RUN_TEST=false
             ;;
         --coconut)
+            USE_COCONUT=true
             DATASET="coconut"
-            BENCHMARK_DIR="$PROJECT_ROOT/outputs/benchmark_coconut"
-            TEST_OUTPUT_DIR="outputs/test_coconut"
-            REALISTIC_GEN_OUTPUT_DIR="outputs/realistic_gen_coconut"
-            COMPARISON_OUTPUT="outputs/test_coconut/comparison.png"
+            ;;
+        --full-ref)
+            USE_FULL_REF=true
+            REFERENCE_SPLIT="full"
             ;;
         --help|-h)
-            echo "Usage: $0 [--test-only] [--gen-only] [--coconut]"
+            echo "Usage: $0 [--test-only] [--gen-only] [--coconut] [--full-ref]"
             echo ""
             echo "Options:"
             echo "  --test-only   Only run test.py (skip realistic_gen.py)"
             echo "  --gen-only    Only run realistic_gen.py (skip test.py)"
             echo "  --coconut     Evaluate COCONUT benchmarks (from outputs/benchmark_coconut/)"
+            echo "  --full-ref    Use train+test combined as reference population for distributional metrics"
             echo ""
             echo "Results are saved to:"
-            echo "  MOSES:   outputs/test/ and outputs/realistic_gen/"
-            echo "  COCONUT: outputs/test_coconut/ and outputs/realistic_gen_coconut/"
-            echo "Comparison tables are saved to outputs/test[_coconut]/comparison.png"
+            echo "  MOSES:             outputs/test/ and outputs/realistic_gen/"
+            echo "  COCONUT:           outputs/test_coconut/ and outputs/realistic_gen_coconut/"
+            echo "  --full-ref:        outputs/test_fullref/ and outputs/realistic_gen_fullref/"
+            echo "  COCONUT+full-ref:  outputs/test_coconut_fullref/ and outputs/realistic_gen_coconut_fullref/"
+            echo "Comparison tables are saved to the test output directory as comparison.png"
             exit 0
             ;;
     esac
 done
+
+# Resolve output directories after all args are parsed
+BENCHMARK_DIR="$PROJECT_ROOT/outputs/benchmark"
+DIR_SUFFIX=""
+
+if [ "$USE_COCONUT" = true ]; then
+    BENCHMARK_DIR="$PROJECT_ROOT/outputs/benchmark_coconut"
+    DIR_SUFFIX="_coconut"
+fi
+
+if [ "$USE_FULL_REF" = true ]; then
+    DIR_SUFFIX="${DIR_SUFFIX}_fullref"
+fi
+
+TEST_OUTPUT_DIR="outputs/test${DIR_SUFFIX}"
+REALISTIC_GEN_OUTPUT_DIR="outputs/realistic_gen${DIR_SUFFIX}"
+COMPARISON_OUTPUT="${TEST_OUTPUT_DIR}/comparison.png"
 
 # Find all last.ckpt files in benchmark directory
 CHECKPOINTS=$(find "$BENCHMARK_DIR" -name "last.ckpt" -type f 2>/dev/null)
@@ -68,6 +89,7 @@ if [ -z "$CHECKPOINTS" ]; then
 fi
 
 echo "Dataset: $DATASET"
+echo "Reference split: $REFERENCE_SPLIT"
 echo "Benchmark dir: $BENCHMARK_DIR"
 echo ""
 echo "Found checkpoints:"
@@ -151,12 +173,12 @@ echo "$CHECKPOINTS" | while read -r ckpt; do
 
     if [ "$RUN_TEST" = true ]; then
         echo "[1/2] Running test.py..."
-        python scripts/test.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.base_dir=$TEST_OUTPUT_DIR $COARSENING_ARGS
+        python scripts/test.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.base_dir=$TEST_OUTPUT_DIR metrics.reference_split=$REFERENCE_SPLIT $COARSENING_ARGS
     fi
 
     if [ "$RUN_GEN" = true ]; then
         echo "[2/2] Running realistic_gen.py..."
-        python scripts/realistic_gen.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.base_dir=$REALISTIC_GEN_OUTPUT_DIR $COARSENING_ARGS
+        python scripts/realistic_gen.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.base_dir=$REALISTIC_GEN_OUTPUT_DIR metrics.reference_split=$REFERENCE_SPLIT $COARSENING_ARGS
     fi
 
     echo ""

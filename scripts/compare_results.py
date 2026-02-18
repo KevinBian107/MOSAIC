@@ -34,6 +34,7 @@ METRIC_SECTIONS = [
             "train_data_size",
             "train_max_steps",
             "coarsening_strategy",
+            "reference_split",
             "generation_time",
         ],
     ),
@@ -90,10 +91,15 @@ METRIC_SECTIONS = [
 ]
 
 # Flat list of all metrics (for backward compatibility)
-TRAINING_INFO_METRICS = ["train_data_size", "train_max_steps", "coarsening_strategy"]
+TRAINING_INFO_METRICS = [
+    "train_data_size",
+    "train_max_steps",
+    "coarsening_strategy",
+    "reference_split",
+]
 
 # Categorical metrics that should not have best/second-best highlighting
-CATEGORICAL_METRICS = {"coarsening_strategy"}
+CATEGORICAL_METRICS = {"coarsening_strategy", "reference_split"}
 DEFAULT_TEST_METRICS = [
     "validity",
     "uniqueness",
@@ -159,6 +165,7 @@ METRIC_DISPLAY_NAMES = {
     "train_data_size": "Train Data Size",
     "train_max_steps": "Train Steps",
     "coarsening_strategy": "Coarsening",
+    "reference_split": "Ref Split",
     # Test metrics
     "validity": "Validity",
     "uniqueness": "Uniqueness",
