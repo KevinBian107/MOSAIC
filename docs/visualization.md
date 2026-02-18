@@ -81,6 +81,29 @@ python scripts/visualization/generation_demo.py \
     'models=[{name: my_hdtc, checkpoint_path: outputs/train/hdtc/best.ckpt, tokenizer_type: hdtc, labeled_graph: true}]'
 ```
 
+### Pipeline Overview (Static Figure)
+
+Visualize the full MOSAIC HDTC pipeline as a single static image showing:
+Input molecule -> Functional decomposition -> MOSAIC model -> Generated decomposition -> Generated molecule.
+
+The figure uses an "exploded" layout for the decomposition panels, where
+communities are shifted apart from the global centroid to show their internal
+structure clearly while preserving atom geometry within each community.
+
+```bash
+# Default: camptothecin with HDTC model
+python scripts/visualization/pipeline_overview.py --output-dir ./figures
+
+# Specific molecule
+python scripts/visualization/pipeline_overview.py --name strychnine
+
+# Layout iteration without GPU (skip generation)
+python scripts/visualization/pipeline_overview.py --no-generate
+
+# Custom SMILES + more samples
+python scripts/visualization/pipeline_overview.py --smiles "CCC1(O)C(=O)OCc2c1cc1n(c2=O)Cc2cc3ccccc3nc2-1" --num-generate 100
+```
+
 ### Community Structure Comparison (4 Coarsening Paradigms)
 
 Compare four coarsening paradigms on the same molecule, each shown as a row
