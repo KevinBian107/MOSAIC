@@ -34,6 +34,10 @@ sampling:
   temperature: 1.0
   max_length: 2048
 
+# Metrics configuration
+metrics:
+  reference_split: "test"  # Reference population: "test" (default) or "full" (train+test combined)
+
 # Analysis configuration
 analysis:
   motif_smiles: "c1ccccc1"  # Motif to analyze (default: benzene)

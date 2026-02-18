@@ -22,6 +22,7 @@ Usage:
 
 import json
 import logging
+import random
 import sys
 from pathlib import Path
 from typing import Optional
@@ -283,8 +284,27 @@ def main(cfg: DictConfig) -> None:
         min_rings=cfg.data.get("min_rings", 3),
     )
     datamodule.setup(stage="test")
-    test_smiles = datamodule.test_smiles
-    log.info(f"Loaded {len(test_smiles)} test SMILES for reference")
+
+    # Build reference set based on reference_split config
+    reference_split = cfg.get("metrics", {}).get("reference_split", "test")
+    train_smiles = datamodule.train_smiles
+
+    if reference_split == "full":
+        if len(train_smiles) == 0:
+            log.warning(
+                "reference_split='full' but train_smiles is empty; "
+                "falling back to test-only reference"
+            )
+            ref_smiles = list(datamodule.test_smiles)
+        else:
+            ref_smiles = list(train_smiles) + list(datamodule.test_smiles)
+            random.Random(cfg.seed).shuffle(ref_smiles)
+        ref_label = "train+test"
+    else:
+        ref_smiles = list(datamodule.test_smiles)
+        ref_label = "test"
+
+    log.info(f"Loaded {len(ref_smiles)} {ref_label} SMILES for reference")
 
     # Configure tokenizer from checkpoint (force-corrects max_num_nodes
     # after any inflation by datamodule.setup())
@@ -339,10 +359,12 @@ def main(cfg: DictConfig) -> None:
     motif_smiles = cfg.analysis.motif_smiles
     log.info(f"\nFiltering for motif: {motif_smiles}")
 
-    ref_filtered = filter_by_motif(test_smiles, motif_smiles)
+    ref_filtered = filter_by_motif(ref_smiles, motif_smiles)
     gen_filtered = filter_by_motif(generated_smiles, motif_smiles)
 
-    log.info(f"  Reference (test): {len(ref_filtered)}/{len(test_smiles)} contain motif")
+    log.info(
+        f"  Reference ({ref_label}): {len(ref_filtered)}/{len(ref_smiles)} contain motif"
+    )
     log.info(f"  Generated: {len(gen_filtered)}/{len(generated_smiles)} contain motif")
 
     if len(ref_filtered) == 0 or len(gen_filtered) == 0:
@@ -374,9 +396,7 @@ def main(cfg: DictConfig) -> None:
     gen_di_total = sum(gen_sub["disubstitution_pattern"].values()) or 1
 
     for pattern in ["ortho", "meta", "para"]:
-        ref_pct = (
-            100 * ref_sub["disubstitution_pattern"].get(pattern, 0) / ref_di_total
-        )
+        ref_pct = 100 * ref_sub["disubstitution_pattern"].get(pattern, 0) / ref_di_total
         gen_pct = 100 * gen_sub["disubstitution_pattern"].get(pattern, 0) / gen_di_total
         log.info(f"  {pattern:<15} {ref_pct:>11.1f}% {gen_pct:>11.1f}%")
 
@@ -466,6 +486,7 @@ def main(cfg: DictConfig) -> None:
         "substitution_kl": sub_metrics["kl_divergence"],
         "functional_group_tv": fg_metrics["total_variation"],
         "functional_group_kl": fg_metrics["kl_divergence"],
+        "reference_split": reference_split,
     }
 
     results_file = output_dir / "results.json"
