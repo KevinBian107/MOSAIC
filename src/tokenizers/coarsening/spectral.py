@@ -710,8 +710,10 @@ class SimpleSpectralCoarsening:
                             local_src = partitions[i].global_node_indices.index(src)
                             local_dst = partitions[j].global_node_indices.index(dst)
                         else:
-                            local_src = partitions[j].global_node_indices.index(src)
-                            local_dst = partitions[i].global_node_indices.index(dst)
+                            # src is in right, dst is in left — swap so
+                            # edge_index[0] = left index, edge_index[1] = right index
+                            local_src = partitions[i].global_node_indices.index(dst)
+                            local_dst = partitions[j].global_node_indices.index(src)
 
                         bipart_edges.append([local_src, local_dst])
 

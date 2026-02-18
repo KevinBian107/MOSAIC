@@ -303,7 +303,7 @@ def plot_substitution_comparison(
         x - width / 2,
         train_pcts,
         width,
-        label="Training Data",
+        label="Reference",
         color="#2ecc71",
         alpha=0.8,
     )
@@ -364,7 +364,7 @@ def plot_substitution_comparison(
         x2 - width / 2,
         train_di_pcts,
         width,
-        label="Training Data",
+        label="Reference",
         color="#2ecc71",
         alpha=0.8,
     )
@@ -463,7 +463,7 @@ def plot_functional_group_comparison(
         x - width / 2,
         train_pcts,
         width,
-        label="Training Data",
+        label="Reference",
         color="#2ecc71",
         alpha=0.8,
     )
@@ -532,7 +532,7 @@ def plot_combined_analysis(
     width = 0.35
 
     ax1.bar(
-        x - width / 2, train_pcts, width, label="Training", color="#2ecc71", alpha=0.8
+        x - width / 2, train_pcts, width, label="Reference", color="#2ecc71", alpha=0.8
     )
     ax1.bar(
         x + width / 2, gen_pcts, width, label="Generated", color="#3498db", alpha=0.8
@@ -564,7 +564,7 @@ def plot_combined_analysis(
         x[:3] - width / 2,
         train_di_pcts,
         width,
-        label="Training",
+        label="Reference",
         color="#2ecc71",
         alpha=0.8,
     )
@@ -601,7 +601,7 @@ def plot_combined_analysis(
             x3 - width / 2,
             train_fg_pcts,
             width,
-            label="Training",
+            label="Reference",
             color="#2ecc71",
             alpha=0.8,
         )
@@ -774,9 +774,9 @@ def _draw_comparison_grid(
             if mol is not None:
                 mols.append(mol)
                 if i == 0:
-                    legends.append(f"Train: {cat_name}")
+                    legends.append(f"Ref: {cat_name}")
                 else:
-                    legends.append("Train")
+                    legends.append("Ref")
 
         # Pad if needed
         while len(train_sampled) < n_per_category:

@@ -393,17 +393,22 @@ class MolecularMetrics:
     def __init__(
         self,
         reference_smiles: list[str],
+        train_smiles: list[str] | None = None,
         fp_radius: int = 2,
         fp_bits: int = 2048,
     ) -> None:
         """Initialize the molecular metrics evaluator.
 
         Args:
-            reference_smiles: Reference SMILES strings (typically training set).
+            reference_smiles: Reference SMILES for distributional metrics
+                (FCD, SNN, fragment/scaffold similarity). Typically the test set.
+            train_smiles: Training SMILES for novelty computation. If None,
+                falls back to reference_smiles.
             fp_radius: Radius for Morgan fingerprint.
             fp_bits: Number of bits in fingerprint.
         """
         self.reference_smiles = reference_smiles
+        self.train_smiles = train_smiles if train_smiles is not None else reference_smiles
         self.fp_radius = fp_radius
         self.fp_bits = fp_bits
 
@@ -432,7 +437,7 @@ class MolecularMetrics:
         return {
             "validity": compute_validity(generated_smiles),
             "uniqueness": compute_uniqueness(generated_smiles),
-            "novelty": compute_novelty(generated_smiles, self.reference_smiles),
+            "novelty": compute_novelty(generated_smiles, self.train_smiles),
             "snn": compute_snn(
                 generated_smiles,
                 self.reference_smiles,
