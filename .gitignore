@@ -72,6 +72,9 @@ wandb/
 *.pth
 *.ckpt
 
+# Nested website repo
+MOSAIC-website/
+
 # OS
 .DS_Store
 Thumbs.db
