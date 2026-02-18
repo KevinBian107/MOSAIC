@@ -108,6 +108,7 @@ class MotifAwareSpectralCoarsening(SpectralCoarsening):
             return [set(range(n))]
 
         # Detect motifs and augment affinity if alpha > 0
+        orig_adj = adj.copy()
         if self.alpha > 0:
             motifs = self._detect_motifs(data)
             self._cached_motifs = motifs
@@ -118,8 +119,9 @@ class MotifAwareSpectralCoarsening(SpectralCoarsening):
         else:
             self._cached_motifs = []
 
-        # Run spectral clustering on the (possibly augmented) adjacency
-        return self._partition_with_adjacency(adj, n)
+        # Run spectral clustering on the (possibly augmented) adjacency,
+        # but evaluate modularity on the original graph structure
+        return self._partition_with_adjacency(adj, n, orig_adj)
 
     def _detect_motifs(self, data: Data) -> list:
         """Detect motif instances in the molecular graph.
@@ -147,7 +149,10 @@ class MotifAwareSpectralCoarsening(SpectralCoarsening):
         )
 
     def _partition_with_adjacency(
-        self, adj: np.ndarray, n: int
+        self,
+        adj: np.ndarray,
+        n: int,
+        orig_adj: np.ndarray | None = None,
     ) -> list[set[int]]:
         """Run spectral clustering on a given adjacency matrix.
 
@@ -157,10 +162,14 @@ class MotifAwareSpectralCoarsening(SpectralCoarsening):
         Args:
             adj: Adjacency matrix (possibly augmented with motif affinity).
             n: Number of nodes.
+            orig_adj: Original (unaugmented) adjacency for modularity
+                evaluation. If None, uses adj.
 
         Returns:
             List of sets containing node indices for each community.
         """
+        if orig_adj is None:
+            orig_adj = adj
         # Compute k range based on graph size (HiGen's formula)
         k_min = max(2, int(np.sqrt(n) * self.k_min_factor))
         k_max = min(n - 1, int(np.sqrt(n) * self.k_max_factor))
@@ -189,7 +198,7 @@ class MotifAwareSpectralCoarsening(SpectralCoarsening):
 
                 # Use original adjacency for modularity computation
                 # (we want modularity of the actual graph, not augmented)
-                modularity = self._compute_modularity(adj, partition)
+                modularity = self._compute_modularity(orig_adj, partition)
                 if modularity > best_modularity:
                     best_modularity = modularity
                     best_partition = partition

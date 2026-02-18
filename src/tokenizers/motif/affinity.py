@@ -48,6 +48,10 @@ def compute_motif_affinity_matrix(
     # Ensure symmetry (should already be symmetric)
     M = (M + M.T) / 2
 
+    # Zero diagonal — self-loops would inflate node degrees in the graph
+    # Laplacian when M is added to the adjacency matrix
+    np.fill_diagonal(M, 0)
+
     return M
 
 
