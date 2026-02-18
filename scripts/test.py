@@ -376,10 +376,14 @@ def main(cfg: DictConfig) -> None:
         )
         log.info(f"Visualizations saved to {viz_dir}")
 
-    # Reference set for metrics that use a reference (FCD, molecular, motif)
+    # Reference sets for metrics
+    # Distributional metrics (FCD, SNN, Frag, Scaf) use test set per MOSES protocol
+    # Novelty uses training set (measures memorization)
     ref_size = cfg.metrics.get("reference_size", 100000)
     reference_smiles = datamodule.test_smiles[:ref_size]
-    log.info(f"Using up to {len(reference_smiles)} reference SMILES for metrics")
+    train_smiles = datamodule.train_smiles
+    log.info(f"Using {len(reference_smiles)} test SMILES for distributional metrics")
+    log.info(f"Using {len(train_smiles)} train SMILES for novelty")
 
     log.info("\n" + "=" * 50)
     log.info("MOLECULAR METRICS")
@@ -387,6 +391,7 @@ def main(cfg: DictConfig) -> None:
 
     mol_metrics = MolecularMetrics(
         reference_smiles=reference_smiles,
+        train_smiles=train_smiles,
     )
     mol_results = mol_metrics(generated_smiles)
 

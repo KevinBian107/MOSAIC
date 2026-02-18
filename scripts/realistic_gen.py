@@ -339,13 +339,13 @@ def main(cfg: DictConfig) -> None:
     motif_smiles = cfg.analysis.motif_smiles
     log.info(f"\nFiltering for motif: {motif_smiles}")
 
-    train_filtered = filter_by_motif(test_smiles, motif_smiles)
+    ref_filtered = filter_by_motif(test_smiles, motif_smiles)
     gen_filtered = filter_by_motif(generated_smiles, motif_smiles)
 
-    log.info(f"  Reference: {len(train_filtered)}/{len(test_smiles)} contain motif")
+    log.info(f"  Reference (test): {len(ref_filtered)}/{len(test_smiles)} contain motif")
     log.info(f"  Generated: {len(gen_filtered)}/{len(generated_smiles)} contain motif")
 
-    if len(train_filtered) == 0 or len(gen_filtered) == 0:
+    if len(ref_filtered) == 0 or len(gen_filtered) == 0:
         log.warning("Not enough molecules with motif for analysis")
         return
 
@@ -354,52 +354,52 @@ def main(cfg: DictConfig) -> None:
     log.info("SUBSTITUTION PATTERN ANALYSIS")
     log.info("=" * 60)
 
-    train_sub = analyze_benzene_substitution(train_filtered)
+    ref_sub = analyze_benzene_substitution(ref_filtered)
     gen_sub = analyze_benzene_substitution(gen_filtered)
 
     log.info("\nSubstitution Count Distribution:")
-    log.info(f"  {'Pattern':<15} {'Training':>12} {'Generated':>12}")
+    log.info(f"  {'Pattern':<15} {'Reference':>12} {'Generated':>12}")
     log.info(f"  {'-' * 15} {'-' * 12} {'-' * 12}")
 
-    train_total = sum(train_sub["substitution_count"].values()) or 1
+    ref_total = sum(ref_sub["substitution_count"].values()) or 1
     gen_total = sum(gen_sub["substitution_count"].values()) or 1
 
     for pattern in ["unsubstituted", "mono", "di", "tri", "poly"]:
-        train_pct = 100 * train_sub["substitution_count"].get(pattern, 0) / train_total
+        ref_pct = 100 * ref_sub["substitution_count"].get(pattern, 0) / ref_total
         gen_pct = 100 * gen_sub["substitution_count"].get(pattern, 0) / gen_total
-        log.info(f"  {pattern:<15} {train_pct:>11.1f}% {gen_pct:>11.1f}%")
+        log.info(f"  {pattern:<15} {ref_pct:>11.1f}% {gen_pct:>11.1f}%")
 
     log.info("\nDi-substitution Patterns (ortho/meta/para):")
-    train_di_total = sum(train_sub["disubstitution_pattern"].values()) or 1
+    ref_di_total = sum(ref_sub["disubstitution_pattern"].values()) or 1
     gen_di_total = sum(gen_sub["disubstitution_pattern"].values()) or 1
 
     for pattern in ["ortho", "meta", "para"]:
-        train_pct = (
-            100 * train_sub["disubstitution_pattern"].get(pattern, 0) / train_di_total
+        ref_pct = (
+            100 * ref_sub["disubstitution_pattern"].get(pattern, 0) / ref_di_total
         )
         gen_pct = 100 * gen_sub["disubstitution_pattern"].get(pattern, 0) / gen_di_total
-        log.info(f"  {pattern:<15} {train_pct:>11.1f}% {gen_pct:>11.1f}%")
+        log.info(f"  {pattern:<15} {ref_pct:>11.1f}% {gen_pct:>11.1f}%")
 
     # Analyze functional groups
     log.info("\n" + "=" * 60)
     log.info("FUNCTIONAL GROUP ANALYSIS")
     log.info("=" * 60)
 
-    train_fg = analyze_functional_groups(train_filtered)
+    ref_fg = analyze_functional_groups(ref_filtered)
     gen_fg = analyze_functional_groups(gen_filtered)
 
     log.info("\nFunctional Groups Attached to Benzene:")
-    log.info(f"  {'Group':<20} {'Training':>12} {'Generated':>12}")
+    log.info(f"  {'Group':<20} {'Reference':>12} {'Generated':>12}")
     log.info(f"  {'-' * 20} {'-' * 12} {'-' * 12}")
 
-    train_fg_total = sum(train_fg.values()) or 1
+    ref_fg_total = sum(ref_fg.values()) or 1
     gen_fg_total = sum(gen_fg.values()) or 1
 
-    combined = train_fg + gen_fg
+    combined = ref_fg + gen_fg
     for group, _ in combined.most_common(12):
-        train_pct = 100 * train_fg.get(group, 0) / train_fg_total
+        ref_pct = 100 * ref_fg.get(group, 0) / ref_fg_total
         gen_pct = 100 * gen_fg.get(group, 0) / gen_fg_total
-        log.info(f"  {group:<20} {train_pct:>11.1f}% {gen_pct:>11.1f}%")
+        log.info(f"  {group:<20} {ref_pct:>11.1f}% {gen_pct:>11.1f}%")
 
     # Compute similarity metrics
     log.info("\n" + "=" * 60)
@@ -407,10 +407,10 @@ def main(cfg: DictConfig) -> None:
     log.info("=" * 60)
 
     sub_metrics = compare_distributions(
-        train_sub["substitution_count"],
+        ref_sub["substitution_count"],
         gen_sub["substitution_count"],
     )
-    fg_metrics = compare_distributions(train_fg, gen_fg)
+    fg_metrics = compare_distributions(ref_fg, gen_fg)
 
     log.info("\nSubstitution Pattern Similarity:")
     log.info(f"  Total Variation Distance: {sub_metrics['total_variation']:.4f}")
@@ -420,7 +420,7 @@ def main(cfg: DictConfig) -> None:
     log.info(f"  Total Variation Distance: {fg_metrics['total_variation']:.4f}")
     log.info(f"  KL Divergence: {fg_metrics['kl_divergence']:.4f}")
 
-    log.info("\n(Lower values = more similar to training distribution)")
+    log.info("\n(Lower values = more similar to reference distribution)")
 
     # Generate visualizations
     log.info("\n" + "=" * 60)
@@ -430,7 +430,7 @@ def main(cfg: DictConfig) -> None:
     # Bar chart analysis
     chart_path = output_dir / f"analysis_{tokenizer_type}.png"
     fig = plot_combined_analysis(
-        train_filtered,
+        ref_filtered,
         gen_filtered,
         output_path=str(chart_path),
         title_prefix=f"{tokenizer_type.upper()} Generation",
@@ -441,7 +441,7 @@ def main(cfg: DictConfig) -> None:
     # Molecule structure visualizations
     log.info("Generating molecule structure visualizations...")
     mol_files = draw_molecule_comparison(
-        train_filtered,
+        ref_filtered,
         gen_filtered,
         output_dir=str(output_dir),
         tokenizer_name=tokenizer_type,
