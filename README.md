@@ -1,4 +1,4 @@
-# Beyond Flat Walks: Compositional Abstraction for Autoregressive Molecular Generation
+# [Beyond Flat Walks: Compositional Abstraction for Autoregressive Molecular Generation](https://kbian.org/MOSAIC-website/#)
 
 This project explores a simple idea: instead of asking generative models to recover motif-level structure implicitly, we encode motifs directly into the representation used for graph generation, independent of the sequence transformer's processing. We are interesting in constructing a representation in the form of flat tokens.
 
