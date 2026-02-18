@@ -5,7 +5,7 @@ AutoGraph/
 scratch/
 tmp/
 figures/
-.claude/
+.claude_old/
 paper/
 
 # Python
