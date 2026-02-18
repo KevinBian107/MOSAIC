@@ -147,6 +147,7 @@ class BatchConverter:
         for i, seq in enumerate(batch):
             if self.truncation_length is not None and len(seq) > self.truncation_length:
                 seq = seq[: self.truncation_length]
+                seq[-1] = self.tokenizer.eos  # Preserve EOS so model learns to stop
             batched[i, : len(seq)] = seq
 
         return batched
