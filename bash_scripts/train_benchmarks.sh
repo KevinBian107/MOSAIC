@@ -2,6 +2,8 @@
 # Train benchmark models from scratch on MOSES or COCONUT dataset.
 #
 # This script trains all tokenizer variants (SENT, H-SENT, HDT, HDTC) from scratch.
+# If a checkpoint exists but training is incomplete (global_step < max_steps),
+# the script automatically resumes from the checkpoint in the same output directory.
 # By default, trains all coarsening variants (MC, SC, HAC) for hierarchical tokenizers.
 #
 # Usage:
@@ -81,7 +83,7 @@ for arg in "$@"; do
             echo ""
             echo "Options:"
             echo "  --dry-run         Show what would be run without executing"
-            echo "  --force           Re-run even if output best.ckpt already exists"
+            echo "  --force           Re-run from scratch even if checkpoint exists"
             echo "  --coconut         Train on COCONUT instead of MOSES"
             echo "  --ddp             Enable DDP multi-GPU training (default: 4 GPUs)"
             echo "  --devices=N       Set number of GPUs (implies DDP when N > 1)"
@@ -274,19 +276,62 @@ for tok_config in "${TOKENIZERS[@]}"; do
 
     RUN_NAME="${DATASET}_${SHORT_NAME}"
 
-    # Skip if already trained (best.ckpt exists in any timestamped output dir)
-    EXISTING_CKPT=$(find "$OUTPUT_DIR" -path "*/${RUN_NAME}_*/best.ckpt" -type f 2>/dev/null | head -1)
-    if [ "$FORCE" = false ] && [ -n "$EXISTING_CKPT" ]; then
-        echo "========================================"
-        echo "[$CURRENT/$TOTAL] SKIPPING: $SHORT_NAME (already trained)"
-        echo "  Output exists: $EXISTING_CKPT"
-        echo "  Use --force to re-run"
-        echo ""
-        continue
+    # Check for existing last.ckpt only. last.ckpt reflects furthest training progress;
+    # best.ckpt may lag behind (saved on val loss improvement, not at end of training).
+    # If only best.ckpt exists without last.ckpt, training was interrupted before the
+    # final save — train.py's resume logic will pick it up automatically.
+    EXISTING_DIR=""
+    RESUME_CKPT=""
+    LAST_CKPT=$(find "$OUTPUT_DIR" -path "*/${RUN_NAME}_*/last.ckpt" -type f 2>/dev/null | sort -r | head -1)
+
+    if [ -n "$LAST_CKPT" ]; then
+        EXISTING_DIR=$(dirname "$LAST_CKPT")
+    else
+        # No last.ckpt — check if best.ckpt exists (interrupted run, always resume)
+        BEST_CKPT=$(find "$OUTPUT_DIR" -path "*/${RUN_NAME}_*/best.ckpt" -type f 2>/dev/null | sort -r | head -1)
+        if [ -n "$BEST_CKPT" ]; then
+            EXISTING_DIR=$(dirname "$BEST_CKPT")
+        fi
     fi
 
-    echo "========================================"
-    echo "[$CURRENT/$TOTAL] Training: $SHORT_NAME"
+    if [ "$FORCE" = false ] && [ -n "$EXISTING_DIR" ]; then
+        if [ -n "$LAST_CKPT" ]; then
+            # Extract global_step from last.ckpt to check if training is complete
+            CKPT_STEP=$(python -c "
+import torch
+ckpt = torch.load('$LAST_CKPT', map_location='cpu', weights_only=False)
+print(ckpt.get('global_step', 0))
+" 2>/dev/null || echo "0")
+
+            if [ "$CKPT_STEP" -ge "$MAX_STEPS" ]; then
+                echo "========================================"
+                echo "[$CURRENT/$TOTAL] SKIPPING: $SHORT_NAME (fully trained)"
+                echo "  Checkpoint: $LAST_CKPT"
+                echo "  Steps: $CKPT_STEP / $MAX_STEPS (complete)"
+                echo "  Use --force to re-run"
+                echo ""
+                continue
+            else
+                echo "========================================"
+                echo "[$CURRENT/$TOTAL] RESUMING: $SHORT_NAME ($CKPT_STEP / $MAX_STEPS steps)"
+                echo "  Checkpoint: $LAST_CKPT"
+                echo "  Output dir: $EXISTING_DIR"
+                RESUME_CKPT="$EXISTING_DIR"
+            fi
+        else
+            # Only best.ckpt exists — interrupted run, always resume
+            echo "========================================"
+            echo "[$CURRENT/$TOTAL] RESUMING: $SHORT_NAME (interrupted, no last.ckpt)"
+            echo "  Checkpoint: $BEST_CKPT"
+            echo "  Output dir: $EXISTING_DIR"
+            RESUME_CKPT="$EXISTING_DIR"
+        fi
+    fi
+
+    if [ -z "$RESUME_CKPT" ]; then
+        echo "========================================"
+        echo "[$CURRENT/$TOTAL] Training: $SHORT_NAME (from scratch)"
+    fi
     echo "Dataset: $DATASET"
     echo "Tokenizer: $TOKENIZER"
     if [ -n "$COARSENING_FULL" ]; then
@@ -301,6 +346,12 @@ for tok_config in "${TOKENIZERS[@]}"; do
     ARGS="$ARGS logs.run_name=$RUN_NAME"
     ARGS="$ARGS logs.base_dir=$OUTPUT_DIR"
     ARGS="$ARGS wandb.enabled=$WANDB_ENABLED"
+
+    # Resume: point logs.path to existing dir so train.py finds the checkpoint
+    if [ -n "$RESUME_CKPT" ]; then
+        ARGS="$ARGS resume=true"
+        ARGS="$ARGS logs.path=$RESUME_CKPT"
+    fi
 
     # Add DDP settings
     if [ "$NUM_DEVICES" -gt 1 ]; then
@@ -325,7 +376,9 @@ for tok_config in "${TOKENIZERS[@]}"; do
     fi
 
     if [ "$DRY_RUN" = true ]; then
-        if [ "$USE_MIG" = true ] && [ "$NUM_DEVICES" -gt 1 ]; then
+        if [ -n "$RESUME_CKPT" ]; then
+            echo "[DRY RUN] Would RESUME from $RESUME_CKPT:"
+        elif [ "$USE_MIG" = true ] && [ "$NUM_DEVICES" -gt 1 ]; then
             echo "[DRY RUN] Would launch $NUM_DEVICES MIG DDP processes:"
         else
             echo "[DRY RUN] Would execute:"
