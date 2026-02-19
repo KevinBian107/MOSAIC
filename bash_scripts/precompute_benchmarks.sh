@@ -34,8 +34,17 @@ TOKENIZER_FILTER="all"
 
 # Dataset sample counts (from configs/experiment/*.yaml)
 MOSES_SAMPLES=1000000
+MOSES_VAL_SAMPLES=0
 COCONUT_SAMPLES=5000
 COCONUT_VAL_SAMPLES=500
+
+# Spectral (SC) speed knobs (only used when --coarsening=sc / spectral)
+# "Aggressive speed up" defaults (kmeans is used inside spectral.py):
+# - n_init=1
+# - tighter K search range (matches our benchmark sweet spot)
+SPECTRAL_N_INIT=1
+SPECTRAL_K_MIN_FACTOR=0.9
+SPECTRAL_K_MAX_FACTOR=1.1
 
 # Small dataset threshold — below this, run directly (no screen sessions)
 SMALL_DATASET_THRESHOLD=10000
@@ -64,6 +73,21 @@ for arg in "$@"; do
         --chunks=*)
             NUM_CHUNKS="${arg#*=}"
             ;;
+        --train-samples=*)
+            MOSES_SAMPLES="${arg#*=}"
+            ;;
+        --val-samples=*)
+            MOSES_VAL_SAMPLES="${arg#*=}"
+            ;;
+        --spectral-n-init=*)
+            SPECTRAL_N_INIT="${arg#*=}"
+            ;;
+        --spectral-k-min-factor=*)
+            SPECTRAL_K_MIN_FACTOR="${arg#*=}"
+            ;;
+        --spectral-k-max-factor=*)
+            SPECTRAL_K_MAX_FACTOR="${arg#*=}"
+            ;;
         --output-dir=*)
             OUTPUT_DIR="${arg#*=}"
             ;;
@@ -80,6 +104,11 @@ for arg in "$@"; do
             echo "  --coarsening=STRATEGY  Filter coarsening: sc, hac, or all (default: all)"
             echo "  --tokenizer=TYPE     Filter tokenizer: hsent, hdt, or all (default: all)"
             echo "  --chunks=N           Number of parallel chunks (default: 8)"
+            echo "  --train-samples=N    MOSES train samples (default: ${MOSES_SAMPLES})"
+            echo "  --val-samples=N      MOSES val samples (default: ${MOSES_VAL_SAMPLES})"
+            echo "  --spectral-n-init=N  Spectral n_init (default: ${SPECTRAL_N_INIT})"
+            echo "  --spectral-k-min-factor=F  Spectral k_min_factor (default: ${SPECTRAL_K_MIN_FACTOR})"
+            echo "  --spectral-k-max-factor=F  Spectral k_max_factor (default: ${SPECTRAL_K_MAX_FACTOR})"
             echo "  --output-dir=PATH    Cache directory (default: data/cache)"
             echo ""
             echo "Datasets:"
@@ -161,7 +190,9 @@ run_dataset() {
 
     # Determine val samples for this dataset
     local val_samples=0
-    if [ "$dataset" = "coconut" ]; then
+    if [ "$dataset" = "moses" ]; then
+        val_samples=$MOSES_VAL_SAMPLES
+    elif [ "$dataset" = "coconut" ]; then
         val_samples=$COCONUT_VAL_SAMPLES
     fi
 
@@ -203,6 +234,13 @@ run_dataset() {
         echo "[$combo_count/$total_combos] ${dataset}: ${TOKENIZER} + ${COARSENING_FULL}"
         echo "========================================"
 
+        # Extra args for preprocess_chunk.py (strategy-specific)
+        SPECTRAL_ARGS=""
+        if [ "$COARSENING_FULL" = "spectral" ]; then
+            SPECTRAL_ARGS="--spectral-n-init $SPECTRAL_N_INIT --spectral-k-min-factor $SPECTRAL_K_MIN_FACTOR --spectral-k-max-factor $SPECTRAL_K_MAX_FACTOR"
+            echo "  Spectral overrides: n_init=$SPECTRAL_N_INIT, k=[$SPECTRAL_K_MIN_FACTOR,$SPECTRAL_K_MAX_FACTOR] (kmeans)"
+        fi
+
         # Helper: check if a combined cache file exists for a given split/size
         check_cache() {
             local check_split="$1"
@@ -212,7 +250,14 @@ run_dataset() {
 import torch
 d = torch.load('$f', weights_only=False)
 cfg = d.get('tokenizer_config', {})
-if cfg.get('coarsening_strategy') == '$COARSENING_FULL':
+ok = (cfg.get('coarsening_strategy') == '$COARSENING_FULL')
+if ok and '$COARSENING_FULL' == 'spectral':
+    ok = (
+        str(cfg.get('spectral_n_init')) == str($SPECTRAL_N_INIT)
+        and str(cfg.get('spectral_k_min_factor')) == str($SPECTRAL_K_MIN_FACTOR)
+        and str(cfg.get('spectral_k_max_factor')) == str($SPECTRAL_K_MAX_FACTOR)
+    )
+if ok:
     print('$f')
 " 2>/dev/null || true)
                 if [ -n "$match" ]; then
@@ -247,6 +292,7 @@ if cfg.get('coarsening_strategy') == '$COARSENING_FULL':
                 cmd="$cmd --tokenizer $TOKENIZER"
                 cmd="$cmd $dataset_args"
                 cmd="$cmd --coarsening-strategy $COARSENING_FULL"
+                cmd="$cmd $SPECTRAL_ARGS"
                 cmd="$cmd --start 0"
                 cmd="$cmd --end $total_samples"
                 cmd="$cmd --output $output_file"
@@ -294,6 +340,7 @@ if cfg.get('coarsening_strategy') == '$COARSENING_FULL':
                     val_cmd="$val_cmd --tokenizer $TOKENIZER"
                     val_cmd="$val_cmd $dataset_args"
                     val_cmd="$val_cmd --coarsening-strategy $COARSENING_FULL"
+                    val_cmd="$val_cmd $SPECTRAL_ARGS"
                     val_cmd="$val_cmd --start $val_start"
                     val_cmd="$val_cmd --end $val_end"
                     val_cmd="$val_cmd --output $val_output_file"
@@ -364,6 +411,7 @@ if cfg.get('coarsening_strategy') == '$COARSENING_FULL':
                 cmd="$cmd --tokenizer $TOKENIZER"
                 cmd="$cmd $dataset_args"
                 cmd="$cmd --coarsening-strategy $COARSENING_FULL"
+                cmd="$cmd $SPECTRAL_ARGS"
                 cmd="$cmd --start $start"
                 cmd="$cmd --end $end"
                 cmd="$cmd --output $output_file"
@@ -389,6 +437,57 @@ if cfg.get('coarsening_strategy') == '$COARSENING_FULL':
                     echo "  Started screen: $screen_name [$start:$end]"
                 fi
             done
+
+            # Val split (always run directly; typically small)
+            if [ $val_samples -gt 0 ]; then
+                echo ""
+                echo "  Val precompute: direct (${val_samples} samples)"
+
+                local existing_val
+                existing_val=$(check_cache "val" "$val_samples")
+
+                if [ "$FORCE" = false ] && [ -n "$existing_val" ]; then
+                    echo "  SKIP val: cache exists: $existing_val"
+                else
+                    local val_start=$total_samples
+                    local val_end=$((total_samples + val_samples))
+                    local val_output_file="$OUTPUT_DIR/${TOKENIZER}_${COARSENING_FULL}_chunk_${val_start}_${val_end}.pt"
+
+                    local val_cmd="python scripts/preprocess/preprocess_chunk.py"
+                    val_cmd="$val_cmd --tokenizer $TOKENIZER"
+                    val_cmd="$val_cmd $dataset_args"
+                    val_cmd="$val_cmd --coarsening-strategy $COARSENING_FULL"
+                    val_cmd="$val_cmd $SPECTRAL_ARGS"
+                    val_cmd="$val_cmd --start $val_start"
+                    val_cmd="$val_cmd --end $val_end"
+                    val_cmd="$val_cmd --output $val_output_file"
+
+                    if [ "$DRY_RUN" = true ]; then
+                        echo "  [DRY RUN] Val precompute:"
+                        echo "    $val_cmd"
+                    else
+                        echo "  Running val preprocessing..."
+                        eval $val_cmd
+                    fi
+
+                    local val_combine_cmd="python scripts/preprocess/combine_chunks.py"
+                    val_combine_cmd="$val_combine_cmd --tokenizer $TOKENIZER"
+                    val_combine_cmd="$val_combine_cmd --coarsening-strategy $COARSENING_FULL"
+                    val_combine_cmd="$val_combine_cmd --chunk_dir $OUTPUT_DIR"
+                    val_combine_cmd="$val_combine_cmd --split val"
+                    val_combine_cmd="$val_combine_cmd --dataset $dataset"
+
+                    if [ "$DRY_RUN" = true ]; then
+                        echo "    $val_combine_cmd"
+                    else
+                        echo "  Combining val chunks..."
+                        eval $val_combine_cmd
+
+                        rm -f "$val_output_file"
+                        echo "  Cleaned up val chunk file"
+                    fi
+                fi
+            fi
 
             echo ""
             echo "  Monitor progress:"

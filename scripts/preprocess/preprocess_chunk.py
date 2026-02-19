@@ -84,6 +84,25 @@ def main():
         default="spectral",
         help="Coarsening strategy (default: spectral)",
     )
+    # Spectral-only knobs (used for aggressive speed vs quality tradeoffs)
+    parser.add_argument(
+        "--spectral-n-init",
+        type=int,
+        default=None,
+        help="SpectralClustering n_init (spectral only). If omitted, tokenizer default is used.",
+    )
+    parser.add_argument(
+        "--spectral-k-min-factor",
+        type=float,
+        default=None,
+        help="Spectral k_min_factor (spectral only). If omitted, tokenizer default is used.",
+    )
+    parser.add_argument(
+        "--spectral-k-max-factor",
+        type=float,
+        default=None,
+        help="Spectral k_max_factor (spectral only). If omitted, tokenizer default is used.",
+    )
     args = parser.parse_args()
 
     chunk_size = args.end - args.start
@@ -158,6 +177,11 @@ def main():
         "normalize_by_motif_size": False,
         "undirected": True,
     }
+    if args.coarsening_strategy == "spectral":
+        # Include spectral parameters in cache hash so precompute matches training config
+        tokenizer_config["spectral_n_init"] = args.spectral_n_init
+        tokenizer_config["spectral_k_min_factor"] = args.spectral_k_min_factor
+        tokenizer_config["spectral_k_max_factor"] = args.spectral_k_max_factor
     # Build common tokenizer kwargs
     tokenizer_kwargs = dict(
         max_length=-1,
@@ -169,6 +193,14 @@ def main():
         labeled_graph=True,
         seed=args.seed,
     )
+    if args.coarsening_strategy == "spectral":
+        # Only apply overrides when provided
+        if args.spectral_n_init is not None:
+            tokenizer_kwargs["n_init"] = args.spectral_n_init
+        if args.spectral_k_min_factor is not None:
+            tokenizer_kwargs["k_min_factor"] = args.spectral_k_min_factor
+        if args.spectral_k_max_factor is not None:
+            tokenizer_kwargs["k_max_factor"] = args.spectral_k_max_factor
     # Initialize tokenizer
     if args.tokenizer == "hsent":
         tokenizer = HSENTTokenizer(**tokenizer_kwargs)
