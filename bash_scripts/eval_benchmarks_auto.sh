@@ -289,9 +289,10 @@ gen_already_done() {
     [ -f "$out_dir/results.json" ] && [ -f "$out_dir/generated_smiles.txt" ] && [ -s "$out_dir/generated_smiles.txt" ]
 }
 
-# Precompute reference graphs once for PGD (so each test.py does not reconvert SMILES)
+# Precompute reference graphs once for PGD (so each test.py does not reconvert SMILES).
+# Run whenever we run test (including --core-only) so the cache exists for any later full run.
 REF_GRAPHS_PATH=""
-if [ "$RUN_TEST" = true ] && [ "$CORE_ONLY" = false ]; then
+if [ "$RUN_TEST" = true ]; then
     echo "========================================"
     echo "Precomputing reference graphs for PGD (shared across all checkpoints)..."
     echo "========================================"

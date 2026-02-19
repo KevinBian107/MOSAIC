@@ -208,6 +208,8 @@ def main(cfg: DictConfig) -> None:
         min_atoms=cfg.data.get("min_atoms", 20),
         max_atoms=cfg.data.get("max_atoms", 100),
         min_rings=cfg.data.get("min_rings", 3),
+        use_precomputed_smiles=cfg.data.get("use_precomputed_smiles", False),
+        precomputed_smiles_dir=cfg.data.get("precomputed_smiles_dir", None),
     )
 
     datamodule.setup(stage="test")

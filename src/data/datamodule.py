@@ -58,6 +58,24 @@ class MolecularGraphDataset(Dataset):
         return self.molecular_dataset.smiles_list
 
 
+class SmilesOnlyDataset(Dataset):
+    """Minimal dataset that only holds a list of SMILES (no graph conversion).
+
+    Used when loading from precomputed reference_data_dir so we skip heavy
+    MolecularDataset conversion. test_dataloader() may still be called;
+    __getitem__ returns a placeholder (caller should not rely on it for evals).
+    """
+
+    def __init__(self, smiles_list: list[str]) -> None:
+        self.smiles_list = list(smiles_list)
+
+    def __len__(self) -> int:
+        return len(self.smiles_list)
+
+    def __getitem__(self, idx: int) -> int:
+        return idx  # Placeholder; not used when loading from reference_data_dir
+
+
 class CachedTokenDataset(Dataset):
     """PyTorch Dataset for pre-tokenized molecular graphs.
 
@@ -166,6 +184,9 @@ class MolecularDataModule(pl.LightningDataModule):
         min_atoms: int = 20,
         max_atoms: int = 100,
         min_rings: int = 3,
+        reference_data_dir: Optional[str] = None,
+        use_precomputed_smiles: bool = False,
+        precomputed_smiles_dir: Optional[str] = None,
     ) -> None:
         """Initialize the data module.
 
@@ -187,6 +208,9 @@ class MolecularDataModule(pl.LightningDataModule):
             min_atoms: Minimum atoms filter (for coconut dataset).
             max_atoms: Maximum atoms filter (for coconut dataset).
             min_rings: Minimum rings filter (for coconut dataset).
+            reference_data_dir: If set, load train/test SMILES from this dir (skip graph conversion).
+            use_precomputed_smiles: If True, load train/test SMILES from precomputed_smiles_dir (skip CSV + graph conversion).
+            precomputed_smiles_dir: Dir with train_smiles.txt and test_smiles.txt (default data/moses_smiles when use_precomputed_smiles).
         """
         super().__init__()
 
@@ -207,6 +231,9 @@ class MolecularDataModule(pl.LightningDataModule):
         self.min_atoms = min_atoms
         self.max_atoms = max_atoms
         self.min_rings = min_rings
+        self.reference_data_dir = reference_data_dir
+        self.use_precomputed_smiles = use_precomputed_smiles
+        self.precomputed_smiles_dir = Path(precomputed_smiles_dir or "data/moses_smiles") if use_precomputed_smiles else None
 
         self.train_dataset: Optional[Dataset] = None
         self.val_dataset: Optional[Dataset] = None
@@ -423,6 +450,38 @@ class MolecularDataModule(pl.LightningDataModule):
                 )
 
         if stage == "test" or stage is None:
+            # Option: load train/test SMILES from precomputed .txt files (no CSV read, no graph conversion)
+            if stage == "test" and self.use_precomputed_smiles and self.precomputed_smiles_dir is not None:
+                train_path = self.precomputed_smiles_dir / "train_smiles.txt"
+                test_path = self.precomputed_smiles_dir / "test_smiles.txt"
+                if train_path.exists() and test_path.exists():
+                    log.info(f"✓ Loading precomputed SMILES from {self.precomputed_smiles_dir}")
+                    with open(train_path) as f:
+                        full_train = [line.strip() for line in f if line.strip()]
+                    with open(test_path) as f:
+                        full_test = [line.strip() for line in f if line.strip()]
+                    # Sample with seed to match load_moses_dataset(num_train, seed) behavior
+                    import random
+                    n_train = self.num_train if self.num_train is not None else len(full_train)
+                    n_test = self.num_test if self.num_test is not None else len(full_test)
+                    rng = random.Random(self.seed)
+                    train_idx = list(range(len(full_train)))
+                    rng.shuffle(train_idx)
+                    self.train_smiles = [full_train[i] for i in train_idx[:n_train]]
+                    test_idx = list(range(len(full_test)))
+                    rng = random.Random(42)  # MOSES test uses seed 42
+                    rng.shuffle(test_idx)
+                    self.test_smiles = [full_test[i] for i in test_idx[:n_test]]
+                    self.test_dataset = SmilesOnlyDataset(self.test_smiles)
+                    log.info(f"  train_smiles: {len(self.train_smiles)}, test_smiles: {len(self.test_smiles)}")
+                    # Skip MolecularDataset.from_moses below
+                    return  # _setup_moses done for test; setup() will still run tokenizer.set_num_nodes(0) etc.
+                else:
+                    log.warning(
+                        f"Precomputed SMILES not found in {self.precomputed_smiles_dir}, "
+                        "falling back to loading from CSV"
+                    )
+
             # Load train SMILES for metrics even in test mode
             if stage == "test" and len(self.train_smiles) == 0:
                 # Try cache first
