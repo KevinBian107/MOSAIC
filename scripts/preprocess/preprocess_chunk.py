@@ -35,7 +35,12 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.data.coconut_loader import CoconutLoader
-from src.data.molecular import MolecularDataset, NUM_ATOM_TYPES, NUM_BOND_TYPES
+from src.data.molecular import (
+    MolecularDataset,
+    NUM_ATOM_TYPES,
+    NUM_BOND_TYPES,
+    load_moses_dataset,
+)
 from src.tokenizers import HDTTokenizer, HSENTTokenizer
 
 logging.basicConfig(level=logging.INFO)
@@ -113,23 +118,28 @@ def main():
     # Load dataset
     if args.dataset == "moses":
         log.info("Loading MOSES dataset...")
-        mol_dataset = MolecularDataset.from_moses(
-            split="train",
-            max_molecules=args.end,  # Load up to our end index
+        # Load SMILES once for the prefix we care about, then slice.
+        # This avoids converting all [0:end) molecules to graphs for every chunk.
+        smiles_all = load_moses_dataset(
+            split="train", max_molecules=args.end, seed=args.seed
+        )
+        if len(smiles_all) < args.end:
+            log.warning(
+                f"Dataset only has {len(smiles_all)} samples, "
+                f"adjusting end to {len(smiles_all)}"
+            )
+            args.end = len(smiles_all)
+            chunk_size = args.end - args.start
+        smiles_slice = smiles_all[args.start : args.end]
+        mol_dataset = MolecularDataset(
+            smiles_slice,
+            dataset_name="moses_train_chunk",
             include_hydrogens=False,
             labeled=True,
-            seed=args.seed,
         )
-        # For MOSES, indices into mol_dataset match global indices
-        chunk_offset = args.start
-
-        if len(mol_dataset) < args.end:
-            log.warning(
-                f"Dataset only has {len(mol_dataset)} samples, "
-                f"adjusting end to {len(mol_dataset)}"
-            )
-            args.end = len(mol_dataset)
-            chunk_size = args.end - args.start
+        # For MOSES, mol_dataset indices now run 0..(end-start-1)
+        # and correspond exactly to the requested [start,end) range.
+        chunk_offset = 0
 
     elif args.dataset == "coconut":
         log.info("Loading COCONUT dataset...")
