@@ -10,6 +10,7 @@
 #   ./bash_scripts/eval_benchmarks.sh --full-ref   # Use train+test as reference population
 #   ./bash_scripts/eval_benchmarks.sh --test-only  # Skip realistic_gen
 #   ./bash_scripts/eval_benchmarks.sh --gen-only   # Skip test, only realistic_gen
+#   ./bash_scripts/eval_benchmarks.sh --force      # Re-evaluate even if results exist
 
 set -e  # Exit on error
 
@@ -25,6 +26,7 @@ RUN_TEST=true
 RUN_GEN=true
 USE_COCONUT=false
 USE_FULL_REF=false
+FORCE_REEVAL=false
 
 for arg in "$@"; do
     case $arg in
@@ -42,14 +44,18 @@ for arg in "$@"; do
             USE_FULL_REF=true
             REFERENCE_SPLIT="full"
             ;;
+        --force)
+            FORCE_REEVAL=true
+            ;;
         --help|-h)
-            echo "Usage: $0 [--test-only] [--gen-only] [--coconut] [--full-ref]"
+            echo "Usage: $0 [--test-only] [--gen-only] [--coconut] [--full-ref] [--force]"
             echo ""
             echo "Options:"
             echo "  --test-only   Only run test.py (skip realistic_gen.py)"
             echo "  --gen-only    Only run realistic_gen.py (skip test.py)"
             echo "  --coconut     Evaluate COCONUT benchmarks (from outputs/benchmark_coconut/)"
             echo "  --full-ref    Use train+test combined as reference population for distributional metrics"
+            echo "  --force       Re-evaluate checkpoints even if results already exist"
             echo ""
             echo "Results are saved to:"
             echo "  MOSES:             outputs/test/ and outputs/realistic_gen/"
@@ -154,6 +160,28 @@ supports_coarsening() {
     fi
 }
 
+# Check if a checkpoint has already been evaluated in a given output directory
+# Returns 0 (true) if a completed evaluation (results.json) exists for this checkpoint
+is_already_evaluated() {
+    local ckpt_path="$1"
+    local output_base_dir="$2"
+
+    [ -d "$output_base_dir" ] || return 1
+
+    for config_file in "$output_base_dir"/*/config.yaml; do
+        [ -f "$config_file" ] || continue
+        if grep -q "checkpoint_path: ${ckpt_path}" "$config_file"; then
+            local result_dir
+            result_dir=$(dirname "$config_file")
+            if [ -f "$result_dir/results.json" ]; then
+                return 0  # already evaluated
+            fi
+        fi
+    done
+
+    return 1
+}
+
 # Evaluate each checkpoint
 echo "$CHECKPOINTS" | while read -r ckpt; do
     TOKENIZER=$(get_tokenizer_type "$ckpt")
@@ -172,13 +200,21 @@ echo "$CHECKPOINTS" | while read -r ckpt; do
     echo "========================================"
 
     if [ "$RUN_TEST" = true ]; then
-        echo "[1/2] Running test.py..."
-        python scripts/test.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.base_dir=$TEST_OUTPUT_DIR metrics.reference_split=$REFERENCE_SPLIT $COARSENING_ARGS
+        if [ "$FORCE_REEVAL" = false ] && is_already_evaluated "$ckpt" "$TEST_OUTPUT_DIR"; then
+            echo "[1/2] Skipping test.py (already evaluated)"
+        else
+            echo "[1/2] Running test.py..."
+            python scripts/test.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.base_dir=$TEST_OUTPUT_DIR metrics.reference_split=$REFERENCE_SPLIT $COARSENING_ARGS
+        fi
     fi
 
     if [ "$RUN_GEN" = true ]; then
-        echo "[2/2] Running realistic_gen.py..."
-        python scripts/realistic_gen.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.base_dir=$REALISTIC_GEN_OUTPUT_DIR metrics.reference_split=$REFERENCE_SPLIT $COARSENING_ARGS
+        if [ "$FORCE_REEVAL" = false ] && is_already_evaluated "$ckpt" "$REALISTIC_GEN_OUTPUT_DIR"; then
+            echo "[2/2] Skipping realistic_gen.py (already evaluated)"
+        else
+            echo "[2/2] Running realistic_gen.py..."
+            python scripts/realistic_gen.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.base_dir=$REALISTIC_GEN_OUTPUT_DIR metrics.reference_split=$REFERENCE_SPLIT $COARSENING_ARGS
+        fi
     fi
 
     echo ""
