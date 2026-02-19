@@ -8,6 +8,10 @@
 #   ./bash_scripts/eval_benchmarks_auto.sh MAPPING.txt OUTPUT_PATH [OPTIONS]
 #   ./bash_scripts/eval_benchmarks_auto.sh MAPPING.txt outputs/eval_my_run --best
 #   ./bash_scripts/eval_benchmarks_auto.sh MAPPING.txt outputs/eval_my_run --last --test-only
+#   ./bash_scripts/eval_benchmarks_auto.sh MAPPING.txt outputs/eval_my_run --recompute run_dir1,run_dir2
+#
+# Caching: If results.json and generated_smiles.txt exist for a run, that run is skipped (still included
+# in the comparison table). Use --recompute DIR[,DIR2,...] to force re-run specific checkpoints.
 #
 # MAPPING.txt format (one line per checkpoint, order = column order):
 #   directory_name
@@ -31,6 +35,10 @@ RUN_TEST=true
 RUN_GEN=true
 DATASET="moses"
 BENCHMARK_DIR="$PROJECT_ROOT/outputs/benchmark"
+# Comma-separated list of dir names to force recompute (empty = use cache when valid)
+RECOMPUTE_DIRS=""
+# If true, only run test.py with core metrics only (no realistic_gen, no FCD/PGD/motif etc.)
+CORE_ONLY=false
 
 usage() {
     echo "Usage: $0 MAPPING_FILE OUTPUT_PATH [OPTIONS]"
@@ -47,7 +55,12 @@ usage() {
     echo "  --dataset NAME       moses or coconut (default: moses)"
     echo "  --test-only    Only run test.py (skip realistic_gen.py)"
     echo "  --gen-only     Only run realistic_gen.py (skip test.py)"
+    echo "  --core-only       Only run core metrics: validity, uniqueness, novelty (no FCD, PGD, motif, realistic_gen)"
+    echo "  --recompute DIR[,DIR2,...]   Force re-run test and/or gen for these checkpoint dirs (still included in table)"
     echo "  -h, --help     Show this help"
+    echo ""
+    echo "Caching: A run is skipped if results.json and generated_smiles.txt exist for that output dir."
+    echo "Use --recompute to force re-run specific checkpoints."
     echo ""
     echo "Example mapping file:"
     echo "  moses_hdtc_n100000_20260126-204311"
@@ -93,6 +106,19 @@ while [ $# -gt 0 ]; do
             ;;
         --gen-only)
             RUN_TEST=false
+            ;;
+        --core-only)
+            CORE_ONLY=true
+            RUN_GEN=false
+            ;;
+        --recompute)
+            if [ -z "${2:-}" ]; then
+                echo "Error: --recompute requires at least one directory name (e.g. --recompute dir1 or --recompute dir1,dir2)"
+                usage
+                exit 1
+            fi
+            RECOMPUTE_DIRS="$2"
+            shift
             ;;
         -h|--help)
             usage
@@ -233,6 +259,37 @@ supports_coarsening() {
     fi
 }
 
+# Return 0 if dir_name is in the --recompute list (comma-separated, no spaces)
+should_recompute() {
+    local dir_name="$1"
+    if [ -z "$RECOMPUTE_DIRS" ]; then
+        return 1
+    fi
+    local rest="$RECOMPUTE_DIRS"
+    while [ -n "$rest" ]; do
+        local item="${rest%%,*}"
+        item=$(echo "$item" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        if [ "$item" = "$dir_name" ]; then
+            return 0
+        fi
+        [ "$rest" = "$item" ] && break
+        rest="${rest#*,}"
+    done
+    return 1
+}
+
+# Check if test run is already done: results.json and generated_smiles.txt must exist (sensitive to samples)
+test_already_done() {
+    local out_dir="$1"
+    [ -f "$out_dir/results.json" ] && [ -f "$out_dir/generated_smiles.txt" ] && [ -s "$out_dir/generated_smiles.txt" ]
+}
+
+# Check if realistic_gen run is already done: results.json and generated_smiles.txt must exist
+gen_already_done() {
+    local out_dir="$1"
+    [ -f "$out_dir/results.json" ] && [ -f "$out_dir/generated_smiles.txt" ] && [ -s "$out_dir/generated_smiles.txt" ]
+}
+
 # Evaluate each checkpoint
 for i in "${!RUN_DIRS[@]}"; do
     dir_name="${RUN_DIRS[$i]}"
@@ -254,14 +311,33 @@ for i in "${!RUN_DIRS[@]}"; do
     LOGS_PATH_TEST="$TEST_OUTPUT_DIR/$dir_name"
     LOGS_PATH_GEN="$REALISTIC_GEN_OUTPUT_DIR/$dir_name"
 
+    FORCE_RUN=false
+    if should_recompute "$dir_name"; then
+        FORCE_RUN=true
+        echo "  (--recompute: forcing re-run for this checkpoint)"
+    fi
+
     if [ "$RUN_TEST" = true ]; then
-        echo "[1/2] Running test.py..."
-        python scripts/test.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.path="$LOGS_PATH_TEST" $COARSENING_ARGS
+        if [ "$FORCE_RUN" = true ] || ! test_already_done "$LOGS_PATH_TEST"; then
+            if [ "$CORE_ONLY" = true ]; then
+                echo "[1/2] Running test.py (core only: validity, uniqueness, novelty)..."
+                python scripts/test.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.path="$LOGS_PATH_TEST" metrics.core_only=true $COARSENING_ARGS
+            else
+                echo "[1/2] Running test.py..."
+                python scripts/test.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.path="$LOGS_PATH_TEST" $COARSENING_ARGS
+            fi
+        else
+            echo "[1/2] Test already done (results.json + generated_smiles.txt present), skipping."
+        fi
     fi
 
     if [ "$RUN_GEN" = true ]; then
-        echo "[2/2] Running realistic_gen.py..."
-        python scripts/realistic_gen.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.path="$LOGS_PATH_GEN" $COARSENING_ARGS
+        if [ "$FORCE_RUN" = true ] || ! gen_already_done "$LOGS_PATH_GEN"; then
+            echo "[2/2] Running realistic_gen.py..."
+            python scripts/realistic_gen.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.path="$LOGS_PATH_GEN" $COARSENING_ARGS
+        else
+            echo "[2/2] Realistic gen already done (results.json + generated_smiles.txt present), skipping."
+        fi
     fi
 
     echo ""

@@ -253,6 +253,20 @@ class MolecularDataModule(pl.LightningDataModule):
         if hasattr(self.tokenizer, "coarsening_strategy"):
             config["coarsening_strategy"] = self.tokenizer.coarsening_strategy
 
+            # Add spectral coarsening parameters for cache hash consistency
+            # These must match what preprocess scripts include in tokenizer_config
+            if (
+                config["coarsening_strategy"] == "spectral"
+                and hasattr(self.tokenizer, "coarsener")
+            ):
+                coarsener = self.tokenizer.coarsener
+                if hasattr(coarsener, "n_init"):
+                    config["n_init"] = coarsener.n_init
+                if hasattr(coarsener, "k_min_factor"):
+                    config["k_min_factor"] = coarsener.k_min_factor
+                if hasattr(coarsener, "k_max_factor"):
+                    config["k_max_factor"] = coarsener.k_max_factor
+
         if hasattr(self.tokenizer, "include_rings"):
             config["include_rings"] = self.tokenizer.include_rings
 

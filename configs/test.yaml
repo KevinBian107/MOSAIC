@@ -34,6 +34,7 @@ sampling:
 
 # Metrics configuration
 metrics:
+  core_only: false  # If true, only compute core metrics: validity, uniqueness, novelty (no FCD, PGD, motif)
   compute_motif: true  # Compute motif distribution metrics (MSC, MFD)
   compute_fcd: true  # Requires moses or fcd package
   compute_pgd: true  # Requires polygraph-benchmark package

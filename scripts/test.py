@@ -362,6 +362,42 @@ def main(cfg: DictConfig) -> None:
         f"Successfully converted {valid_count}/{len(generated_smiles)} graphs to SMILES"
     )
 
+    # Core-only mode: compute only validity, uniqueness, novelty (no FCD, PGD, motif, etc.)
+    if cfg.metrics.get("core_only", False):
+        reference_split = cfg.metrics.get("reference_split", "test")
+        train_smiles = list(datamodule.train_smiles) if hasattr(datamodule, "train_smiles") else []
+        mol_metrics = MolecularMetrics(
+            reference_smiles=[],  # not used for validity/uniqueness/novelty
+            train_smiles=train_smiles,
+        )
+        mol_results = mol_metrics(generated_smiles)
+        log.info("Core metrics (core_only mode):")
+        for name in ("validity", "uniqueness", "novelty"):
+            log.info(f"  {name:20s}: {mol_results.get(name, 0):.6f}")
+        all_results = {
+            "validity": mol_results.get("validity"),
+            "uniqueness": mol_results.get("uniqueness"),
+            "novelty": mol_results.get("novelty"),
+            "generation_time": gen_time,
+            "num_samples": num_samples,
+            "num_valid_smiles": valid_count,
+            "reference_split": reference_split,
+        }
+        output_path = Path(cfg.logs.path)
+        output_path.mkdir(parents=True, exist_ok=True)
+        results_file = output_path / "results.json"
+        with open(results_file, "w") as f:
+            json.dump(all_results, f, indent=2)
+        log.info(f"\nResults saved to {results_file}")
+        smiles_file = output_path / "generated_smiles.txt"
+        with open(smiles_file, "w") as f:
+            for smi in generated_smiles:
+                if smi != INVALID_SMILES_SENTINEL:
+                    f.write(smi + "\n")
+        log.info(f"Generated SMILES saved to {smiles_file}")
+        log.info("\nEvaluation complete (core only: validity, uniqueness, novelty).")
+        return
+
     # Visualization (if enabled)
     if cfg.get("visualization", {}).get("enabled", False):
         log.info("Generating molecule visualizations...")

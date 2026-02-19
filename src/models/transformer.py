@@ -260,10 +260,14 @@ def _run_with_heartbeat(
     t = threading.Thread(target=worker, daemon=True)
     t.start()
     start = time.monotonic()
+    screen_safe = use_screen_safe_progress()
     while t.is_alive():
         time.sleep(interval)
         elapsed = time.monotonic() - start
-        print(f"\r  {desc}: {elapsed:.0f}s elapsed...", end="", flush=True, file=sys.stderr)
+        if screen_safe:
+            print(f"  {desc}: {elapsed:.0f}s elapsed...", flush=True, file=sys.stderr)
+        else:
+            print(f"\r  {desc}: {elapsed:.0f}s elapsed...", end="", flush=True, file=sys.stderr)
     print(file=sys.stderr)
     if exception[0] is not None:
         raise exception[0]

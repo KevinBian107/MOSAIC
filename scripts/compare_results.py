@@ -33,6 +33,10 @@ METRIC_SECTIONS = [
         [
             "train_data_size",
             "train_max_steps",
+            "batch_size",
+            "learning_rate",
+            "weight_decay",
+            "warmup_steps",
             "coarsening_strategy",
             "reference_split",
             "generation_time",
@@ -94,6 +98,10 @@ METRIC_SECTIONS = [
 TRAINING_INFO_METRICS = [
     "train_data_size",
     "train_max_steps",
+    "batch_size",
+    "learning_rate",
+    "weight_decay",
+    "warmup_steps",
     "coarsening_strategy",
     "reference_split",
 ]
@@ -164,6 +172,10 @@ METRIC_DISPLAY_NAMES = {
     # Training info
     "train_data_size": "Train Data Size",
     "train_max_steps": "Train Steps",
+    "batch_size": "Batch Size",
+    "learning_rate": "LR",
+    "weight_decay": "Weight Decay",
+    "warmup_steps": "Warmup Steps",
     "coarsening_strategy": "Coarsening",
     "reference_split": "Ref Split",
     # Test metrics
@@ -358,6 +370,10 @@ def extract_training_info(config: dict) -> dict:
     info = {
         "train_data_size": None,
         "train_max_steps": None,
+        "batch_size": None,
+        "learning_rate": None,
+        "weight_decay": None,
+        "warmup_steps": None,
         "coarsening_strategy": None,
     }
 
@@ -384,14 +400,26 @@ def extract_training_info(config: dict) -> dict:
     if actual_steps is not None:
         info["train_max_steps"] = actual_steps
 
-    # Try to load training config for data size (and fallback steps)
+    # Try to load training config for data size, optimizer/training params, and fallback steps
     train_config = load_training_config(config)
     if train_config:
         num_train = train_config.get("data", {}).get("num_train")
+        data_cfg = train_config.get("data", {})
+        model_cfg = train_config.get("model", {})
 
         # Use config max_steps as fallback if checkpoint didn't have it
         if info["train_max_steps"] is None:
             info["train_max_steps"] = train_config.get("trainer", {}).get("max_steps")
+
+        # Training hyperparameters from config
+        if model_cfg.get("learning_rate") is not None:
+            info["learning_rate"] = model_cfg["learning_rate"]
+        if data_cfg.get("batch_size") is not None:
+            info["batch_size"] = data_cfg["batch_size"]
+        if model_cfg.get("weight_decay") is not None:
+            info["weight_decay"] = model_cfg["weight_decay"]
+        if model_cfg.get("warmup_steps") is not None:
+            info["warmup_steps"] = model_cfg["warmup_steps"]
 
         # If num_train is -1 (full dataset), try to parse from directory name
         if num_train is not None and num_train != -1:
