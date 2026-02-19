@@ -289,6 +289,21 @@ gen_already_done() {
     [ -f "$out_dir/results.json" ] && [ -f "$out_dir/generated_smiles.txt" ] && [ -s "$out_dir/generated_smiles.txt" ]
 }
 
+# Precompute reference graphs once for PGD (so each test.py does not reconvert SMILES)
+REF_GRAPHS_PATH=""
+if [ "$RUN_TEST" = true ] && [ "$CORE_ONLY" = false ]; then
+    echo "========================================"
+    echo "Precomputing reference graphs for PGD (shared across all checkpoints)..."
+    echo "========================================"
+    REF_GRAPHS_PATH=$(python scripts/precompute_reference_graphs.py experiment="$DATASET" reference_graphs.output_dir="$OUTPUT_PATH" 2>/dev/null) || true
+    if [ -n "$REF_GRAPHS_PATH" ] && [ -f "$REF_GRAPHS_PATH" ]; then
+        echo "Reference graphs: $REF_GRAPHS_PATH"
+    else
+        REF_GRAPHS_PATH=""
+    fi
+    echo ""
+fi
+
 # Evaluate each checkpoint
 for i in "${!RUN_DIRS[@]}"; do
     dir_name="${RUN_DIRS[$i]}"
@@ -323,7 +338,9 @@ for i in "${!RUN_DIRS[@]}"; do
                 python scripts/test.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.path="$LOGS_PATH_TEST" metrics.core_only=true $COARSENING_ARGS
             else
                 echo "[1/2] Running test.py..."
-                python scripts/test.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.path="$LOGS_PATH_TEST" $COARSENING_ARGS
+                REF_ARGS=""
+                [ -n "$REF_GRAPHS_PATH" ] && REF_ARGS="metrics.reference_graphs_path=$REF_GRAPHS_PATH"
+                python scripts/test.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.path="$LOGS_PATH_TEST" $REF_ARGS $COARSENING_ARGS
             fi
         else
             echo "[1/2] Test already done (results.json + generated_smiles.txt present), skipping."

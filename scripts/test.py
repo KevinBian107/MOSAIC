@@ -491,29 +491,37 @@ def main(cfg: DictConfig) -> None:
     pgd_score = None
     if cfg.metrics.get("compute_pgd", True):  # Default enabled
         try:
-            # Convert reference SMILES to graphs for PGD
-            # Limit to max_reference_size for memory constraints
             max_ref_size = cfg.metrics.get("pgd_reference_size", 100)
-            if reference_split == "full":
-                pgd_reference_smiles = reference_smiles[:max_ref_size]
+            ref_graphs_path = cfg.metrics.get("reference_graphs_path")
+
+            if ref_graphs_path and Path(ref_graphs_path).exists():
+                log.info(f"Loading precomputed reference graphs from {ref_graphs_path}")
+                reference_graphs = torch.load(
+                    ref_graphs_path, map_location="cpu", weights_only=False
+                )
+                log.info(f"Loaded {len(reference_graphs)} reference graphs")
             else:
-                pgd_reference_smiles = datamodule.test_smiles[:max_ref_size]
+                # Convert reference SMILES to graphs for PGD
+                if reference_split == "full":
+                    pgd_reference_smiles = reference_smiles[:max_ref_size]
+                else:
+                    pgd_reference_smiles = datamodule.test_smiles[:max_ref_size]
 
-            log.info(
-                f"Converting {len(pgd_reference_smiles)} reference SMILES to graphs..."
-            )
-            reference_graphs = []
-            for smi in tqdm(
-                pgd_reference_smiles, desc="Converting reference to graphs"
-            ):
-                try:
-                    g = smiles_to_graph(smi)
-                    if g is not None and g.num_nodes > 0:
-                        reference_graphs.append(g)
-                except Exception:
-                    continue  # Skip invalid SMILES
+                log.info(
+                    f"Converting {len(pgd_reference_smiles)} reference SMILES to graphs..."
+                )
+                reference_graphs = []
+                for smi in tqdm(
+                    pgd_reference_smiles, desc="Converting reference to graphs"
+                ):
+                    try:
+                        g = smiles_to_graph(smi)
+                        if g is not None and g.num_nodes > 0:
+                            reference_graphs.append(g)
+                    except Exception:
+                        continue  # Skip invalid SMILES
 
-            log.info(f"Successfully converted {len(reference_graphs)} reference graphs")
+                log.info(f"Successfully converted {len(reference_graphs)} reference graphs")
 
             if len(reference_graphs) > 0:
                 polygraph_metric = PolygraphMetric(
