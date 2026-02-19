@@ -5,6 +5,7 @@ generation models using next-token prediction.
 """
 
 import logging
+import os
 import sys
 import threading
 import time
@@ -240,6 +241,18 @@ class TransformerLM(nn.Module):
             )
 
         return results, token_lengths
+
+
+def use_screen_safe_progress() -> bool:
+    """Return True if we should use newline-based progress (e.g. under screen/tmux or non-TTY)."""
+    if not hasattr(sys.stderr, "isatty") or not sys.stderr.isatty():
+        return True
+    term = os.environ.get("TERM", "")
+    if "screen" in term or "tmux" in term:
+        return True
+    if os.environ.get("STY") or os.environ.get("TMUX"):
+        return True
+    return False
 
 
 def _run_with_heartbeat(
