@@ -147,6 +147,24 @@ def main(cfg: DictConfig) -> None:
         output_dir = Path(hydra.utils.get_original_cwd()) / output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    results_path = output_dir / "results.json"
+    full_path = output_dir / "results_full.json"
+
+    # If not force_run and cached results exist, load them and just re-plot
+    if not cfg.force_run and results_path.exists():
+        print(f"force_run=false, loading cached results from {results_path}")
+        with open(results_path) as f:
+            all_results = json.load(f)
+        for name, res in all_results.items():
+            print(f"  {name}: validity={res['validity_rate']:.1%}, "
+                  f"violations={res['total_violations']}, "
+                  f"boundary_ratio={res['boundary_ratio']:.3f}")
+        print(f"\n{'='*60}")
+        print("Re-creating visualization from cached results...")
+        create_figure(all_results, str(output_dir))
+        print("\nDone! (used cached results, set force_run=true to regenerate)")
+        return
+
     torch.manual_seed(cfg.seed)
 
     all_results = {}
@@ -221,13 +239,11 @@ def main(cfg: DictConfig) -> None:
             k: v for k, v in res.items() if k != "per_molecule"
         }
 
-    results_path = output_dir / "results.json"
     with open(results_path, "w") as f:
         json.dump(summary, f, indent=2)
     print(f"Results saved to {results_path}")
 
     # Also save full per-molecule data
-    full_path = output_dir / "results_full.json"
     with open(full_path, "w") as f:
         json.dump(
             {name: res for name, res in all_results.items()},

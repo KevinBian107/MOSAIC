@@ -1,6 +1,12 @@
 seed: 42
 
+# If false, load existing results from output dir and only re-generate the figure
+force_run: true
+
 models:
+  - name: "SENT"
+    checkpoint_path: outputs/benchmark_coconut/coconut_sent_20260209-050645/last.ckpt
+    tokenizer_type: sent
   - name: "H-SENT SC"
     checkpoint_path: outputs/benchmark_coconut/coconut_hsent_sc_20260216-102500/last.ckpt
     tokenizer_type: hsent

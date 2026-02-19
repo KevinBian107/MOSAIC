@@ -32,7 +32,7 @@ Output is saved to `outputs/property_experiment/<name>/`.
 **Hypothesis:** Flexible coarsening methods (SC, HAC) merge singleton/linker atoms into motif communities where they don't belong, corrupting the structural prior and causing valence violations at ring-chain boundaries.
 
 **Method:**
-1. Generate 500 molecules from each of 5 COCONUT models (H-SENT SC, H-SENT HAC, HDT SC, HDT HAC, HDTC)
+1. Generate 500 molecules from each of 6 COCONUT models (SENT, H-SENT SC, H-SENT HAC, HDT SC, HDT HAC, HDTC)
 2. Build each molecule without RDKit sanitization to preserve raw valence states
 3. Identify atoms with valence violations (actual valence > max allowed)
 4. Classify each violating atom's structural role:
@@ -54,6 +54,9 @@ python property_experiment/error_analysis/run_experiment.py
 
 # Override sample count
 python property_experiment/error_analysis/run_experiment.py generation.num_samples=100
+
+# Re-plot from cached results without regenerating (skips model loading)
+python property_experiment/error_analysis/run_experiment.py force_run=false
 ```
 
 ---
