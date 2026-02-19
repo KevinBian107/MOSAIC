@@ -18,7 +18,7 @@
 #   directory_name	Display Label
 #   # comment lines and empty lines are skipped
 #
-# If a line has two columns (tab or space separated), the second is used as the column label
+# If a line has two columns (space-separated; one or more spaces), the second is used as the column label
 # in the comparison table. Otherwise the directory name is used.
 #
 # Checkpoints are looked for under BENCHMARK_DIR (default: outputs/benchmark). Each directory
@@ -45,7 +45,7 @@ usage() {
     echo ""
     echo "Arguments:"
     echo "  MAPPING_FILE   Path to a text file listing checkpoint dir names (and optional column labels)."
-    echo "                 Order of lines = column order. Format: dir_name or dir_name<TAB>Label"
+    echo "                 Order of lines = column order. Format: dir_name or dir_name  Label (space-separated)"
     echo "  OUTPUT_PATH    Base directory for test/ and realistic_gen/ outputs and comparison.png"
     echo ""
     echo "Options:"
@@ -64,8 +64,8 @@ usage() {
     echo ""
     echo "Example mapping file:"
     echo "  moses_hdtc_n100000_20260126-204311"
-    echo "  moses_hsent_mc_20260122-093526	H-SENT MC"
-    echo "  moses_sent_n1000000_20260123-140906	SENT 1M"
+    echo "  moses_hsent_mc_20260122-093526  H-SENT MC"
+    echo "  moses_sent_n1000000_20260123-140906  SENT 1M"
 }
 
 if [ $# -lt 2 ]; then
@@ -148,7 +148,7 @@ COMPARISON_OUTPUT="$OUTPUT_PATH/comparison.png"
 mkdir -p "$TEST_OUTPUT_DIR"
 mkdir -p "$REALISTIC_GEN_OUTPUT_DIR"
 
-# Parse mapping file: lines like "dir_name" or "dir_name\tLabel" or "dir_name  Label"
+# Parse mapping file: lines like "dir_name" or "dir_name  Label" (space-separated; one or more spaces)
 # Output order of (dir_name, label) and only include dirs that have a checkpoint
 parse_mapping_and_find_ckpts() {
     local ckpt_name="$1"
@@ -156,9 +156,8 @@ parse_mapping_and_find_ckpts() {
         line=$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
         [ -z "$line" ] && continue
         [[ "$line" =~ ^# ]] && continue
-        dir_name="${line%%[[:space:]]*}"
-        rest="${line#$dir_name}"
-        rest=$(echo "$rest" | sed 's/^[[:space:]]*//')
+        IFS=' ' read -r dir_name rest <<< "$line"
+        rest=$(echo "$rest" | sed 's/^ *//')
         ckpt_path="$BENCHMARK_DIR/$dir_name/$ckpt_name"
         if [ -f "$ckpt_path" ]; then
             if [ -n "$rest" ]; then
