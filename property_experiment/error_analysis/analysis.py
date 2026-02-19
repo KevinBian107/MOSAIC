@@ -2,6 +2,9 @@
 
 Builds molecules without sanitization and classifies where valence
 violations occur (ring interior, ring boundary, chain boundary, chain interior).
+
+Validity is determined by the standard RDKit sanitization check (graph_to_smiles).
+Violation analysis is only performed on invalid molecules.
 """
 
 from typing import Optional
@@ -16,6 +19,7 @@ from src.data.molecular import (
     BOND_TYPES,
     NUM_ATOM_TYPES,
     NUM_BOND_TYPES,
+    graph_to_smiles,
 )
 
 
@@ -99,31 +103,12 @@ def build_mol_no_sanitize(data: Data) -> Optional[Chem.RWMol]:
         return None
 
 
-def _compute_explicit_valence(mol: Chem.RWMol, atom_idx: int) -> int:
-    """Compute explicit valence from bonds (works on unsanitized molecules).
-
-    Sums bond orders for all bonds connected to the atom.
-    """
-    bond_order_map = {
-        Chem.rdchem.BondType.SINGLE: 1,
-        Chem.rdchem.BondType.DOUBLE: 2,
-        Chem.rdchem.BondType.TRIPLE: 3,
-        Chem.rdchem.BondType.AROMATIC: 1.5,
-    }
-    atom = mol.GetAtomWithIdx(atom_idx)
-    valence = 0
-    for bond in atom.GetBonds():
-        valence += bond_order_map.get(bond.GetBondType(), 1)
-    # Add implicit H count if set, and formal charge adjustment
-    valence += atom.GetNumExplicitHs()
-    return int(valence) if valence == int(valence) else int(valence + 0.5)
-
-
 def find_valence_violations(mol: Chem.RWMol) -> list[dict]:
     """Find atoms with valence violations in an unsanitized molecule.
 
-    Computes valence manually from bonds (since GetTotalValence() requires
-    sanitization) and compares against RDKit's allowed valences.
+    Uses RDKit's partial sanitization (SANITIZE_PROPERTIES) to compute
+    valence correctly (handles aromatic kekulization, implicit Hs, etc.),
+    then checks each atom for violations.
 
     Args:
         mol: Unsanitized RWMol object.
@@ -132,12 +117,37 @@ def find_valence_violations(mol: Chem.RWMol) -> list[dict]:
         List of dicts with keys: atom_idx, atom_type, actual_valence, allowed_valence.
     """
     pt = Chem.GetPeriodicTable()
-    violations = []
 
+    # Run partial sanitization to compute valence properties without
+    # raising on violations. This handles aromatic kekulization properly.
+    try:
+        Chem.SanitizeMol(
+            mol,
+            sanitizeOps=Chem.SanitizeFlags.SANITIZE_FINDRADICALS
+            | Chem.SanitizeFlags.SANITIZE_SETAROMATICITY
+            | Chem.SanitizeFlags.SANITIZE_SETCONJUGATION
+            | Chem.SanitizeFlags.SANITIZE_SETHYBRIDIZATION
+            | Chem.SanitizeFlags.SANITIZE_SYMMRINGS,
+        )
+    except Exception:
+        pass
+
+    # Now compute explicit valence (won't raise after partial sanitize)
+    try:
+        mol.UpdatePropertyCache(strict=False)
+    except Exception:
+        pass
+
+    violations = []
     for idx in range(mol.GetNumAtoms()):
         atom = mol.GetAtomWithIdx(idx)
         atomic_num = atom.GetAtomicNum()
-        actual_valence = _compute_explicit_valence(mol, idx)
+
+        try:
+            actual_valence = atom.GetTotalValence()
+        except Exception:
+            # Fallback: count bond orders manually
+            actual_valence = _compute_explicit_valence(mol, idx)
 
         # GetDefaultValence returns a tuple of allowed valences
         default_valence = pt.GetDefaultValence(atomic_num)
@@ -157,6 +167,25 @@ def find_valence_violations(mol: Chem.RWMol) -> list[dict]:
             )
 
     return violations
+
+
+def _compute_explicit_valence(mol: Chem.RWMol, atom_idx: int) -> int:
+    """Fallback: compute explicit valence from bonds manually.
+
+    Only used when UpdatePropertyCache + GetTotalValence fails.
+    """
+    bond_order_map = {
+        Chem.rdchem.BondType.SINGLE: 1,
+        Chem.rdchem.BondType.DOUBLE: 2,
+        Chem.rdchem.BondType.TRIPLE: 3,
+        Chem.rdchem.BondType.AROMATIC: 1,  # conservative: treat as single
+    }
+    atom = mol.GetAtomWithIdx(atom_idx)
+    valence = 0
+    for bond in atom.GetBonds():
+        valence += bond_order_map.get(bond.GetBondType(), 1)
+    valence += atom.GetNumExplicitHs()
+    return valence
 
 
 def classify_atom_role(mol: Chem.RWMol, atom_idx: int) -> str:
@@ -204,12 +233,19 @@ def classify_atom_role(mol: Chem.RWMol, atom_idx: int) -> str:
 def analyze_molecule(data: Data) -> dict:
     """Analyze a single generated molecule for valence violations.
 
+    Uses graph_to_smiles() (standard RDKit sanitization) for validity.
+    Only performs violation analysis on invalid molecules.
+
     Args:
         data: PyG Data object representing a generated molecule.
 
     Returns:
-        Dict with keys: valid, num_atoms, violations (list of per-atom info).
+        Dict with keys: valid, num_atoms, decode_failure, violations.
     """
+    # Standard validity check via RDKit sanitization
+    smiles = graph_to_smiles(data)
+    is_valid = smiles is not None
+
     mol = build_mol_no_sanitize(data)
 
     if mol is None:
@@ -220,7 +256,18 @@ def analyze_molecule(data: Data) -> dict:
             "violations": [],
         }
 
-    # Initialize ring info on unsanitized molecule
+    num_atoms = mol.GetNumAtoms()
+
+    # If valid, no need to analyze violations
+    if is_valid:
+        return {
+            "valid": True,
+            "num_atoms": num_atoms,
+            "decode_failure": False,
+            "violations": [],
+        }
+
+    # Invalid molecule — find and classify violations
     Chem.FastFindRings(mol)
 
     violations_raw = find_valence_violations(mol)
@@ -239,8 +286,8 @@ def analyze_molecule(data: Data) -> dict:
         )
 
     return {
-        "valid": len(violations) == 0,
-        "num_atoms": mol.GetNumAtoms(),
+        "valid": False,
+        "num_atoms": num_atoms,
         "decode_failure": False,
         "violations": violations,
     }
@@ -264,7 +311,7 @@ def analyze_batch(graphs: list[Data]) -> dict:
     num_invalid = sum(1 for r in results if not r["valid"] and not r["decode_failure"])
     num_decode_failures = sum(1 for r in results if r["decode_failure"])
 
-    # Aggregate violation counts per role
+    # Aggregate violation counts per role (only from invalid molecules)
     role_counts = {
         "ring_interior": 0,
         "ring_boundary": 0,
@@ -275,8 +322,18 @@ def analyze_batch(graphs: list[Data]) -> dict:
     # Per atom-type breakdown
     atom_type_counts = {}
 
+    # Count invalid molecules with vs without valence violations
+    num_invalid_with_valence = 0
+    num_invalid_other = 0
+
     total_violations = 0
     for r in results:
+        if not r["valid"] and not r["decode_failure"]:
+            if len(r["violations"]) > 0:
+                num_invalid_with_valence += 1
+            else:
+                num_invalid_other += 1
+
         for v in r["violations"]:
             role_counts[v["role"]] += 1
             total_violations += 1
@@ -301,6 +358,8 @@ def analyze_batch(graphs: list[Data]) -> dict:
         "total": total,
         "num_valid": num_valid,
         "num_invalid": num_invalid,
+        "num_invalid_with_valence": num_invalid_with_valence,
+        "num_invalid_other": num_invalid_other,
         "num_decode_failures": num_decode_failures,
         "validity_rate": num_valid / total if total > 0 else 0.0,
         "total_violations": total_violations,
