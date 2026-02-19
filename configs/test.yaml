@@ -23,7 +23,7 @@ data:
   num_workers: 0
   include_hydrogens: false
   data_root: data
-  # Load train/test SMILES from precomputed .txt (run scripts/export_moses_smiles.py once first)
+  # Load from single precomputed file (run scripts/export_moses_smiles.py once → data/moses_smiles/moses_smiles.txt)
   use_precomputed_smiles: false
   precomputed_smiles_dir: data/moses_smiles
 

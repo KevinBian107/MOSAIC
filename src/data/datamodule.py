@@ -450,16 +450,17 @@ class MolecularDataModule(pl.LightningDataModule):
                 )
 
         if stage == "test" or stage is None:
-            # Option: load train/test SMILES from precomputed .txt files (no CSV read, no graph conversion)
+            # Option: load train/test SMILES from precomputed single file (no CSV read, no graph conversion)
             if stage == "test" and self.use_precomputed_smiles and self.precomputed_smiles_dir is not None:
-                train_path = self.precomputed_smiles_dir / "train_smiles.txt"
-                test_path = self.precomputed_smiles_dir / "test_smiles.txt"
-                if train_path.exists() and test_path.exists():
-                    log.info(f"✓ Loading precomputed SMILES from {self.precomputed_smiles_dir}")
-                    with open(train_path) as f:
-                        full_train = [line.strip() for line in f if line.strip()]
-                    with open(test_path) as f:
-                        full_test = [line.strip() for line in f if line.strip()]
+                single_path = self.precomputed_smiles_dir / "moses_smiles.txt"
+                if single_path.exists():
+                    log.info(f"✓ Loading precomputed SMILES from {single_path}")
+                    with open(single_path) as f:
+                        first_line = f.readline().strip()
+                        train_count = int(first_line)
+                        all_smiles = [line.strip() for line in f if line.strip()]
+                    full_train = all_smiles[:train_count]
+                    full_test = all_smiles[train_count:]
                     # Sample with seed to match load_moses_dataset(num_train, seed) behavior
                     import random
                     n_train = self.num_train if self.num_train is not None else len(full_train)
@@ -474,12 +475,10 @@ class MolecularDataModule(pl.LightningDataModule):
                     self.test_smiles = [full_test[i] for i in test_idx[:n_test]]
                     self.test_dataset = SmilesOnlyDataset(self.test_smiles)
                     log.info(f"  train_smiles: {len(self.train_smiles)}, test_smiles: {len(self.test_smiles)}")
-                    # Skip MolecularDataset.from_moses below
-                    return  # _setup_moses done for test; setup() will still run tokenizer.set_num_nodes(0) etc.
+                    return
                 else:
                     log.warning(
-                        f"Precomputed SMILES not found in {self.precomputed_smiles_dir}, "
-                        "falling back to loading from CSV"
+                        f"Precomputed SMILES not found: {single_path}, falling back to loading from CSV"
                     )
 
             # Load train SMILES for metrics even in test mode
