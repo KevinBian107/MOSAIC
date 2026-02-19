@@ -187,11 +187,6 @@ def main():
         "normalize_by_motif_size": False,
         "undirected": True,
     }
-    if args.coarsening_strategy == "spectral":
-        # Include spectral parameters in cache hash so precompute matches training config
-        tokenizer_config["spectral_n_init"] = args.spectral_n_init
-        tokenizer_config["spectral_k_min_factor"] = args.spectral_k_min_factor
-        tokenizer_config["spectral_k_max_factor"] = args.spectral_k_max_factor
     # Build common tokenizer kwargs
     tokenizer_kwargs = dict(
         max_length=-1,
@@ -204,13 +199,18 @@ def main():
         seed=args.seed,
     )
     if args.coarsening_strategy == "spectral":
-        # Only apply overrides when provided
-        if args.spectral_n_init is not None:
-            tokenizer_kwargs["n_init"] = args.spectral_n_init
-        if args.spectral_k_min_factor is not None:
-            tokenizer_kwargs["k_min_factor"] = args.spectral_k_min_factor
-        if args.spectral_k_max_factor is not None:
-            tokenizer_kwargs["k_max_factor"] = args.spectral_k_max_factor
+        # Use provided args or tokenizer defaults (10, 0.7, 1.3)
+        n_init = args.spectral_n_init if args.spectral_n_init is not None else 10
+        k_min_factor = args.spectral_k_min_factor if args.spectral_k_min_factor is not None else 0.7
+        k_max_factor = args.spectral_k_max_factor if args.spectral_k_max_factor is not None else 1.3
+        tokenizer_kwargs["n_init"] = n_init
+        tokenizer_kwargs["k_min_factor"] = k_min_factor
+        tokenizer_kwargs["k_max_factor"] = k_max_factor
+        # Include spectral parameters in cache hash so precompute matches training config
+        # Use same key names as datamodule (without "spectral_" prefix)
+        tokenizer_config["n_init"] = n_init
+        tokenizer_config["k_min_factor"] = k_min_factor
+        tokenizer_config["k_max_factor"] = k_max_factor
     # Initialize tokenizer
     if args.tokenizer == "hsent":
         tokenizer = HSENTTokenizer(**tokenizer_kwargs)
