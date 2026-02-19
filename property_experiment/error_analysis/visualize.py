@@ -10,8 +10,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-# Color scheme: SC=red tones, HAC=orange tones, HDTC=blue
+# Color scheme: SENT=green, SC=red tones, HAC=orange tones, HDTC=blue
 MODEL_COLORS = {
+    "SENT": "#27ae60",
     "H-SENT SC": "#c0392b",
     "HDT SC": "#e74c3c",
     "H-SENT HAC": "#e67e22",
