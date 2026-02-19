@@ -1,0 +1,33 @@
+seed: 42
+
+models:
+  - name: "H-SENT SC"
+    checkpoint_path: outputs/benchmark_coconut/coconut_hsent_sc_20260216-102500/last.ckpt
+    tokenizer_type: hsent
+    coarsening_strategy: spectral
+  - name: "H-SENT HAC"
+    checkpoint_path: outputs/benchmark_coconut/coconut_hsent_hac_20260217-011628/last.ckpt
+    tokenizer_type: hsent
+    coarsening_strategy: hac
+  - name: "HDT SC"
+    checkpoint_path: outputs/benchmark_coconut/coconut_hdt_sc_20260217-092827/last.ckpt
+    tokenizer_type: hdt
+    coarsening_strategy: spectral
+  - name: "HDT HAC"
+    checkpoint_path: outputs/benchmark_coconut/coconut_hdt_hac_20260217-212653/last.ckpt
+    tokenizer_type: hdt
+    coarsening_strategy: hac
+  - name: "HDTC"
+    checkpoint_path: outputs/benchmark_coconut/coconut_hdtc_20260209-170216/last.ckpt
+    tokenizer_type: hdtc
+    coarsening_strategy: mc
+
+generation:
+  num_samples: 500
+  batch_size: 32
+  top_k: 10
+  temperature: 1.0
+  max_length: 2048
+
+output:
+  dir: outputs/property_experiment/error_analysis

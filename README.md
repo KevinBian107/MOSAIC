@@ -159,6 +159,7 @@ MOSAIC/
 ├── configs/               # Hydra configuration
 ├── scripts/               # Training, evaluation, and visualization scripts
 ├── bash_scripts/          # Batch benchmark automation scripts
+├── property_experiment/   # Post-hoc analysis experiments
 ├── tests/                 # Test suite
 └── docs/                  # Documentation
 ```
@@ -177,6 +178,7 @@ See the [docs/](docs/) directory for:
 - [Evaluation Metrics](docs/metric.md)
 - [Realistic Generation](docs/realistic.md)
 - [Visualize Tokenization](docs/visualization.md)
+- [Property Experiments](docs/property_experiment.md)
 
 ## Acknowledgement
 
