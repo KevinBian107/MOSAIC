@@ -280,7 +280,13 @@ def load_moses_dataset(
             precomputed_smiles_dir = "data/moses_smiles"
         precomputed_file = os.path.join(precomputed_smiles_dir, "moses_smiles.txt")
         
-        if os.path.exists(precomputed_file):
+        # Resolve to absolute path for better error messages
+        precomputed_file_abs = os.path.abspath(precomputed_file)
+        
+        if os.path.exists(precomputed_file_abs):
+            import logging
+            log = logging.getLogger(__name__)
+            log.info(f"Loading MOSES from precomputed SMILES file: {precomputed_file_abs}")
             with open(precomputed_file, "r") as f:
                 first_line = f.readline().strip()
                 train_count = int(first_line)
@@ -303,7 +309,17 @@ def load_moses_dataset(
                     # We'll use sequential by default since preprocess_chunk needs sequential access
                     smiles_list = smiles_list[:max_molecules]
                 
+                import logging
+                log = logging.getLogger(__name__)
+                log.info(f"Loaded {len(smiles_list)} SMILES from precomputed file (split={split})")
                 return smiles_list
+        else:
+            import logging
+            log = logging.getLogger(__name__)
+            log.warning(
+                f"Precomputed SMILES file not found at {precomputed_file_abs}, "
+                f"falling back to CSV loading"
+            )
 
     # Workaround: Read directly from CSV files to avoid rdkit.six import error
     import pandas as pd

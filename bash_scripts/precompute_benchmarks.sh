@@ -291,11 +291,19 @@ if ok:
         # Add precomputed SMILES flag if file exists or explicitly requested
         local precomputed_smiles_args=""
         if [ "$dataset" = "moses" ]; then
-            local precomputed_file="$PRECOMPUTED_SMILES_DIR/moses_smiles.txt"
-            if [ "$USE_PRECOMPUTED_SMILES" = true ] || [ -f "$precomputed_file" ]; then
-                precomputed_smiles_args="--use-precomputed-smiles --precomputed-smiles-dir $PRECOMPUTED_SMILES_DIR"
-                if [ -f "$precomputed_file" ]; then
-                    echo "  Using precomputed SMILES file: $precomputed_file"
+            # Use relative path from PROJECT_ROOT for Python script (screen sessions cd there)
+            local precomputed_smiles_dir_rel="data/moses_smiles"
+            # Resolve absolute path for checking
+            local precomputed_file_abs="$PROJECT_ROOT/$precomputed_smiles_dir_rel/moses_smiles.txt"
+            
+            # Always use precomputed if flag is set, or if file exists
+            if [ "$USE_PRECOMPUTED_SMILES" = true ] || [ -f "$precomputed_file_abs" ]; then
+                precomputed_smiles_args="--use-precomputed-smiles --precomputed-smiles-dir $precomputed_smiles_dir_rel"
+                if [ -f "$precomputed_file_abs" ]; then
+                    echo "  ✓ Using precomputed SMILES file: $precomputed_file_abs"
+                elif [ "$USE_PRECOMPUTED_SMILES" = true ]; then
+                    echo "  ⚠ WARNING: Precomputed SMILES file not found at $precomputed_file_abs"
+                    echo "  Flag was set, will attempt to use anyway (Python will fall back to CSV if not found)"
                 fi
             fi
         fi
@@ -448,7 +456,13 @@ if ok:
                 if [ "$DRY_RUN" = true ]; then
                     echo "  [DRY RUN] screen -dmS $screen_name: $cmd"
                 else
+<<<<<<< HEAD
                     /usr/bin/screen -dmS "$screen_name" bash -c "
+=======
+                    echo "  Starting screen session: $screen_name"
+                    echo "  Command: $cmd"
+                    screen -dmS "$screen_name" bash -c "
+>>>>>>> 3d5044a (fix SMILES loading)
                         cd '$PROJECT_ROOT'
                         source \"\$(conda info --base)/etc/profile.d/conda.sh\"
                         conda activate mosaic
