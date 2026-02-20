@@ -49,6 +49,10 @@ SPECTRAL_K_MAX_FACTOR=1.1
 # Small dataset threshold — below this, run directly (no screen sessions)
 SMALL_DATASET_THRESHOLD=10000
 
+# Precomputed SMILES file (faster than CSV)
+USE_PRECOMPUTED_SMILES=false
+PRECOMPUTED_SMILES_DIR="$PROJECT_ROOT/data/moses_smiles"
+
 # Parse arguments
 for arg in "$@"; do
     case $arg in
@@ -91,6 +95,12 @@ for arg in "$@"; do
         --output-dir=*)
             OUTPUT_DIR="${arg#*=}"
             ;;
+        --use-precomputed-smiles)
+            USE_PRECOMPUTED_SMILES=true
+            ;;
+        --precomputed-smiles-dir=*)
+            PRECOMPUTED_SMILES_DIR="${arg#*=}"
+            ;;
         --help|-h)
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -110,6 +120,8 @@ for arg in "$@"; do
             echo "  --spectral-k-min-factor=F  Spectral k_min_factor (default: ${SPECTRAL_K_MIN_FACTOR})"
             echo "  --spectral-k-max-factor=F  Spectral k_max_factor (default: ${SPECTRAL_K_MAX_FACTOR})"
             echo "  --output-dir=PATH    Cache directory (default: data/cache)"
+            echo "  --use-precomputed-smiles  Use precomputed moses_smiles.txt (faster than CSV)"
+            echo "  --precomputed-smiles-dir=PATH  Directory with moses_smiles.txt (default: data/moses_smiles)"
             echo ""
             echo "Datasets:"
             echo "  MOSES:   ${MOSES_SAMPLES} training samples (parallel screen sessions)"
@@ -200,7 +212,9 @@ run_dataset() {
     read -ra combos <<< "$(build_combos)"
 
     echo "========================================"
-    echo "Precompute Cache: ${dataset^^}"
+    # Uppercase dataset name in a POSIX-compatible way
+    DATASET_UPPER=$(printf '%s' "$dataset" | tr '[:lower:]' '[:upper:]')
+    echo "Precompute Cache: $DATASET_UPPER"
     echo "========================================"
     echo ""
     echo "Settings:"
@@ -273,6 +287,18 @@ if ok:
             dataset_args="$dataset_args --data-file data/coconut_complex.smi"
             dataset_args="$dataset_args --min-atoms 20 --max-atoms 100 --min-rings 3"
         fi
+        
+        # Add precomputed SMILES flag if file exists or explicitly requested
+        local precomputed_smiles_args=""
+        if [ "$dataset" = "moses" ]; then
+            local precomputed_file="$PRECOMPUTED_SMILES_DIR/moses_smiles.txt"
+            if [ "$USE_PRECOMPUTED_SMILES" = true ] || [ -f "$precomputed_file" ]; then
+                precomputed_smiles_args="--use-precomputed-smiles --precomputed-smiles-dir $PRECOMPUTED_SMILES_DIR"
+                if [ -f "$precomputed_file" ]; then
+                    echo "  Using precomputed SMILES file: $precomputed_file"
+                fi
+            fi
+        fi
 
         if [ $total_samples -le $SMALL_DATASET_THRESHOLD ]; then
             # Small dataset: run directly (no screen sessions needed)
@@ -293,6 +319,7 @@ if ok:
                 cmd="$cmd $dataset_args"
                 cmd="$cmd --coarsening-strategy $COARSENING_FULL"
                 cmd="$cmd $SPECTRAL_ARGS"
+                cmd="$cmd $precomputed_smiles_args"
                 cmd="$cmd --start 0"
                 cmd="$cmd --end $total_samples"
                 cmd="$cmd --output $output_file"
@@ -341,6 +368,7 @@ if ok:
                     val_cmd="$val_cmd $dataset_args"
                     val_cmd="$val_cmd --coarsening-strategy $COARSENING_FULL"
                     val_cmd="$val_cmd $SPECTRAL_ARGS"
+                    val_cmd="$val_cmd $precomputed_smiles_args"
                     val_cmd="$val_cmd --start $val_start"
                     val_cmd="$val_cmd --end $val_end"
                     val_cmd="$val_cmd --output $val_output_file"
@@ -412,6 +440,7 @@ if ok:
                 cmd="$cmd $dataset_args"
                 cmd="$cmd --coarsening-strategy $COARSENING_FULL"
                 cmd="$cmd $SPECTRAL_ARGS"
+                cmd="$cmd $precomputed_smiles_args"
                 cmd="$cmd --start $start"
                 cmd="$cmd --end $end"
                 cmd="$cmd --output $output_file"
@@ -458,6 +487,7 @@ if ok:
                     val_cmd="$val_cmd $dataset_args"
                     val_cmd="$val_cmd --coarsening-strategy $COARSENING_FULL"
                     val_cmd="$val_cmd $SPECTRAL_ARGS"
+                    val_cmd="$val_cmd $precomputed_smiles_args"
                     val_cmd="$val_cmd --start $val_start"
                     val_cmd="$val_cmd --end $val_end"
                     val_cmd="$val_cmd --output $val_output_file"

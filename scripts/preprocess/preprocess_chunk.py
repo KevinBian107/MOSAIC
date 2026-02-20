@@ -108,6 +108,17 @@ def main():
         default=None,
         help="Spectral k_max_factor (spectral only). If omitted, tokenizer default is used.",
     )
+    parser.add_argument(
+        "--use-precomputed-smiles",
+        action="store_true",
+        help="Load SMILES from precomputed moses_smiles.txt file (faster than CSV)",
+    )
+    parser.add_argument(
+        "--precomputed-smiles-dir",
+        type=str,
+        default="data/moses_smiles",
+        help="Directory containing moses_smiles.txt (default: data/moses_smiles)",
+    )
     args = parser.parse_args()
 
     chunk_size = args.end - args.start
@@ -121,7 +132,11 @@ def main():
         # Load SMILES once for the prefix we care about, then slice.
         # This avoids converting all [0:end) molecules to graphs for every chunk.
         smiles_all = load_moses_dataset(
-            split="train", max_molecules=args.end, seed=args.seed
+            split="train",
+            max_molecules=args.end,
+            seed=args.seed,
+            use_precomputed_smiles=args.use_precomputed_smiles,
+            precomputed_smiles_dir=args.precomputed_smiles_dir,
         )
         if len(smiles_all) < args.end:
             log.warning(

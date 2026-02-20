@@ -136,6 +136,8 @@ def preprocess_split(
     min_rings: int = 0,
     num_train: int = 0,
     num_val: int = 0,
+    use_precomputed_smiles: bool = False,
+    precomputed_smiles_dir: str | None = None,
 ) -> Path:
     """Preprocess and cache a single dataset split.
 
@@ -180,6 +182,8 @@ def preprocess_split(
             max_molecules=num_samples,
             include_hydrogens=include_hydrogens,
             labeled=labeled,
+            use_precomputed_smiles=use_precomputed_smiles,
+            precomputed_smiles_dir=precomputed_smiles_dir,
         )
     elif dataset_name == "qm9":
         mol_dataset = MolecularDataset.from_qm9(
@@ -447,6 +451,8 @@ def main(cfg: DictConfig) -> None:
             tokenizer_type=tokenizer_type,
             tokenizer_config=tokenizer_config,
             include_hydrogens=cfg.data.get("include_hydrogens", False),
+            use_precomputed_smiles=cfg.data.get("use_precomputed_smiles", False),
+            precomputed_smiles_dir=cfg.data.get("precomputed_smiles_dir", None),
             **coconut_kwargs,
         )
 

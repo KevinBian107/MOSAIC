@@ -18,6 +18,7 @@ import transformers
 from torch import nn
 from torch_geometric.data import Data
 from tqdm import tqdm
+import math
 
 from src.tokenizers.base import Tokenizer
 
@@ -475,7 +476,7 @@ class GraphGeneratorModule(pl.LightningModule):
                 1, self.max_steps - self.warmup_steps
             )
             progress = min(progress, 1.0)
-            return 0.5 * (1.0 + __import__("math").cos(__import__("math").pi * progress))
+            return 0.5 * (1.0 + math.cos(math.pi * progress))
 
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
