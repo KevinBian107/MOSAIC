@@ -456,10 +456,9 @@ if ok:
                 if [ "$DRY_RUN" = true ]; then
                     echo "  [DRY RUN] screen -dmS $screen_name: $cmd"
                 else
-                    /usr/bin/screen -dmS "$screen_name" bash -c "
                     echo "  Starting screen session: $screen_name"
                     echo "  Command: $cmd"
-                    screen -dmS "$screen_name" bash -c "
+                    /usr/bin/screen -dmS "$screen_name" bash -c "
                         cd '$PROJECT_ROOT'
                         source \"\$(conda info --base)/etc/profile.d/conda.sh\"
                         conda activate mosaic
