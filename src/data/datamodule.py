@@ -414,6 +414,8 @@ class MolecularDataModule(pl.LightningDataModule):
                     max_molecules=self.num_train,
                     include_hydrogens=self.include_hydrogens,
                     labeled=labeled,
+                    use_precomputed_smiles=self.use_precomputed_smiles,
+                    precomputed_smiles_dir=str(self.precomputed_smiles_dir) if self.precomputed_smiles_dir else None,
                 )
                 self.train_smiles = train_mol.smiles_list
                 self.max_num_nodes = max(self.max_num_nodes, train_mol.max_num_nodes)
@@ -442,6 +444,8 @@ class MolecularDataModule(pl.LightningDataModule):
                     include_hydrogens=self.include_hydrogens,
                     labeled=labeled,
                     seed=137,  # Different seed from test (42) to avoid overlap
+                    use_precomputed_smiles=self.use_precomputed_smiles,
+                    precomputed_smiles_dir=str(self.precomputed_smiles_dir) if self.precomputed_smiles_dir else None,
                 )
                 self.val_smiles = val_mol.smiles_list
                 self.max_num_nodes = max(self.max_num_nodes, val_mol.max_num_nodes)
@@ -496,6 +500,8 @@ class MolecularDataModule(pl.LightningDataModule):
                         max_molecules=self.num_train,
                         include_hydrogens=self.include_hydrogens,
                         labeled=labeled,
+                        use_precomputed_smiles=self.use_precomputed_smiles,
+                        precomputed_smiles_dir=str(self.precomputed_smiles_dir) if self.precomputed_smiles_dir else None,
                     )
                     self.train_smiles = train_mol.smiles_list
                     self.max_num_nodes = max(
@@ -517,6 +523,8 @@ class MolecularDataModule(pl.LightningDataModule):
                     max_molecules=self.num_test,
                     include_hydrogens=self.include_hydrogens,
                     labeled=labeled,
+                    use_precomputed_smiles=self.use_precomputed_smiles,
+                    precomputed_smiles_dir=str(self.precomputed_smiles_dir) if self.precomputed_smiles_dir else None,
                 )
                 self.test_smiles = test_mol.smiles_list
                 self.max_num_nodes = max(self.max_num_nodes, test_mol.max_num_nodes)

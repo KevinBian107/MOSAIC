@@ -2,7 +2,9 @@
 """Precompute reference SMILES -> graphs for PGD and save to disk.
 
 Used by eval_benchmarks_auto.sh so that each checkpoint eval can load the same
-reference graphs instead of reconverting SMILES every time.
+reference graphs instead of reconverting SMILES every time. Set
+metrics.reference_graphs_path to the printed path in test.yaml or pass it to test.py.
+See docs/commands_reference.md.
 
 Usage:
     python scripts/precompute_reference_graphs.py experiment=moses reference_graphs.output_dir=outputs/eval_run
@@ -75,6 +77,8 @@ def main_with_overrides(overrides: list[str]) -> str:
         min_atoms=cfg.data.get("min_atoms", 20),
         max_atoms=cfg.data.get("max_atoms", 100),
         min_rings=cfg.data.get("min_rings", 3),
+        use_precomputed_smiles=cfg.data.get("use_precomputed_smiles", False),
+        precomputed_smiles_dir=cfg.data.get("precomputed_smiles_dir", None),
     )
     datamodule.setup(stage="test")
 

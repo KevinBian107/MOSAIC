@@ -23,6 +23,9 @@
 #
 # Checkpoints are looked for under BENCHMARK_DIR (default: outputs/benchmark). Each directory
 # under BENCHMARK_DIR is checked for last.ckpt or best.ckpt depending on --last/--best.
+#
+# Optional: --use-precomputed-smiles uses data/moses_smiles/moses_smiles.txt and precomputes
+# PGD reference graphs once for all runs. See docs/commands_reference.md and bash_scripts/README.md.
 
 set -e
 

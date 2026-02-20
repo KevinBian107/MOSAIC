@@ -16,6 +16,8 @@
 #
 # Output:
 #   data/cache/{dataset}_{split}_{tokenizer}_{num_samples}_{hash}.pt
+#
+# See docs/commands_reference.md and bash_scripts/README.md for more examples.
 
 set -e  # Exit on error
 
@@ -267,9 +269,9 @@ cfg = d.get('tokenizer_config', {})
 ok = (cfg.get('coarsening_strategy') == '$COARSENING_FULL')
 if ok and '$COARSENING_FULL' == 'spectral':
     ok = (
-        str(cfg.get('spectral_n_init')) == str($SPECTRAL_N_INIT)
-        and str(cfg.get('spectral_k_min_factor')) == str($SPECTRAL_K_MIN_FACTOR)
-        and str(cfg.get('spectral_k_max_factor')) == str($SPECTRAL_K_MAX_FACTOR)
+        str(cfg.get('n_init')) == str($SPECTRAL_N_INIT)
+        and str(cfg.get('k_min_factor')) == str($SPECTRAL_K_MIN_FACTOR)
+        and str(cfg.get('k_max_factor')) == str($SPECTRAL_K_MAX_FACTOR)
     )
 if ok:
     print('$f')
@@ -457,8 +459,13 @@ if ok:
                     echo "  [DRY RUN] screen -dmS $screen_name: $cmd"
                 else
                     echo "  Starting screen session: $screen_name"
-                    echo "  Command: $cmd"
-                    /usr/bin/screen -dmS "$screen_name" bash -c "
+                    echo "  Full command: $cmd"
+                    if [ -n "$precomputed_smiles_args" ]; then
+                        echo "  ✓ Precomputed SMILES enabled"
+                    else
+                        echo "  ⚠ Precomputed SMILES NOT enabled for this chunk"
+                    fi
+                    screen -dmS "$screen_name" bash -c "
                         cd '$PROJECT_ROOT'
                         source \"\$(conda info --base)/etc/profile.d/conda.sh\"
                         conda activate mosaic

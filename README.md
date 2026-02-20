@@ -105,14 +105,16 @@ pytest tests/ -v
 
 ### Batch Benchmark Scripts
 
-The `bash_scripts/` directory provides end-to-end automation for the full benchmark pipeline. Each script supports `--dry-run`, `--force`, and `--help` flags. See [bash_scripts/README.md](bash_scripts/README.md) for detailed options.
+The `bash_scripts/` directory provides end-to-end automation for the full benchmark pipeline. Each script supports `--dry-run`, `--force`, and `--help` flags. See [bash_scripts/README.md](bash_scripts/README.md) for detailed options. For a full command cheat sheet (GCP, DSMLP, setup, precompute, training, eval), see [docs/commands_reference.md](docs/commands_reference.md).
 
 ```
 0. precompute_benchmarks.sh       -> Precompute tokenized cache (optional, speeds up training)
+   stop_precompute_benchmarks.sh  -> Stop precompute screen sessions
 1. train_benchmarks.sh            -> Pretrain all tokenizer variants on MOSES (or COCONUT)
 2. eval_benchmarks.sh             -> Evaluate pretrained models (validity, FCD, motif rate, etc.)
+   eval_benchmarks_auto.sh        -> Evaluate checkpoints from a mapping file (with caching, precomputed SMILES/reference graphs)
 3. finetune_benchmarks.sh         -> Fine-tune on COCONUT (transfer learning)
-4. eval_finetune_benchmarks.sh    -> Evaluate fine-tuned models
+4. eval_finetune_benchmarks.sh   -> Evaluate fine-tuned models
 ```
 
 ```bash
@@ -120,6 +122,8 @@ The `bash_scripts/` directory provides end-to-end automation for the full benchm
 ./bash_scripts/precompute_benchmarks.sh              # MOSES (1M samples, parallel screen sessions)
 ./bash_scripts/precompute_benchmarks.sh --coconut    # COCONUT (5K samples, runs directly)
 ./bash_scripts/precompute_benchmarks.sh --all        # Both datasets
+./bash_scripts/precompute_benchmarks.sh --use-precomputed-smiles --tokenizer=hsent --coarsening=sc  # Use precomputed SMILES (run export_moses_smiles.py first)
+./bash_scripts/stop_precompute_benchmarks.sh --tokenizer=hsent --coarsening=sc   # Cancel running precompute jobs
 
 # Step 1: Train all tokenizer variants from scratch
 ./bash_scripts/train_benchmarks.sh                   # MOSES (default, 500K steps)
@@ -127,8 +131,9 @@ The `bash_scripts/` directory provides end-to-end automation for the full benchm
 ./bash_scripts/train_benchmarks.sh --skip-sc-hac     # Only MC coarsening variants
 
 # Step 2: Evaluate pretrained models
-./bash_scripts/eval_benchmarks.sh                    # MOSES benchmarks
+./bash_scripts/eval_benchmarks.sh                    # MOSES benchmarks (auto-discovers checkpoints)
 ./bash_scripts/eval_benchmarks.sh --coconut          # COCONUT benchmarks
+./bash_scripts/eval_benchmarks_auto.sh MAPPING.txt outputs/eval --use-precomputed-smiles   # Custom list + caching + precomputed SMILES
 
 # Step 3: Fine-tune pretrained models on COCONUT
 ./bash_scripts/finetune_benchmarks.sh                # Full fine-tuning (5K samples)
@@ -161,8 +166,10 @@ MOSAIC/
 ## Documentation
 
 See the [docs/](docs/) directory for:
+- [Command Reference](docs/commands_reference.md) — GCP, DSMLP, setup, precompute, training, and eval cheat sheet
 - [Codebase Guide](docs/codebase.md)
 - [Server Setup Guide](docs/server_setup.md)
+- [GCP Setup](docs/setup_gcp.md)
 - [Training Setup Guide](docs/setup_training.md)
 - [Contributing Guide](docs/contributing.md)
 - [H-graph Construction](docs/hgraph.md)
