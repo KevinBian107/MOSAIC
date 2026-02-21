@@ -42,7 +42,7 @@ BENCHMARK_DIR="$PROJECT_ROOT/outputs/benchmark"
 RECOMPUTE_DIRS=""
 # If true, only run test.py with core metrics only (no realistic_gen, no FCD/PGD/motif etc.)
 CORE_ONLY=false
-# If true, pass data.use_precomputed_smiles=true (load from data/moses_smiles/moses_smiles.txt; run export_moses_smiles.py once first)
+# If true, pass data.use_precomputed_smiles=true (load from data/moses_smiles/moses_smiles.txt; run scripts/preprocess/export_moses_smiles.py once first)
 USE_PRECOMPUTED_SMILES=false
 
 usage() {
@@ -61,7 +61,7 @@ usage() {
     echo "  --test-only    Only run test.py (skip realistic_gen.py)"
     echo "  --gen-only     Only run realistic_gen.py (skip test.py)"
     echo "  --core-only       Only run core metrics: validity, uniqueness, novelty (no FCD, PGD, motif, realistic_gen)"
-    echo "  --use-precomputed-smiles   Load train/test SMILES from data/moses_smiles/moses_smiles.txt (run export_moses_smiles.py once first)"
+    echo "  --use-precomputed-smiles   Load train/test SMILES from data/moses_smiles/moses_smiles.txt (run scripts/preprocess/export_moses_smiles.py once first)"
     echo "  --recompute DIR[,DIR2,...]   Force re-run test and/or gen for these checkpoint dirs (still included in table)"
     echo "  -h, --help     Show this help"
     echo ""
@@ -305,7 +305,7 @@ if [ "$RUN_TEST" = true ]; then
     echo "========================================"
     echo "Precomputing reference graphs for PGD (shared across all checkpoints)..."
     echo "========================================"
-    REF_GRAPHS_PATH=$(python scripts/precompute_reference_graphs.py experiment="$DATASET" reference_graphs.output_dir="$OUTPUT_PATH" 2>/dev/null) || true
+    REF_GRAPHS_PATH=$(python scripts/preprocess/precompute_reference_graphs.py experiment="$DATASET" reference_graphs.output_dir="$OUTPUT_PATH" 2>/dev/null) || true
     if [ -n "$REF_GRAPHS_PATH" ] && [ -f "$REF_GRAPHS_PATH" ]; then
         echo "Reference graphs: $REF_GRAPHS_PATH"
     else
@@ -386,7 +386,7 @@ LABELS_CSV=$(IFS=,; echo "${RUN_LABELS[*]}")
 echo "========================================"
 echo "Generating comparison table..."
 echo "========================================"
-python scripts/compare_results.py \
+python scripts/comparison/compare_results.py \
     --test-dir "$TEST_OUTPUT_DIR" \
     --realistic-gen-dir "$REALISTIC_GEN_OUTPUT_DIR" \
     --output "$COMPARISON_OUTPUT" \

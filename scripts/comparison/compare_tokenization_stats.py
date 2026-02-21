@@ -5,9 +5,9 @@ Runs all tokenization variants (SENT, HSENT, HDT, HDTC with various coarsenings)
 on sample molecules from MOSES and reports statistics.
 
 Usage:
-    python scripts/benchmark_tokenization_stats.py
-    python scripts/benchmark_tokenization_stats.py --num-samples 20
-    python scripts/benchmark_tokenization_stats.py --output tokenization_stats.json
+    python scripts/comparison/compare_tokenization_stats.py
+    python scripts/comparison/compare_tokenization_stats.py --num-samples 20
+    python scripts/comparison/compare_tokenization_stats.py --output tokenization_stats.json
 """
 
 from __future__ import annotations

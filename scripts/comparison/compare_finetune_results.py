@@ -6,16 +6,16 @@ a comparison table showing transfer learning performance across tokenizers.
 
 Usage:
     # After running finetune_benchmarks.sh, compare the results:
-    python scripts/compare_finetune_results.py
+    python scripts/comparison/compare_finetune_results.py
 
     # Compare from a specific directory:
-    python scripts/compare_finetune_results.py --finetune-dir outputs/finetune
+    python scripts/comparison/compare_finetune_results.py --finetune-dir outputs/finetune
 
     # Filter by pattern:
-    python scripts/compare_finetune_results.py --filter "hdtc"
+    python scripts/comparison/compare_finetune_results.py --filter "hdtc"
 
     # Save as CSV:
-    python scripts/compare_finetune_results.py --csv results.csv
+    python scripts/comparison/compare_finetune_results.py --csv results.csv
 """
 
 import argparse
@@ -530,10 +530,10 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python scripts/compare_finetune_results.py
-  python scripts/compare_finetune_results.py --finetune-dir outputs/finetune
-  python scripts/compare_finetune_results.py --filter "hdtc"
-  python scripts/compare_finetune_results.py --csv results.csv
+  python scripts/comparison/compare_finetune_results.py
+  python scripts/comparison/compare_finetune_results.py --finetune-dir outputs/finetune
+  python scripts/comparison/compare_finetune_results.py --filter "hdtc"
+  python scripts/comparison/compare_finetune_results.py --csv results.csv
         """,
     )
     parser.add_argument(

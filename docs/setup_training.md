@@ -57,7 +57,7 @@ cd ~/MOSAIC
 To avoid re-reading CSV and converting SMILES to graphs on every run, export MOSES once to a single file:
 
 ```bash
-python scripts/export_moses_smiles.py
+python scripts/preprocess/export_moses_smiles.py
 # Creates data/moses_smiles/moses_smiles.txt
 ```
 
@@ -68,7 +68,7 @@ Then use `data.use_precomputed_smiles=true` in training/test, or `--use-precompu
 When evaluating many checkpoints, you can precompute reference SMILES→graphs once and reuse:
 
 ```bash
-python scripts/precompute_reference_graphs.py experiment=moses reference_graphs.output_dir=outputs/eval_run
+python scripts/preprocess/precompute_reference_graphs.py experiment=moses reference_graphs.output_dir=outputs/eval_run
 # Then pass metrics.reference_graphs_path=<printed path> to test.py, or use eval_benchmarks_auto.sh (it does this automatically).
 ```
 
@@ -96,7 +96,7 @@ python scripts/precompute_reference_graphs.py experiment=moses reference_graphs.
 | `data.num_val` | (from experiment) | Validation samples |
 | `data.num_test` | (from experiment) | Test samples |
 | `data.use_cache` | `false` | Use precomputed tokenized cache (run `precompute_benchmarks.sh` or `preprocess_dataset.py` first) |
-| `data.use_precomputed_smiles` | `false` | Load train/test from single SMILES file (run `export_moses_smiles.py` first) |
+| `data.use_precomputed_smiles` | `false` | Load train/test from single SMILES file (run `scripts/preprocess/export_moses_smiles.py` first) |
 | `data.precomputed_smiles_dir` | `data/moses_smiles` | Directory containing `moses_smiles.txt` |
 
 **Note**: Dataset name, data file, and sample counts are set by the experiment config. Use `experiment=moses`, `experiment=qm9`, or `experiment=coconut`.

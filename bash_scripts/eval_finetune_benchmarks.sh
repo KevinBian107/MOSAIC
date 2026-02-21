@@ -212,9 +212,9 @@ echo "========================================"
 
 if [ "$DRY_RUN" = true ]; then
     echo "[DRY RUN] Would execute:"
-    echo "  python scripts/compare_finetune_results.py --finetune-dir $EVAL_OUTPUT_DIR"
+    echo "  python scripts/comparison/compare_finetune_results.py --finetune-dir $EVAL_OUTPUT_DIR"
 else
-    python scripts/compare_finetune_results.py --finetune-dir "$EVAL_OUTPUT_DIR" --output "$FINETUNE_DIR/comparison.png"
+    python scripts/comparison/compare_finetune_results.py --finetune-dir "$EVAL_OUTPUT_DIR" --output "$FINETUNE_DIR/comparison.png"
 fi
 
 echo ""

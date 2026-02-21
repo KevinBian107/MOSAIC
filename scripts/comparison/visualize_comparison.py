@@ -1,14 +1,14 @@
 #!/usr/bin/env python
 """Generate the comparison table image from stored JSON data only.
 
-Use this when you have already run eval_benchmarks_auto.sh (or compare_results.py)
+Use this when you have already run eval_benchmarks_auto.sh (or scripts/comparison/compare_results.py)
 and have a comparison_data.json file. This script only loads the JSON and draws
 the table—no loading of results.json/config.yaml or checkpoint dirs.
 
 Usage:
-    python scripts/visualize_comparison.py outputs/eval_my_run/comparison.json
-    python scripts/visualize_comparison.py outputs/eval_my_run/comparison.json -o comparison_updated.png
-    python scripts/visualize_comparison.py outputs/eval_my_run/comparison.png   # infers .json same base path
+    python scripts/comparison/visualize_comparison.py outputs/eval_my_run/comparison.json
+    python scripts/comparison/visualize_comparison.py outputs/eval_my_run/comparison.json -o comparison_updated.png
+    python scripts/comparison/visualize_comparison.py outputs/eval_my_run/comparison.png   # infers .json same base path
 """
 
 import argparse
@@ -23,7 +23,7 @@ def render_table_from_data(table_data: dict, output_path: Path) -> None:
     """Render the comparison table image from a table_data dict.
 
     Expects table_data to have: title, col_labels, row_labels, cell_data,
-    cell_colors, section_rows (as produced by compare_results.py and saved to JSON).
+    cell_colors, section_rows (as produced by scripts/comparison/compare_results.py and saved to JSON).
     """
     row_labels = table_data["row_labels"]
     col_labels = table_data["col_labels"]

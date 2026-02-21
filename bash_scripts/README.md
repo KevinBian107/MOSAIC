@@ -31,7 +31,7 @@ Only SC (spectral clustering) and HAC (hierarchical agglomerative clustering) be
 3. For COCONUT (5K samples): runs directly in foreground (takes ~4 minutes per combo)
 4. Combines chunks into a single cache file per combo
 5. Cache files are used by training with `data.use_cache=true`
-6. Optionally uses **precomputed SMILES** (`--use-precomputed-smiles`) so chunks read from `data/moses_smiles/moses_smiles.txt` instead of CSV (run `python scripts/export_moses_smiles.py` first)
+6. Optionally uses **precomputed SMILES** (`--use-precomputed-smiles`) so chunks read from `data/moses_smiles/moses_smiles.txt` instead of CSV (run `python scripts/preprocess/export_moses_smiles.py` first)
 
 ### Usage
 
@@ -51,7 +51,7 @@ Only SC (spectral clustering) and HAC (hierarchical agglomerative clustering) be
 # Custom train/val sample counts and chunks
 ./bash_scripts/precompute_benchmarks.sh --tokenizer=hsent --coarsening=sc --train-samples=50000 --val-samples=1000 --chunks=4
 
-# Use precomputed SMILES file (faster; run export_moses_smiles.py first)
+# Use precomputed SMILES file (faster; run scripts/preprocess/export_moses_smiles.py first)
 ./bash_scripts/precompute_benchmarks.sh --use-precomputed-smiles --tokenizer=hsent --coarsening=sc
 
 # Dry run (show commands without executing)
@@ -144,9 +144,9 @@ Checkpoints are looked for under `BENCHMARK_DIR` (default `outputs/benchmark`) a
 ### What it does
 
 1. Reads mapping file and finds each checkpoint under `BENCHMARK_DIR`
-2. Optionally runs `precompute_reference_graphs.py` once and passes the `.pt` path to every `test.py` so PGD reference graphs are not reconverted for each run
+2. Optionally runs `scripts/preprocess/precompute_reference_graphs.py` once and passes the `.pt` path to every `test.py` so PGD reference graphs are not reconverted for each run
 3. For each checkpoint: runs `test.py` (and optionally `realistic_gen.py`) unless results already exist (skip if `results.json` and `generated_smiles.txt` exist)
-4. Runs `compare_results.py` to produce a comparison table image
+4. Runs `scripts/comparison/compare_results.py` to produce a comparison table image
 
 ### Usage
 
@@ -319,7 +319,7 @@ Before running, ensure you have prepared the COCONUT dataset:
 
 ```bash
 # Download and prepare COCONUT data (~191MB download)
-python scripts/prepare_coconut_data.py
+python scripts/preprocess/prepare_coconut_data.py
 ```
 
 This creates `data/coconut_complex.smi` with ~10,000 complex natural products.
@@ -335,7 +335,7 @@ Evaluates all checkpoints in `outputs/benchmark/` (or `outputs/benchmark_coconut
 1. Finds all `last.ckpt` files in the benchmark directory
 2. Runs `scripts/test.py` on each checkpoint (computes validity, uniqueness, novelty, FCD, PGD, etc.)
 3. Runs `scripts/realistic_gen.py` on each checkpoint (computes motif rate, substitution patterns, etc.)
-4. Runs `scripts/compare_results.py` to generate a comparison table PNG
+4. Runs `scripts/comparison/compare_results.py` to generate a comparison table PNG
 
 ### Usage
 
@@ -422,7 +422,7 @@ Evaluates fine-tuned checkpoints and generates a comparison table showing transf
 3. Computes transfer performance metrics (FCD, SNN, fragment/scaffold similarity)
 4. Computes adaptation metrics (vs COCONUT distribution)
 5. Computes retention metrics (vs MOSES distribution)
-6. Generates comparison table using `scripts/compare_finetune_results.py`
+6. Generates comparison table using `scripts/comparison/compare_finetune_results.py`
 
 ### Usage
 

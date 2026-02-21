@@ -90,7 +90,7 @@ python -c "import torch, torch_geometric, torch_scatter, torch_sparse; print('Al
 To avoid re-reading CSV and converting SMILES to graphs on every run, export MOSES to a single file once, then use it for training and evaluation:
 
 ```bash
-python scripts/export_moses_smiles.py
+python scripts/preprocess/export_moses_smiles.py
 # Creates data/moses_smiles/moses_smiles.txt
 ```
 
@@ -400,7 +400,7 @@ Precomputing builds tokenized cache files so training can skip on-the-fly tokeni
 
 ### Precompute with bash script (recommended)
 
-Uses parallel **screen** sessions for large MOSES runs. Optionally use precomputed SMILES so chunks read from one file instead of CSV (run `python scripts/export_moses_smiles.py` first).
+Uses parallel **screen** sessions for large MOSES runs. Optionally use precomputed SMILES so chunks read from one file instead of CSV (run `python scripts/preprocess/export_moses_smiles.py` first).
 
 ```bash
 # H-SENT + spectral, 8 chunks (default)
@@ -422,7 +422,7 @@ bash bash_scripts/precompute_benchmarks.sh --tokenizer=hsent --coarsening=sc --c
   --val-samples=1000 \
   --chunks=4
 
-# Use precomputed SMILES file (faster; run export_moses_smiles.py first)
+# Use precomputed SMILES file (faster; run scripts/preprocess/export_moses_smiles.py first)
 ./bash_scripts/precompute_benchmarks.sh --use-precomputed-smiles --tokenizer=hsent --coarsening=sc --chunks=4
 
 # 1.5M train samples, 4 chunks
@@ -477,7 +477,7 @@ python scripts/test.py \
 Speeds up evaluation when running many checkpoints: convert reference SMILES to graphs once, then pass the `.pt` path to each `test.py` run.
 
 ```bash
-python scripts/precompute_reference_graphs.py experiment=moses reference_graphs.output_dir=outputs/eval_run
+python scripts/preprocess/precompute_reference_graphs.py experiment=moses reference_graphs.output_dir=outputs/eval_run
 # Prints path, e.g. outputs/eval_run/reference_graphs/reference_graphs_moses_test_100.pt
 ```
 
@@ -511,16 +511,16 @@ Checkpoints are looked for under `BENCHMARK_DIR` (default `outputs/benchmark`) a
 
 The script precomputes reference graphs once and passes `metrics.reference_graphs_path` to each `test.py` so all checkpoints share the same PGD reference set.
 
-### compare_results.py
+### scripts/comparison/compare_results.py
 
 Build a comparison table image from test (and optional realistic_gen) outputs:
 
 ```bash
-python scripts/compare_results.py
-python scripts/compare_results.py --filter "moses"
-python scripts/compare_results.py --output comparison.png
-python scripts/compare_results.py --all    # show all runs, not just best per tokenizer+coarsening
-python scripts/compare_results.py --test-only   # exclude realistic gen metrics
+python scripts/comparison/compare_results.py
+python scripts/comparison/compare_results.py --filter "moses"
+python scripts/comparison/compare_results.py --output comparison.png
+python scripts/comparison/compare_results.py --all    # show all runs, not just best per tokenizer+coarsening
+python scripts/comparison/compare_results.py --test-only   # exclude realistic gen metrics
 ```
 
 Table sections include Training Info (e.g. `coarsening_strategy`, `reference_split`, `generation_time`), Core Quality, Distribution Matching, Structural, Motif MMD, and Realistic Generation.
@@ -531,7 +531,7 @@ Table sections include Training Info (e.g. `coarsening_strategy`, `reference_spl
 
 | Override | Effect |
 |----------|--------|
-| `data.use_precomputed_smiles=true` | Load train/test from `data/moses_smiles/moses_smiles.txt` (run `export_moses_smiles.py` first) |
+| `data.use_precomputed_smiles=true` | Load train/test from `data/moses_smiles/moses_smiles.txt` (run `scripts/preprocess/export_moses_smiles.py` first) |
 | `data.use_cache=true` | Use precomputed tokenized cache from `data/cache/` (run `precompute_benchmarks.sh` first) |
 | `metrics.reference_graphs_path=<.pt path>` | Load PGD reference graphs from file instead of converting SMILES each run |
 | `metrics.core_only=true` | Only validity, uniqueness, novelty |

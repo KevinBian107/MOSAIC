@@ -8,11 +8,11 @@ when available, matching by checkpoint path. Table sections include Training Inf
 Matching, Structural, Motif MMD, and Realistic Generation. See docs/commands_reference.md.
 
 Usage:
-    python scripts/compare_results.py
-    python scripts/compare_results.py --filter "moses"
-    python scripts/compare_results.py --output comparison.png
-    python scripts/compare_results.py --all  # Show all runs, not just best per tokenizer+coarsening
-    python scripts/compare_results.py --test-only  # Exclude realistic gen metrics
+    python scripts/comparison/compare_results.py
+    python scripts/comparison/compare_results.py --filter "moses"
+    python scripts/comparison/compare_results.py --output comparison.png
+    python scripts/comparison/compare_results.py --all  # Show all runs, not just best per tokenizer+coarsening
+    python scripts/comparison/compare_results.py --test-only  # Exclude realistic gen metrics
 """
 
 import argparse
@@ -912,12 +912,12 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python scripts/compare_results.py
-  python scripts/compare_results.py --filter "moses"
-  python scripts/compare_results.py --output comparison.png
-  python scripts/compare_results.py --all  # Show all runs, not just best
-  python scripts/compare_results.py --csv results.csv
-  python scripts/compare_results.py --test-only  # Exclude realistic gen metrics
+  python scripts/comparison/compare_results.py
+  python scripts/comparison/compare_results.py --filter "moses"
+  python scripts/comparison/compare_results.py --output comparison.png
+  python scripts/comparison/compare_results.py --all  # Show all runs, not just best
+  python scripts/comparison/compare_results.py --csv results.csv
+  python scripts/comparison/compare_results.py --test-only  # Exclude realistic gen metrics
         """,
     )
     parser.add_argument(
