@@ -33,6 +33,7 @@ DRY_RUN=false
 FORCE=false
 SKIP_SC_HAC=false
 NUM_DEVICES=1
+DEVICES_SET=false  # Track whether --devices was explicitly set
 
 # Tokenizers to train
 # Format: "tokenizer:coarsening" where coarsening is "none", "mc", "sc", or "hac"
@@ -65,10 +66,14 @@ for arg in "$@"; do
             MAX_STEPS=50000  # Smaller dataset, fewer steps
             ;;
         --ddp)
-            NUM_DEVICES=4  # Default to 4 GPUs
+            # Only set default of 4 GPUs if --devices wasn't explicitly specified
+            if [ "$DEVICES_SET" = false ]; then
+                NUM_DEVICES=4
+            fi
             ;;
         --devices=*)
             NUM_DEVICES="${arg#*=}"
+            DEVICES_SET=true
             ;;
         --skip-sc-hac)
             SKIP_SC_HAC=true
@@ -228,6 +233,51 @@ supports_coarsening() {
     fi
 }
 
+# Get recommended sampling.max_length per tokenizer/dataset.
+# Values derived from tokenization stats on 1000 samples with ~15% buffer,
+# rounded to multiples of 128.
+#
+# MOSES (10-26 nodes):                COCONUT (20-100 nodes):
+#   SENT:      max=121  → 128          SENT:      max=433  → 512
+#   HSENT_MC:  max=358  → 384          HSENT_MC:  max=1337 → 1536
+#   HSENT_SC:  max=375  → 384          HSENT_SC:  max=1413 → 1536
+#   HSENT_HAC: max=474  → 512          HSENT_HAC: max=1736 → 2048
+#   HDT_MC:    max=232  → 256          HDT_MC:    max=868  → 1024
+#   HDT_SC:    max=234  → 256          HDT_SC:    max=840  → 1024
+#   HDT_HAC:   max=272  → 384          HDT_HAC:   max=1010 → 1280
+#   HDTC:      max=308  → 384          HDTC:      max=1180 → 1536
+get_max_length() {
+    local dataset="$1"
+    local tok="$2"
+    local coarse="$3"
+
+    if [ "$dataset" = "coconut" ]; then
+        case "${tok}_${coarse}" in
+            sent_none)  echo 512  ;;
+            hsent_mc)   echo 1536 ;;
+            hsent_sc)   echo 1536 ;;
+            hsent_hac)  echo 2048 ;;
+            hdt_mc)     echo 1024 ;;
+            hdt_sc)     echo 1024 ;;
+            hdt_hac)    echo 1280 ;;
+            hdtc_none)  echo 1536 ;;
+            *)          echo 2048 ;;
+        esac
+    else
+        case "${tok}_${coarse}" in
+            sent_none)  echo 128  ;;
+            hsent_mc)   echo 384  ;;
+            hsent_sc)   echo 384  ;;
+            hsent_hac)  echo 512  ;;
+            hdt_mc)     echo 256  ;;
+            hdt_sc)     echo 256  ;;
+            hdt_hac)    echo 384  ;;
+            hdtc_none)  echo 384  ;;
+            *)          echo 1024 ;;
+        esac
+    fi
+}
+
 # Precompute tokenized data caches so DDP processes load pre-tokenized data.
 # The preprocess script skips splits whose cache files already exist.
 echo "========================================"
@@ -374,6 +424,10 @@ print(ckpt.get('global_step', 0))
     if [ -n "$COARSENING_FULL" ] && supports_coarsening "$TOKENIZER"; then
         ARGS="$ARGS tokenizer.coarsening_strategy=$COARSENING_FULL"
     fi
+
+    # Set per-tokenizer sampling max_length for position embeddings
+    TOK_MAX_LENGTH=$(get_max_length "$DATASET" "$TOKENIZER" "$COARSENING")
+    ARGS="$ARGS sampling.max_length=$TOK_MAX_LENGTH"
 
     if [ "$DRY_RUN" = true ]; then
         if [ -n "$RESUME_CKPT" ]; then

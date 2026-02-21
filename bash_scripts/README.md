@@ -239,6 +239,38 @@ Trains all tokenizer variants from scratch on MOSES or COCONUT dataset.
 **With `--skip-sc-hac` (4 variants):**
 - `SENT`, `H-SENT + MC`, `HDT + MC`, `HDTC`
 
+### Per-tokenizer max sequence length
+
+The script automatically sets `sampling.max_length` per tokenizer and dataset to size the position embedding table appropriately. Values were derived from tokenization stats on 1000 samples with ~15% buffer, rounded to multiples of 128.
+
+**MOSES** (molecules have 10-26 nodes):
+
+| Tokenizer | Observed Max | Recommended `max_length` |
+|-----------|-------------|--------------------------|
+| SENT      | 121         | 128                      |
+| HSENT_MC  | 358         | 384                      |
+| HSENT_SC  | 375         | 384                      |
+| HSENT_HAC | 474         | 512                      |
+| HDT_MC    | 232         | 256                      |
+| HDT_SC    | 234         | 256                      |
+| HDT_HAC   | 272         | 384                      |
+| HDTC      | 308         | 384                      |
+
+**COCONUT** (molecules have 20-100 nodes):
+
+| Tokenizer | Observed Max | Recommended `max_length` |
+|-----------|-------------|--------------------------|
+| SENT      | 433         | 512                      |
+| HSENT_MC  | 1337        | 1536                     |
+| HSENT_SC  | 1413        | 1536                     |
+| HSENT_HAC | 1736        | 2048                     |
+| HDT_MC    | 868         | 1024                     |
+| HDT_SC    | 840         | 1024                     |
+| HDT_HAC   | 1010        | 1280                     |
+| HDTC      | 1180        | 1536                     |
+
+To regenerate these stats: `python scripts/comparison/compare_tokenization_stats.py --dataset both --num-samples 1000`
+
 ### Output
 
 **MOSES training:**

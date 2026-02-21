@@ -232,9 +232,12 @@ def preprocess_split(
         tokenized_data.append(tokens)
         smiles_list.append(mol_dataset.smiles_list[i])
 
-    # Save to cache
+    # Save to cache using num_samples (the configured count) so the filename
+    # matches what _try_load_cache looks up. If some SMILES failed conversion,
+    # len(mol_dataset) < num_samples, but the cache key must use the config value.
+    save_count = num_samples if num_samples is not None else len(mol_dataset)
     cache_filename = get_cache_filename(
-        dataset_name, split, tokenizer_type, len(mol_dataset), tokenizer_config
+        dataset_name, split, tokenizer_type, save_count, tokenizer_config
     )
     cache_path = cache_dir / cache_filename
 
@@ -308,7 +311,9 @@ def main(cfg: DictConfig) -> None:
 
     elif tokenizer_type == "hdt":
         coarsening_strategy = cfg.tokenizer.get("coarsening_strategy", "spectral")
-        motif_aware = cfg.tokenizer.get("motif_aware", False)
+        # Derive motif_aware from coarsening_strategy to match tokenizer behavior
+        # (HDTTokenizer sets self.motif_aware based on strategy, not config)
+        motif_aware = coarsening_strategy in ("motif_aware_spectral", "motif_community")
         tokenizer_config.update(
             {
                 "node_order": cfg.tokenizer.get("node_order", "BFS"),
@@ -353,7 +358,9 @@ def main(cfg: DictConfig) -> None:
 
     elif tokenizer_type == "hsent":
         coarsening_strategy = cfg.tokenizer.get("coarsening_strategy", "spectral")
-        motif_aware = cfg.tokenizer.get("motif_aware", False)
+        # Derive motif_aware from coarsening_strategy to match tokenizer behavior
+        # (HSENTTokenizer sets self.motif_aware based on strategy, not config)
+        motif_aware = coarsening_strategy in ("motif_aware_spectral", "motif_community")
         tokenizer_config.update(
             {
                 "node_order": cfg.tokenizer.get("node_order", "BFS"),
