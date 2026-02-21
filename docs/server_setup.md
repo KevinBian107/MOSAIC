@@ -1,33 +1,36 @@
 # DSMLP Server Quick Reference
 
-Quick reference commands for running MOSAIC on UCSD DSMLP cluster.
+Quick reference commands for running MOSAIC on UCSD DSMLP cluster. See also [commands_reference.md](commands_reference.md) for a combined GCP + DSMLP + setup + training cheat sheet.
 
 ## SSH Access
 
 ```bash
-ssh <username>@dsmlp-login.ucsd.edu
+ssh any012@dsmlp-login.ucsd.edu
 ```
 
 ## Pod Management
 
 ```bash
-# Create pod: 1 GPU, 8 CPU, 64GB Memory, A30
+# Create pod: 1 GPU, 8 CPU, 64 GB Memory, A30, run in background
 launch-scipy-ml.sh -W DSC180A_FA25_A00 -g 1 -c 8 -m 64 -n 31 -b
 
-# Or if you want a pod with 4 * A5000s
+# Create pod: 2 GPUs, low priority, A5000
+launch-scipy-ml.sh -W DSC180A_FA25_A00 -g 2 -p low -c 8 -m 64 -n 30 -b
+
+# Create pod: 4 GPUs, low priority, A5000
 launch-scipy-ml.sh -W DSC180A_FA25_A00 -g 4 -p low -c 8 -m 64 -n 30 -b
 
 # List pods
 kubectl get pods
 
 # Shell into pod
-kubesh <pod-name>
+kubesh any012-2279099
 
 # Delete pod
-kubectl delete pod <pod-name>
+kubectl delete pod any012-2279099
 
 # View pod logs
-kubectl logs <pod-name>
+kubectl logs any012-2279099
 
 # Check pod events (debugging)
 kubectl describe pod <pod-name>

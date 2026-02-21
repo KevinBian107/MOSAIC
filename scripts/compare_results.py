@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 """Compare test results across multiple runs.
 
-This script reads results from test output directories and creates
-a table image comparing metrics across tokenization schemes.
-It also incorporates realistic generation metrics when available,
-matching them to test runs by checkpoint path.
+Reads results from test output directories and creates a table image comparing
+metrics across tokenization schemes. Incorporates realistic generation metrics
+when available, matching by checkpoint path. Table sections include Training Info
+(coarsening_strategy, reference_split, generation_time), Core Quality, Distribution
+Matching, Structural, Motif MMD, and Realistic Generation. See docs/commands_reference.md.
 
 Usage:
     python scripts/compare_results.py
@@ -33,6 +34,11 @@ METRIC_SECTIONS = [
         [
             "train_data_size",
             "train_max_steps",
+            "total_samples_seen",
+            "batch_size",
+            "learning_rate",
+            "weight_decay",
+            "warmup_steps",
             "coarsening_strategy",
             "reference_split",
             "generation_time",
@@ -94,6 +100,11 @@ METRIC_SECTIONS = [
 TRAINING_INFO_METRICS = [
     "train_data_size",
     "train_max_steps",
+    "total_samples_seen",
+    "batch_size",
+    "learning_rate",
+    "weight_decay",
+    "warmup_steps",
     "coarsening_strategy",
     "reference_split",
 ]
@@ -141,6 +152,7 @@ LOWER_IS_BETTER = {
     # Training info (smaller/more efficient is better)
     "train_data_size",
     "train_max_steps",
+    "total_samples_seen",
     # Test metrics
     "pgd",
     "fcd",
@@ -164,6 +176,11 @@ METRIC_DISPLAY_NAMES = {
     # Training info
     "train_data_size": "Train Data Size",
     "train_max_steps": "Train Steps",
+    "total_samples_seen": "Total Samples Seen",
+    "batch_size": "Batch Size",
+    "learning_rate": "LR",
+    "weight_decay": "Weight Decay",
+    "warmup_steps": "Warmup Steps",
     "coarsening_strategy": "Coarsening",
     "reference_split": "Ref Split",
     # Test metrics
@@ -358,6 +375,11 @@ def extract_training_info(config: dict) -> dict:
     info = {
         "train_data_size": None,
         "train_max_steps": None,
+        "total_samples_seen": None,
+        "batch_size": None,
+        "learning_rate": None,
+        "weight_decay": None,
+        "warmup_steps": None,
         "coarsening_strategy": None,
     }
 
@@ -384,14 +406,40 @@ def extract_training_info(config: dict) -> dict:
     if actual_steps is not None:
         info["train_max_steps"] = actual_steps
 
-    # Try to load training config for data size (and fallback steps)
+    # Try to load training config for data size, optimizer/training params, and fallback steps
     train_config = load_training_config(config)
     if train_config:
         num_train = train_config.get("data", {}).get("num_train")
+        data_cfg = train_config.get("data", {})
+        model_cfg = train_config.get("model", {})
+        trainer_cfg = train_config.get("trainer", {})
 
         # Use config max_steps as fallback if checkpoint didn't have it
         if info["train_max_steps"] is None:
-            info["train_max_steps"] = train_config.get("trainer", {}).get("max_steps")
+            info["train_max_steps"] = trainer_cfg.get("max_steps")
+
+        # Training hyperparameters from config
+        if model_cfg.get("learning_rate") is not None:
+            info["learning_rate"] = model_cfg["learning_rate"]
+        if data_cfg.get("batch_size") is not None:
+            info["batch_size"] = data_cfg["batch_size"]
+        if model_cfg.get("weight_decay") is not None:
+            info["weight_decay"] = model_cfg["weight_decay"]
+        if model_cfg.get("warmup_steps") is not None:
+            info["warmup_steps"] = model_cfg["warmup_steps"]
+
+        # Total samples seen = train_max_steps * (batch_size * num_gpus)
+        num_gpus = trainer_cfg.get("devices", 1)
+        if isinstance(num_gpus, (list, tuple)):
+            num_gpus = len(num_gpus) if num_gpus else 1
+        if (
+            info["train_max_steps"] is not None
+            and info["batch_size"] is not None
+            and num_gpus is not None
+        ):
+            info["total_samples_seen"] = (
+                info["train_max_steps"] * info["batch_size"] * num_gpus
+            )
 
         # If num_train is -1 (full dataset), try to parse from directory name
         if num_train is not None and num_train != -1:
@@ -607,26 +655,17 @@ def select_best_per_tokenizer_and_coarsening(runs: list[dict]) -> list[dict]:
     return best_runs
 
 
-def create_table_image(
+def build_table_data(
     runs: list[dict],
     metrics: list[str],
-    output_path: Path,
-    title: str = "Model Comparison Results",
+    title: str,
     col_labels: list[str] | None = None,
-) -> None:
-    """Create a table image comparing runs with section separators.
+) -> dict:
+    """Build table data (row labels, cell text, cell colors) for the comparison table.
 
-    Args:
-        runs: List of run data dictionaries.
-        metrics: List of metric names to display.
-        output_path: Path to save the image.
-        title: Title for the table.
-        col_labels: Optional list of column labels (one per run). If None, uses tokenizer_display.
+    Returns a dict with keys: title, col_labels, row_labels, cell_data, cell_colors, section_rows.
+    Used by create_table_image and for saving to JSON (visualization-only script).
     """
-    if not runs:
-        print("No runs to display.")
-        return
-
     num_cols = len(runs)
     if col_labels is not None and len(col_labels) == num_cols:
         col_labels = list(col_labels)
@@ -724,6 +763,52 @@ def create_table_image(
             cell_colors.append(row_colors)
             row_idx += 1
 
+    return {
+        "title": title,
+        "col_labels": col_labels,
+        "row_labels": row_labels,
+        "cell_data": cell_data,
+        "cell_colors": cell_colors,
+        "section_rows": section_rows,
+    }
+
+
+def create_table_image(
+    runs: list[dict],
+    metrics: list[str],
+    output_path: Path,
+    title: str = "Model Comparison Results",
+    col_labels: list[str] | None = None,
+) -> dict | None:
+    """Create a table image comparing runs with section separators.
+
+    Args:
+        runs: List of run data dictionaries.
+        metrics: List of metric names to display.
+        output_path: Path to save the image.
+        title: Title for the table.
+        col_labels: Optional list of column labels (one per run). If None, uses tokenizer_display.
+
+    Returns:
+        Table data dict (title, col_labels, row_labels, cell_data, cell_colors, section_rows)
+        for saving to JSON, or None if no runs.
+    """
+    if not runs:
+        print("No runs to display.")
+        return None
+
+    table_data = build_table_data(runs, metrics, title, col_labels)
+    if not table_data["row_labels"]:
+        print("No runs to display.")
+        return None
+
+    row_labels = table_data["row_labels"]
+    col_labels_out = table_data["col_labels"]
+    cell_data = table_data["cell_data"]
+    cell_colors = table_data["cell_colors"]
+    section_rows = table_data["section_rows"]
+    num_cols = len(col_labels_out)
+
     # Create figure
     fig_width = max(8, 2 + num_cols * 1.5)
     fig_height = max(6, 1 + len(row_labels) * 0.4)
@@ -735,7 +820,7 @@ def create_table_image(
     table = ax.table(
         cellText=cell_data,
         rowLabels=row_labels,
-        colLabels=col_labels,
+        colLabels=col_labels_out,
         cellColours=cell_colors,
         rowColours=["#f0f0f0"] * len(row_labels),
         colColours=["#4472C4"] * num_cols,
@@ -764,7 +849,7 @@ def create_table_image(
             cell.set_text_props(weight="bold")
 
     # Add title
-    plt.title(title, fontsize=14, fontweight="bold", pad=20)
+    plt.title(table_data["title"], fontsize=14, fontweight="bold", pad=20)
 
     # Add footnote
     footnote = (
@@ -779,6 +864,7 @@ def create_table_image(
     plt.close()
 
     print(f"Table image saved to {output_path}")
+    return table_data
 
 
 def save_csv(
@@ -1020,10 +1106,15 @@ Examples:
     if args.column_labels:
         col_labels = [s.strip() for s in args.column_labels.split(",")]
 
-    # Create table image
-    create_table_image(
+    # Create table image and save table data to JSON for visualization-only script
+    table_data = create_table_image(
         runs, available_metrics, args.output, title=title, col_labels=col_labels
     )
+    if table_data:
+        data_path = args.output.with_suffix(".json")
+        with open(data_path, "w") as f:
+            json.dump(table_data, f, indent=2)
+        print(f"Table data saved to {data_path}")
 
     # Save CSV if requested
     if args.csv:

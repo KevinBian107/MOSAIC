@@ -64,6 +64,8 @@ logs/
 *.log
 wandb/
 .ruff_cache
+*.png
+*.json
 
 # Data
 /data/

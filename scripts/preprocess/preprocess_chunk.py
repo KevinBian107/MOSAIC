@@ -35,7 +35,12 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.data.coconut_loader import CoconutLoader
-from src.data.molecular import MolecularDataset, NUM_ATOM_TYPES, NUM_BOND_TYPES
+from src.data.molecular import (
+    MolecularDataset,
+    NUM_ATOM_TYPES,
+    NUM_BOND_TYPES,
+    load_moses_dataset,
+)
 from src.tokenizers import HDTTokenizer, HSENTTokenizer
 
 logging.basicConfig(level=logging.INFO)
@@ -84,6 +89,36 @@ def main():
         default="spectral",
         help="Coarsening strategy (default: spectral)",
     )
+    # Spectral-only knobs (used for aggressive speed vs quality tradeoffs)
+    parser.add_argument(
+        "--spectral-n-init",
+        type=int,
+        default=None,
+        help="SpectralClustering n_init (spectral only). If omitted, tokenizer default is used.",
+    )
+    parser.add_argument(
+        "--spectral-k-min-factor",
+        type=float,
+        default=None,
+        help="Spectral k_min_factor (spectral only). If omitted, tokenizer default is used.",
+    )
+    parser.add_argument(
+        "--spectral-k-max-factor",
+        type=float,
+        default=None,
+        help="Spectral k_max_factor (spectral only). If omitted, tokenizer default is used.",
+    )
+    parser.add_argument(
+        "--use-precomputed-smiles",
+        action="store_true",
+        help="Load SMILES from precomputed moses_smiles.txt file (faster than CSV)",
+    )
+    parser.add_argument(
+        "--precomputed-smiles-dir",
+        type=str,
+        default="data/moses_smiles",
+        help="Directory containing moses_smiles.txt (default: data/moses_smiles)",
+    )
     args = parser.parse_args()
 
     chunk_size = args.end - args.start
@@ -94,23 +129,32 @@ def main():
     # Load dataset
     if args.dataset == "moses":
         log.info("Loading MOSES dataset...")
-        mol_dataset = MolecularDataset.from_moses(
+        # Load SMILES once for the prefix we care about, then slice.
+        # This avoids converting all [0:end) molecules to graphs for every chunk.
+        smiles_all = load_moses_dataset(
             split="train",
-            max_molecules=args.end,  # Load up to our end index
+            max_molecules=args.end,
+            seed=args.seed,
+            use_precomputed_smiles=args.use_precomputed_smiles,
+            precomputed_smiles_dir=args.precomputed_smiles_dir,
+        )
+        if len(smiles_all) < args.end:
+            log.warning(
+                f"Dataset only has {len(smiles_all)} samples, "
+                f"adjusting end to {len(smiles_all)}"
+            )
+            args.end = len(smiles_all)
+            chunk_size = args.end - args.start
+        smiles_slice = smiles_all[args.start : args.end]
+        mol_dataset = MolecularDataset(
+            smiles_slice,
+            dataset_name="moses_train_chunk",
             include_hydrogens=False,
             labeled=True,
-            seed=args.seed,
         )
-        # For MOSES, indices into mol_dataset match global indices
-        chunk_offset = args.start
-
-        if len(mol_dataset) < args.end:
-            log.warning(
-                f"Dataset only has {len(mol_dataset)} samples, "
-                f"adjusting end to {len(mol_dataset)}"
-            )
-            args.end = len(mol_dataset)
-            chunk_size = args.end - args.start
+        # For MOSES, mol_dataset indices now run 0..(end-start-1)
+        # and correspond exactly to the requested [start,end) range.
+        chunk_offset = 0
 
     elif args.dataset == "coconut":
         log.info("Loading COCONUT dataset...")
@@ -169,6 +213,19 @@ def main():
         labeled_graph=True,
         seed=args.seed,
     )
+    if args.coarsening_strategy == "spectral":
+        # Use provided args or tokenizer defaults (10, 0.7, 1.3)
+        n_init = args.spectral_n_init if args.spectral_n_init is not None else 10
+        k_min_factor = args.spectral_k_min_factor if args.spectral_k_min_factor is not None else 0.7
+        k_max_factor = args.spectral_k_max_factor if args.spectral_k_max_factor is not None else 1.3
+        tokenizer_kwargs["n_init"] = n_init
+        tokenizer_kwargs["k_min_factor"] = k_min_factor
+        tokenizer_kwargs["k_max_factor"] = k_max_factor
+        # Include spectral parameters in cache hash so precompute matches training config
+        # Use same key names as datamodule (without "spectral_" prefix)
+        tokenizer_config["n_init"] = n_init
+        tokenizer_config["k_min_factor"] = k_min_factor
+        tokenizer_config["k_max_factor"] = k_max_factor
     # Initialize tokenizer
     if args.tokenizer == "hsent":
         tokenizer = HSENTTokenizer(**tokenizer_kwargs)

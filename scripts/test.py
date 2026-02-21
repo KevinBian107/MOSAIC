@@ -208,6 +208,8 @@ def main(cfg: DictConfig) -> None:
         min_atoms=cfg.data.get("min_atoms", 20),
         max_atoms=cfg.data.get("max_atoms", 100),
         min_rings=cfg.data.get("min_rings", 3),
+        use_precomputed_smiles=cfg.data.get("use_precomputed_smiles", False),
+        precomputed_smiles_dir=cfg.data.get("precomputed_smiles_dir", None),
     )
 
     datamodule.setup(stage="test")
@@ -362,6 +364,42 @@ def main(cfg: DictConfig) -> None:
         f"Successfully converted {valid_count}/{len(generated_smiles)} graphs to SMILES"
     )
 
+    # Core-only mode: compute only validity, uniqueness, novelty (no FCD, PGD, motif, etc.)
+    if cfg.metrics.get("core_only", False):
+        reference_split = cfg.metrics.get("reference_split", "test")
+        train_smiles = list(datamodule.train_smiles) if hasattr(datamodule, "train_smiles") else []
+        mol_metrics = MolecularMetrics(
+            reference_smiles=[],  # not used for validity/uniqueness/novelty
+            train_smiles=train_smiles,
+        )
+        mol_results = mol_metrics(generated_smiles)
+        log.info("Core metrics (core_only mode):")
+        for name in ("validity", "uniqueness", "novelty"):
+            log.info(f"  {name:20s}: {mol_results.get(name, 0):.6f}")
+        all_results = {
+            "validity": mol_results.get("validity"),
+            "uniqueness": mol_results.get("uniqueness"),
+            "novelty": mol_results.get("novelty"),
+            "generation_time": gen_time,
+            "num_samples": num_samples,
+            "num_valid_smiles": valid_count,
+            "reference_split": reference_split,
+        }
+        output_path = Path(cfg.logs.path)
+        output_path.mkdir(parents=True, exist_ok=True)
+        results_file = output_path / "results.json"
+        with open(results_file, "w") as f:
+            json.dump(all_results, f, indent=2)
+        log.info(f"\nResults saved to {results_file}")
+        smiles_file = output_path / "generated_smiles.txt"
+        with open(smiles_file, "w") as f:
+            for smi in generated_smiles:
+                if smi != INVALID_SMILES_SENTINEL:
+                    f.write(smi + "\n")
+        log.info(f"Generated SMILES saved to {smiles_file}")
+        log.info("\nEvaluation complete (core only: validity, uniqueness, novelty).")
+        return
+
     # Visualization (if enabled)
     if cfg.get("visualization", {}).get("enabled", False):
         log.info("Generating molecule visualizations...")
@@ -455,29 +493,37 @@ def main(cfg: DictConfig) -> None:
     pgd_score = None
     if cfg.metrics.get("compute_pgd", True):  # Default enabled
         try:
-            # Convert reference SMILES to graphs for PGD
-            # Limit to max_reference_size for memory constraints
             max_ref_size = cfg.metrics.get("pgd_reference_size", 100)
-            if reference_split == "full":
-                pgd_reference_smiles = reference_smiles[:max_ref_size]
+            ref_graphs_path = cfg.metrics.get("reference_graphs_path")
+
+            if ref_graphs_path and Path(ref_graphs_path).exists():
+                log.info(f"Loading precomputed reference graphs from {ref_graphs_path}")
+                reference_graphs = torch.load(
+                    ref_graphs_path, map_location="cpu", weights_only=False
+                )
+                log.info(f"Loaded {len(reference_graphs)} reference graphs")
             else:
-                pgd_reference_smiles = datamodule.test_smiles[:max_ref_size]
+                # Convert reference SMILES to graphs for PGD
+                if reference_split == "full":
+                    pgd_reference_smiles = reference_smiles[:max_ref_size]
+                else:
+                    pgd_reference_smiles = datamodule.test_smiles[:max_ref_size]
 
-            log.info(
-                f"Converting {len(pgd_reference_smiles)} reference SMILES to graphs..."
-            )
-            reference_graphs = []
-            for smi in tqdm(
-                pgd_reference_smiles, desc="Converting reference to graphs"
-            ):
-                try:
-                    g = smiles_to_graph(smi)
-                    if g is not None and g.num_nodes > 0:
-                        reference_graphs.append(g)
-                except Exception:
-                    continue  # Skip invalid SMILES
+                log.info(
+                    f"Converting {len(pgd_reference_smiles)} reference SMILES to graphs..."
+                )
+                reference_graphs = []
+                for smi in tqdm(
+                    pgd_reference_smiles, desc="Converting reference to graphs"
+                ):
+                    try:
+                        g = smiles_to_graph(smi)
+                        if g is not None and g.num_nodes > 0:
+                            reference_graphs.append(g)
+                    except Exception:
+                        continue  # Skip invalid SMILES
 
-            log.info(f"Successfully converted {len(reference_graphs)} reference graphs")
+                log.info(f"Successfully converted {len(reference_graphs)} reference graphs")
 
             if len(reference_graphs) > 0:
                 polygraph_metric = PolygraphMetric(

@@ -5,6 +5,7 @@ generation models using next-token prediction.
 """
 
 import logging
+import os
 import sys
 import threading
 import time
@@ -17,6 +18,7 @@ import transformers
 from torch import nn
 from torch_geometric.data import Data
 from tqdm import tqdm
+import math
 
 from src.tokenizers.base import Tokenizer
 
@@ -242,6 +244,18 @@ class TransformerLM(nn.Module):
         return results, token_lengths
 
 
+def use_screen_safe_progress() -> bool:
+    """Return True if we should use newline-based progress (e.g. under screen/tmux or non-TTY)."""
+    if not hasattr(sys.stderr, "isatty") or not sys.stderr.isatty():
+        return True
+    term = os.environ.get("TERM", "")
+    if "screen" in term or "tmux" in term:
+        return True
+    if os.environ.get("STY") or os.environ.get("TMUX"):
+        return True
+    return False
+
+
 def _run_with_heartbeat(
     fn,
     desc: str = "Generating",
@@ -260,10 +274,14 @@ def _run_with_heartbeat(
     t = threading.Thread(target=worker, daemon=True)
     t.start()
     start = time.monotonic()
+    screen_safe = use_screen_safe_progress()
     while t.is_alive():
         time.sleep(interval)
         elapsed = time.monotonic() - start
-        print(f"\r  {desc}: {elapsed:.0f}s elapsed...", end="", flush=True, file=sys.stderr)
+        if screen_safe:
+            print(f"  {desc}: {elapsed:.0f}s elapsed...", flush=True, file=sys.stderr)
+        else:
+            print(f"\r  {desc}: {elapsed:.0f}s elapsed...", end="", flush=True, file=sys.stderr)
     print(file=sys.stderr)
     if exception[0] is not None:
         raise exception[0]
@@ -458,7 +476,7 @@ class GraphGeneratorModule(pl.LightningModule):
                 1, self.max_steps - self.warmup_steps
             )
             progress = min(progress, 1.0)
-            return 0.5 * (1.0 + __import__("math").cos(__import__("math").pi * progress))
+            return 0.5 * (1.0 + math.cos(math.pi * progress))
 
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 

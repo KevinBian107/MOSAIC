@@ -2,6 +2,22 @@
 
 This guide covers setting up GCP for training MOSAIC models, including running multiple experiments in parallel.
 
+For a short command cheat sheet (SSH, setup, training, precompute, eval), see [commands_reference.md](commands_reference.md).
+
+---
+
+## Quick SSH
+
+```bash
+# SSH into a GCP VM (default user)
+gcloud compute ssh mosaic-v100 --zone=us-central1-a
+
+# SSH as a specific user
+gcloud compute ssh andrewyang@mosaic-v100 --zone=us-central1-a
+```
+
+Then: `cd andrew/MOSAIC && conda activate mosaic`
+
 ---
 
 ## 1. Install Google Cloud CLI

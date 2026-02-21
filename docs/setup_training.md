@@ -2,7 +2,8 @@
 
 This guide covers environment setup, configuration, and training workflows for MOSAIC.
 
-For UCSD DSMLP cluster-specific commands, see [Server Quick Reference](server_setup.md).
+- **UCSD DSMLP / GCP:** [Server Quick Reference](server_setup.md), [GCP Setup](setup_gcp.md)
+- **Command cheat sheet (GCP, DSMLP, setup, precompute, training, eval):** [commands_reference.md](commands_reference.md)
 
 ---
 
@@ -51,6 +52,26 @@ wget https://media.githubusercontent.com/media/molecularsets/moses/master/data/t
 cd ~/MOSAIC 
 ```
 
+### Optional: Precomputed SMILES (faster loading)
+
+To avoid re-reading CSV and converting SMILES to graphs on every run, export MOSES once to a single file:
+
+```bash
+python scripts/export_moses_smiles.py
+# Creates data/moses_smiles/moses_smiles.txt
+```
+
+Then use `data.use_precomputed_smiles=true` in training/test, or `--use-precomputed-smiles` with `eval_benchmarks_auto.sh`. See [commands_reference.md](commands_reference.md).
+
+### Optional: Precomputed PGD reference graphs (faster evaluation)
+
+When evaluating many checkpoints, you can precompute reference SMILES→graphs once and reuse:
+
+```bash
+python scripts/precompute_reference_graphs.py experiment=moses reference_graphs.output_dir=outputs/eval_run
+# Then pass metrics.reference_graphs_path=<printed path> to test.py, or use eval_benchmarks_auto.sh (it does this automatically).
+```
+
 ---
 
 ## Configuration Reference
@@ -74,7 +95,9 @@ cd ~/MOSAIC
 | `data.num_train` | (from experiment) | Training samples (override with CLI) |
 | `data.num_val` | (from experiment) | Validation samples |
 | `data.num_test` | (from experiment) | Test samples |
-| `data.use_cache` | `false` | Cache tokenized data |
+| `data.use_cache` | `false` | Use precomputed tokenized cache (run `precompute_benchmarks.sh` or `preprocess_dataset.py` first) |
+| `data.use_precomputed_smiles` | `false` | Load train/test from single SMILES file (run `export_moses_smiles.py` first) |
+| `data.precomputed_smiles_dir` | `data/moses_smiles` | Directory containing `moses_smiles.txt` |
 
 **Note**: Dataset name, data file, and sample counts are set by the experiment config. Use `experiment=moses`, `experiment=qm9`, or `experiment=coconut`.
 
@@ -219,6 +242,8 @@ python scripts/test.py \
 Results are saved to:
 - `outputs/test/YYYY-MM-DD/HH-MM-SS/results.json`
 - `outputs/test/YYYY-MM-DD/HH-MM-SS/generated_smiles.txt`
+
+For evaluating multiple checkpoints with a mapping file, precomputed SMILES, and cached reference graphs, use `./bash_scripts/eval_benchmarks_auto.sh`; see [commands_reference.md](commands_reference.md) and [bash_scripts/README.md](../bash_scripts/README.md).
 
 ---
 

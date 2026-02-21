@@ -58,6 +58,24 @@ class MolecularGraphDataset(Dataset):
         return self.molecular_dataset.smiles_list
 
 
+class SmilesOnlyDataset(Dataset):
+    """Minimal dataset that only holds a list of SMILES (no graph conversion).
+
+    Used when loading from precomputed reference_data_dir so we skip heavy
+    MolecularDataset conversion. test_dataloader() may still be called;
+    __getitem__ returns a placeholder (caller should not rely on it for evals).
+    """
+
+    def __init__(self, smiles_list: list[str]) -> None:
+        self.smiles_list = list(smiles_list)
+
+    def __len__(self) -> int:
+        return len(self.smiles_list)
+
+    def __getitem__(self, idx: int) -> int:
+        return idx  # Placeholder; not used when loading from reference_data_dir
+
+
 class CachedTokenDataset(Dataset):
     """PyTorch Dataset for pre-tokenized molecular graphs.
 
@@ -166,6 +184,9 @@ class MolecularDataModule(pl.LightningDataModule):
         min_atoms: int = 20,
         max_atoms: int = 100,
         min_rings: int = 3,
+        reference_data_dir: Optional[str] = None,
+        use_precomputed_smiles: bool = False,
+        precomputed_smiles_dir: Optional[str] = None,
     ) -> None:
         """Initialize the data module.
 
@@ -187,6 +208,9 @@ class MolecularDataModule(pl.LightningDataModule):
             min_atoms: Minimum atoms filter (for coconut dataset).
             max_atoms: Maximum atoms filter (for coconut dataset).
             min_rings: Minimum rings filter (for coconut dataset).
+            reference_data_dir: If set, load train/test SMILES from this dir (skip graph conversion).
+            use_precomputed_smiles: If True, load train/test SMILES from precomputed_smiles_dir (skip CSV + graph conversion).
+            precomputed_smiles_dir: Dir with train_smiles.txt and test_smiles.txt (default data/moses_smiles when use_precomputed_smiles).
         """
         super().__init__()
 
@@ -207,6 +231,9 @@ class MolecularDataModule(pl.LightningDataModule):
         self.min_atoms = min_atoms
         self.max_atoms = max_atoms
         self.min_rings = min_rings
+        self.reference_data_dir = reference_data_dir
+        self.use_precomputed_smiles = use_precomputed_smiles
+        self.precomputed_smiles_dir = Path(precomputed_smiles_dir or "data/moses_smiles") if use_precomputed_smiles else None
 
         self.train_dataset: Optional[Dataset] = None
         self.val_dataset: Optional[Dataset] = None
@@ -252,6 +279,20 @@ class MolecularDataModule(pl.LightningDataModule):
         # Add coarsening strategy for H-SENT/HDT tokenizers
         if hasattr(self.tokenizer, "coarsening_strategy"):
             config["coarsening_strategy"] = self.tokenizer.coarsening_strategy
+
+            # Add spectral coarsening parameters for cache hash consistency
+            # These must match what preprocess scripts include in tokenizer_config
+            if (
+                config["coarsening_strategy"] == "spectral"
+                and hasattr(self.tokenizer, "coarsener")
+            ):
+                coarsener = self.tokenizer.coarsener
+                if hasattr(coarsener, "n_init"):
+                    config["n_init"] = coarsener.n_init
+                if hasattr(coarsener, "k_min_factor"):
+                    config["k_min_factor"] = coarsener.k_min_factor
+                if hasattr(coarsener, "k_max_factor"):
+                    config["k_max_factor"] = coarsener.k_max_factor
 
         if hasattr(self.tokenizer, "include_rings"):
             config["include_rings"] = self.tokenizer.include_rings
@@ -373,6 +414,8 @@ class MolecularDataModule(pl.LightningDataModule):
                     max_molecules=self.num_train,
                     include_hydrogens=self.include_hydrogens,
                     labeled=labeled,
+                    use_precomputed_smiles=self.use_precomputed_smiles,
+                    precomputed_smiles_dir=str(self.precomputed_smiles_dir) if self.precomputed_smiles_dir else None,
                 )
                 self.train_smiles = train_mol.smiles_list
                 self.max_num_nodes = max(self.max_num_nodes, train_mol.max_num_nodes)
@@ -401,6 +444,8 @@ class MolecularDataModule(pl.LightningDataModule):
                     include_hydrogens=self.include_hydrogens,
                     labeled=labeled,
                     seed=137,  # Different seed from test (42) to avoid overlap
+                    use_precomputed_smiles=self.use_precomputed_smiles,
+                    precomputed_smiles_dir=str(self.precomputed_smiles_dir) if self.precomputed_smiles_dir else None,
                 )
                 self.val_smiles = val_mol.smiles_list
                 self.max_num_nodes = max(self.max_num_nodes, val_mol.max_num_nodes)
@@ -409,6 +454,37 @@ class MolecularDataModule(pl.LightningDataModule):
                 )
 
         if stage == "test" or stage is None:
+            # Option: load train/test SMILES from precomputed single file (no CSV read, no graph conversion)
+            if stage == "test" and self.use_precomputed_smiles and self.precomputed_smiles_dir is not None:
+                single_path = self.precomputed_smiles_dir / "moses_smiles.txt"
+                if single_path.exists():
+                    log.info(f"✓ Loading precomputed SMILES from {single_path}")
+                    with open(single_path) as f:
+                        first_line = f.readline().strip()
+                        train_count = int(first_line)
+                        all_smiles = [line.strip() for line in f if line.strip()]
+                    full_train = all_smiles[:train_count]
+                    full_test = all_smiles[train_count:]
+                    # Sample with seed to match load_moses_dataset(num_train, seed) behavior
+                    import random
+                    n_train = self.num_train if self.num_train is not None else len(full_train)
+                    n_test = self.num_test if self.num_test is not None else len(full_test)
+                    rng = random.Random(self.seed)
+                    train_idx = list(range(len(full_train)))
+                    rng.shuffle(train_idx)
+                    self.train_smiles = [full_train[i] for i in train_idx[:n_train]]
+                    test_idx = list(range(len(full_test)))
+                    rng = random.Random(42)  # MOSES test uses seed 42
+                    rng.shuffle(test_idx)
+                    self.test_smiles = [full_test[i] for i in test_idx[:n_test]]
+                    self.test_dataset = SmilesOnlyDataset(self.test_smiles)
+                    log.info(f"  train_smiles: {len(self.train_smiles)}, test_smiles: {len(self.test_smiles)}")
+                    return
+                else:
+                    log.warning(
+                        f"Precomputed SMILES not found: {single_path}, falling back to loading from CSV"
+                    )
+
             # Load train SMILES for metrics even in test mode
             if stage == "test" and len(self.train_smiles) == 0:
                 # Try cache first
@@ -424,6 +500,8 @@ class MolecularDataModule(pl.LightningDataModule):
                         max_molecules=self.num_train,
                         include_hydrogens=self.include_hydrogens,
                         labeled=labeled,
+                        use_precomputed_smiles=self.use_precomputed_smiles,
+                        precomputed_smiles_dir=str(self.precomputed_smiles_dir) if self.precomputed_smiles_dir else None,
                     )
                     self.train_smiles = train_mol.smiles_list
                     self.max_num_nodes = max(
@@ -445,6 +523,8 @@ class MolecularDataModule(pl.LightningDataModule):
                     max_molecules=self.num_test,
                     include_hydrogens=self.include_hydrogens,
                     labeled=labeled,
+                    use_precomputed_smiles=self.use_precomputed_smiles,
+                    precomputed_smiles_dir=str(self.precomputed_smiles_dir) if self.precomputed_smiles_dir else None,
                 )
                 self.test_smiles = test_mol.smiles_list
                 self.max_num_nodes = max(self.max_num_nodes, test_mol.max_num_nodes)

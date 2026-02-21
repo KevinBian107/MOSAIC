@@ -252,21 +252,77 @@ def graph_to_smiles(data: Data) -> Optional[str]:
         return None
 
 
-def load_moses_dataset(split: str = "train", max_molecules: Optional[int] = None, seed: int = 42) -> list[str]:
+def load_moses_dataset(
+    split: str = "train",
+    max_molecules: Optional[int] = None,
+    seed: int = 42,
+    use_precomputed_smiles: bool = False,
+    precomputed_smiles_dir: Optional[str] = None,
+) -> list[str]:
     """Load MOSES dataset with efficient random sampling.
 
     Args:
         split: Dataset split ('train', 'test', 'test_scaffolds').
         max_molecules: Maximum number of molecules to load (randomly sampled).
         seed: Random seed for sampling.
+        use_precomputed_smiles: If True, load from precomputed SMILES file instead of CSV.
+        precomputed_smiles_dir: Directory containing moses_smiles.txt (default: data/moses_smiles).
 
     Returns:
         List of SMILES strings.
     """
-    # Workaround: Read directly from CSV files to avoid rdkit.six import error
-    import pandas as pd
     import os
     import random
+
+    # Try precomputed SMILES file first if requested
+    if use_precomputed_smiles:
+        if precomputed_smiles_dir is None:
+            precomputed_smiles_dir = "data/moses_smiles"
+        precomputed_file = os.path.join(precomputed_smiles_dir, "moses_smiles.txt")
+        
+        # Resolve to absolute path for better error messages
+        precomputed_file_abs = os.path.abspath(precomputed_file)
+        
+        if os.path.exists(precomputed_file_abs):
+            import logging
+            log = logging.getLogger(__name__)
+            log.info(f"Loading MOSES from precomputed SMILES file: {precomputed_file_abs}")
+            with open(precomputed_file, "r") as f:
+                first_line = f.readline().strip()
+                train_count = int(first_line)
+                all_smiles = [line.strip() for line in f if line.strip()]
+            
+            # Extract the requested split
+            if split == "train":
+                smiles_list = all_smiles[:train_count]
+            elif split == "test":
+                smiles_list = all_smiles[train_count:]
+            else:
+                # For test_scaffolds, fall back to CSV
+                use_precomputed_smiles = False
+            
+            if use_precomputed_smiles:
+                # Apply max_molecules limit (sequential for chunks, random for sampling)
+                if max_molecules is not None and max_molecules < len(smiles_list):
+                    # For preprocessing chunks, use sequential slicing (seed ignored)
+                    # For random sampling, use random.sample
+                    # We'll use sequential by default since preprocess_chunk needs sequential access
+                    smiles_list = smiles_list[:max_molecules]
+                
+                import logging
+                log = logging.getLogger(__name__)
+                log.info(f"Loaded {len(smiles_list)} SMILES from precomputed file (split={split})")
+                return smiles_list
+        else:
+            import logging
+            log = logging.getLogger(__name__)
+            log.warning(
+                f"Precomputed SMILES file not found at {precomputed_file_abs}, "
+                f"falling back to CSV loading"
+            )
+
+    # Workaround: Read directly from CSV files to avoid rdkit.six import error
+    import pandas as pd
 
     csv_file = f"data/moses/{split}.csv"
     if os.path.exists(csv_file):
@@ -419,6 +475,8 @@ class MolecularDataset:
         include_hydrogens: bool = False,
         labeled: bool = False,
         seed: int = 42,
+        use_precomputed_smiles: bool = False,
+        precomputed_smiles_dir: Optional[str] = None,
     ) -> "MolecularDataset":
         """Create dataset from MOSES with random sampling.
 
@@ -428,11 +486,19 @@ class MolecularDataset:
             include_hydrogens: Whether to include explicit hydrogens.
             labeled: If True, use integer labels (AutoGraph format).
             seed: Random seed for sampling.
+            use_precomputed_smiles: If True, load from precomputed SMILES file instead of CSV.
+            precomputed_smiles_dir: Directory containing moses_smiles.txt (default: data/moses_smiles).
 
         Returns:
             MolecularDataset instance.
         """
-        smiles_list = load_moses_dataset(split, max_molecules=max_molecules, seed=seed)
+        smiles_list = load_moses_dataset(
+            split,
+            max_molecules=max_molecules,
+            seed=seed,
+            use_precomputed_smiles=use_precomputed_smiles,
+            precomputed_smiles_dir=precomputed_smiles_dir,
+        )
         return cls(
             smiles_list,
             dataset_name=f"moses_{split}",

@@ -6,11 +6,15 @@ Utility scripts for running batch operations.
 
 ```
 0. precompute_benchmarks.sh       → Precompute tokenized cache (optional, speeds up training)
+    stop_precompute_benchmarks.sh → Stop precompute screen sessions (cancel running jobs)
 1. train_benchmarks.sh            → Pretrain on MOSES (or COCONUT)
-2. eval_benchmarks.sh             → Evaluate pretrained models
+2. eval_benchmarks.sh             → Evaluate pretrained models (discovers checkpoints automatically)
+    eval_benchmarks_auto.sh       → Evaluate checkpoints from a mapping file (with optional caching, precomputed SMILES, reference graphs)
 3. finetune_benchmarks.sh         → Fine-tune on COCONUT (transfer learning)
 4. eval_finetune_benchmarks.sh    → Evaluate fine-tuned models
 ```
+
+See also [docs/commands_reference.md](../docs/commands_reference.md) for GCP, DSMLP, setup, precompute, and eval command examples.
 
 ---
 
@@ -23,10 +27,11 @@ Only SC (spectral clustering) and HAC (hierarchical agglomerative clustering) be
 ### What it does
 
 1. For each tokenizer + coarsening combo, runs `preprocess_chunk.py` to tokenize molecules
-2. For MOSES (1M samples): launches parallel screen sessions for chunked processing
+2. For MOSES (1M samples): launches parallel **screen** sessions for chunked processing
 3. For COCONUT (5K samples): runs directly in foreground (takes ~4 minutes per combo)
 4. Combines chunks into a single cache file per combo
 5. Cache files are used by training with `data.use_cache=true`
+6. Optionally uses **precomputed SMILES** (`--use-precomputed-smiles`) so chunks read from `data/moses_smiles/moses_smiles.txt` instead of CSV (run `python scripts/export_moses_smiles.py` first)
 
 ### Usage
 
@@ -42,6 +47,12 @@ Only SC (spectral clustering) and HAC (hierarchical agglomerative clustering) be
 
 # Single tokenizer + coarsening combo
 ./bash_scripts/precompute_benchmarks.sh --tokenizer=hsent --coarsening=sc
+
+# Custom train/val sample counts and chunks
+./bash_scripts/precompute_benchmarks.sh --tokenizer=hsent --coarsening=sc --train-samples=50000 --val-samples=1000 --chunks=4
+
+# Use precomputed SMILES file (faster; run export_moses_smiles.py first)
+./bash_scripts/precompute_benchmarks.sh --use-precomputed-smiles --tokenizer=hsent --coarsening=sc
 
 # Dry run (show commands without executing)
 ./bash_scripts/precompute_benchmarks.sh --dry-run
@@ -62,6 +73,13 @@ Only SC (spectral clustering) and HAC (hierarchical agglomerative clustering) be
 | `--coarsening=STRATEGY` | Filter: `sc`, `hac`, or `all` (default: `all`) |
 | `--tokenizer=TYPE` | Filter: `hsent`, `hdt`, or `all` (default: `all`) |
 | `--chunks=N` | Number of parallel chunks for MOSES (default: 8) |
+| `--train-samples=N` | MOSES training samples (default: 1000000) |
+| `--val-samples=N` | MOSES validation samples (default: 0) |
+| `--spectral-n-init=N` | Spectral clustering n_init for SC only (default: 1 for faster precompute) |
+| `--spectral-k-min-factor=F` | Spectral k_min_factor for SC (default: 0.9) |
+| `--spectral-k-max-factor=F` | Spectral k_max_factor for SC (default: 1.1) |
+| `--use-precomputed-smiles` | Read SMILES from `data/moses_smiles/moses_smiles.txt` instead of CSV |
+| `--precomputed-smiles-dir=PATH` | Directory with moses_smiles.txt (default: data/moses_smiles) |
 | `--output-dir=PATH` | Cache directory (default: `data/cache`) |
 | `--dry-run` | Show commands without executing |
 | `--force` | Re-run even if cache files exist |
@@ -77,10 +95,93 @@ hdt:sc     hdt:hac
 
 Cache files are saved to `data/cache/` with the naming pattern:
 ```
-{dataset}_train_{tokenizer}_{num_samples}_{config_hash}.pt
+{dataset}_{split}_{tokenizer}_{num_samples}_{config_hash}.pt
 ```
 
-Use in training: `python scripts/train.py ... data.use_cache=true`
+The config hash includes spectral parameters (`n_init`, `k_min_factor`, `k_max_factor`) so different spectral settings get different cache files. Use in training: `python scripts/train.py ... data.use_cache=true`
+
+---
+
+## stop_precompute_benchmarks.sh
+
+Stops (kills) all **screen** sessions started by `precompute_benchmarks.sh`. Use this to cancel running precompute jobs.
+
+### Usage
+
+```bash
+# Stop H-SENT + spectral precompute screens (default 8 chunks)
+./bash_scripts/stop_precompute_benchmarks.sh --tokenizer=hsent --coarsening=sc
+
+# Stop HDT + spectral with custom chunks
+./bash_scripts/stop_precompute_benchmarks.sh --tokenizer=hdt --coarsening=sc --chunks=4
+
+# Stop all MOSES + COCONUT precompute screens
+./bash_scripts/stop_precompute_benchmarks.sh --all
+
+./bash_scripts/stop_precompute_benchmarks.sh --help
+```
+
+Options mirror the relevant subset of `precompute_benchmarks.sh` (`--tokenizer`, `--coarsening`, `--chunks`, `--coconut`, `--all`).
+
+---
+
+## eval_benchmarks_auto.sh
+
+Evaluates a **list of checkpoints** from a **mapping file**, with optional result caching, precomputed SMILES, and precomputed PGD reference graphs. Use this when you want to compare specific runs in a fixed column order and avoid re-running test/gen when results already exist.
+
+### Mapping file format
+
+One line per checkpoint; order of lines = column order in the comparison table. Optional second column (space-separated) is the display label.
+
+```
+directory_name
+directory_name    Display Label
+# comments and empty lines are skipped
+```
+
+Checkpoints are looked for under `BENCHMARK_DIR` (default `outputs/benchmark`) as `BENCHMARK_DIR/<directory_name>/best.ckpt` or `last.ckpt`.
+
+### What it does
+
+1. Reads mapping file and finds each checkpoint under `BENCHMARK_DIR`
+2. Optionally runs `precompute_reference_graphs.py` once and passes the `.pt` path to every `test.py` so PGD reference graphs are not reconverted for each run
+3. For each checkpoint: runs `test.py` (and optionally `realistic_gen.py`) unless results already exist (skip if `results.json` and `generated_smiles.txt` exist)
+4. Runs `compare_results.py` to produce a comparison table image
+
+### Usage
+
+```bash
+./bash_scripts/eval_benchmarks_auto.sh MAPPING_FILE OUTPUT_PATH [OPTIONS]
+
+# Example: evaluate checkpoints listed in compare_ckpts.txt, write to outputs/eval, use last.ckpt, core metrics only, precomputed SMILES
+./bash_scripts/eval_benchmarks_auto.sh \
+    outputs/benchmark/compare_ckpts.txt \
+    outputs/eval \
+    --last \
+    --core-only \
+    --use-precomputed-smiles
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--last` | Use `last.ckpt` instead of `best.ckpt` |
+| `--best` | Use `best.ckpt` (default) |
+| `--benchmark-dir DIR` | Directory to search for checkpoints (default: outputs/benchmark) |
+| `--dataset NAME` | moses or coconut (default: moses) |
+| `--test-only` | Only run test.py (skip realistic_gen.py) |
+| `--gen-only` | Only run realistic_gen.py (skip test.py) |
+| `--core-only` | Only core metrics: validity, uniqueness, novelty (no FCD, PGD, motif, realistic_gen) |
+| `--use-precomputed-smiles` | Pass data.use_precomputed_smiles=true and use precomputed SMILES when precomputing reference graphs |
+| `--recompute DIR[,DIR2,...]` | Force re-run test and/or gen for these directory names (still included in table) |
+| `-h`, `--help` | Show help |
+
+### Output
+
+- Test outputs: `OUTPUT_PATH/test/<directory_name>/results.json`, `generated_smiles.txt`
+- Realistic gen: `OUTPUT_PATH/realistic_gen/<directory_name>/...`
+- Comparison table: `OUTPUT_PATH/comparison.png`
 
 ---
 

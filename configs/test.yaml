@@ -23,6 +23,9 @@ data:
   num_workers: 0
   include_hydrogens: false
   data_root: data
+  # Load from single precomputed file (run scripts/export_moses_smiles.py once → data/moses_smiles/moses_smiles.txt)
+  use_precomputed_smiles: false
+  precomputed_smiles_dir: data/moses_smiles
 
 # Sampling configuration
 sampling:
@@ -34,12 +37,14 @@ sampling:
 
 # Metrics configuration
 metrics:
+  core_only: false  # If true, only compute core metrics: validity, uniqueness, novelty (no FCD, PGD, motif)
   compute_motif: true  # Compute motif distribution metrics (MSC, MFD)
   compute_fcd: true  # Requires moses or fcd package
   compute_pgd: true  # Requires polygraph-benchmark package
   pgd_reference_size: 100  # Max number of reference molecules for PGD (memory constraint)
   reference_size: 100000  # Max reference set size for FCD, molecular, and motif metrics
   reference_split: "test"  # Reference population: "test" (default) or "full" (train+test combined)
+  reference_graphs_path: null  # If set, load PGD reference graphs from this .pt file (skip SMILES->graph conversion)
 
 # Visualization configuration
 visualization:

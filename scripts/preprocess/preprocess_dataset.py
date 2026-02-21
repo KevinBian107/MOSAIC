@@ -136,6 +136,8 @@ def preprocess_split(
     min_rings: int = 0,
     num_train: int = 0,
     num_val: int = 0,
+    use_precomputed_smiles: bool = False,
+    precomputed_smiles_dir: str | None = None,
 ) -> Path:
     """Preprocess and cache a single dataset split.
 
@@ -180,6 +182,8 @@ def preprocess_split(
             max_molecules=num_samples,
             include_hydrogens=include_hydrogens,
             labeled=labeled,
+            use_precomputed_smiles=use_precomputed_smiles,
+            precomputed_smiles_dir=precomputed_smiles_dir,
         )
     elif dataset_name == "qm9":
         mol_dataset = MolecularDataset.from_qm9(
@@ -318,23 +322,34 @@ def main(cfg: DictConfig) -> None:
                 "undirected": cfg.tokenizer.get("undirected", True),
             }
         )
+        # Add spectral coarsening parameters for cache hash consistency
+        if coarsening_strategy == "spectral":
+            tokenizer_config["n_init"] = cfg.tokenizer.get("n_init", 10)
+            tokenizer_config["k_min_factor"] = cfg.tokenizer.get("k_min_factor", 0.7)
+            tokenizer_config["k_max_factor"] = cfg.tokenizer.get("k_max_factor", 1.3)
 
         log.info(
             f"Using HDT tokenizer ({coarsening_strategy}{' + motif-aware' if motif_aware else ''})"
         )
 
-        tokenizer = HDTTokenizer(
-            max_length=cfg.tokenizer.max_length,
-            truncation_length=cfg.tokenizer.truncation_length,
-            node_order=cfg.tokenizer.get("node_order", "BFS"),
-            min_community_size=cfg.tokenizer.get("min_community_size", 4),
-            coarsening_strategy=coarsening_strategy,
-            motif_aware=motif_aware,
-            motif_alpha=cfg.tokenizer.get("motif_alpha", 1.0),
-            normalize_by_motif_size=cfg.tokenizer.get("normalize_by_motif_size", False),
-            labeled_graph=cfg.tokenizer.get("labeled_graph", True),
-            seed=cfg.seed,
-        )
+        tokenizer_kwargs = {
+            "max_length": cfg.tokenizer.max_length,
+            "truncation_length": cfg.tokenizer.truncation_length,
+            "node_order": cfg.tokenizer.get("node_order", "BFS"),
+            "min_community_size": cfg.tokenizer.get("min_community_size", 4),
+            "coarsening_strategy": coarsening_strategy,
+            "motif_aware": motif_aware,
+            "motif_alpha": cfg.tokenizer.get("motif_alpha", 1.0),
+            "normalize_by_motif_size": cfg.tokenizer.get("normalize_by_motif_size", False),
+            "labeled_graph": cfg.tokenizer.get("labeled_graph", True),
+            "seed": cfg.seed,
+        }
+        # Add spectral parameters if using spectral coarsening
+        if coarsening_strategy == "spectral":
+            tokenizer_kwargs["n_init"] = cfg.tokenizer.get("n_init", 10)
+            tokenizer_kwargs["k_min_factor"] = cfg.tokenizer.get("k_min_factor", 0.7)
+            tokenizer_kwargs["k_max_factor"] = cfg.tokenizer.get("k_max_factor", 1.3)
+        tokenizer = HDTTokenizer(**tokenizer_kwargs)
 
     elif tokenizer_type == "hsent":
         coarsening_strategy = cfg.tokenizer.get("coarsening_strategy", "spectral")
@@ -352,23 +367,34 @@ def main(cfg: DictConfig) -> None:
                 "undirected": cfg.tokenizer.get("undirected", True),
             }
         )
+        # Add spectral coarsening parameters for cache hash consistency
+        if coarsening_strategy == "spectral":
+            tokenizer_config["n_init"] = cfg.tokenizer.get("n_init", 10)
+            tokenizer_config["k_min_factor"] = cfg.tokenizer.get("k_min_factor", 0.7)
+            tokenizer_config["k_max_factor"] = cfg.tokenizer.get("k_max_factor", 1.3)
 
         log.info(
             f"Using H-SENT tokenizer ({coarsening_strategy}{' + motif-aware' if motif_aware else ''})"
         )
 
-        tokenizer = HSENTTokenizer(
-            max_length=cfg.tokenizer.max_length,
-            truncation_length=cfg.tokenizer.truncation_length,
-            node_order=cfg.tokenizer.get("node_order", "BFS"),
-            min_community_size=cfg.tokenizer.get("min_community_size", 4),
-            coarsening_strategy=coarsening_strategy,
-            motif_aware=motif_aware,
-            motif_alpha=cfg.tokenizer.get("motif_alpha", 1.0),
-            normalize_by_motif_size=cfg.tokenizer.get("normalize_by_motif_size", False),
-            labeled_graph=cfg.tokenizer.get("labeled_graph", True),
-            seed=cfg.seed,
-        )
+        tokenizer_kwargs = {
+            "max_length": cfg.tokenizer.max_length,
+            "truncation_length": cfg.tokenizer.truncation_length,
+            "node_order": cfg.tokenizer.get("node_order", "BFS"),
+            "min_community_size": cfg.tokenizer.get("min_community_size", 4),
+            "coarsening_strategy": coarsening_strategy,
+            "motif_aware": motif_aware,
+            "motif_alpha": cfg.tokenizer.get("motif_alpha", 1.0),
+            "normalize_by_motif_size": cfg.tokenizer.get("normalize_by_motif_size", False),
+            "labeled_graph": cfg.tokenizer.get("labeled_graph", True),
+            "seed": cfg.seed,
+        }
+        # Add spectral parameters if using spectral coarsening
+        if coarsening_strategy == "spectral":
+            tokenizer_kwargs["n_init"] = cfg.tokenizer.get("n_init", 10)
+            tokenizer_kwargs["k_min_factor"] = cfg.tokenizer.get("k_min_factor", 0.7)
+            tokenizer_kwargs["k_max_factor"] = cfg.tokenizer.get("k_max_factor", 1.3)
+        tokenizer = HSENTTokenizer(**tokenizer_kwargs)
 
     else:
         tokenizer_config.update(
@@ -425,6 +451,8 @@ def main(cfg: DictConfig) -> None:
             tokenizer_type=tokenizer_type,
             tokenizer_config=tokenizer_config,
             include_hydrogens=cfg.data.get("include_hydrogens", False),
+            use_precomputed_smiles=cfg.data.get("use_precomputed_smiles", False),
+            precomputed_smiles_dir=cfg.data.get("precomputed_smiles_dir", None),
             **coconut_kwargs,
         )
 
