@@ -55,7 +55,7 @@ python scripts/test.py
 python scripts/realistic_gen.py
 
 # Create output table
-python scripts/compare_results.py
+python scripts/comparison/compare_results.py
 ```
 
 
@@ -65,10 +65,10 @@ Fine-tune a pretrained model on COCONUT complex natural products to evaluate tra
 
 ```bash
 # First, prepare the complex molecule dataset (one-time setup, ~191MB download)
-python scripts/prepare_coconut_data.py
+python scripts/preprocess/prepare_coconut_data.py
 
 # Custom filtering thresholds
-python scripts/prepare_coconut_data.py \
+python scripts/preprocess/prepare_coconut_data.py \
     --n-molecules 10000 \
     --min-atoms 25 \
     --min-rings 3
@@ -90,7 +90,7 @@ python scripts/eval_finetune.py \
     generation.num_samples=1000
 
 # Compare the results of fine-tuned model
-python scripts/compare_finetune_results.py
+python scripts/comparison/compare_finetune_results.py
 ```
 
 ### Trained Checkpoint
@@ -122,7 +122,7 @@ The `bash_scripts/` directory provides end-to-end automation for the full benchm
 ./bash_scripts/precompute_benchmarks.sh              # MOSES (1M samples, parallel screen sessions)
 ./bash_scripts/precompute_benchmarks.sh --coconut    # COCONUT (5K samples, runs directly)
 ./bash_scripts/precompute_benchmarks.sh --all        # Both datasets
-./bash_scripts/precompute_benchmarks.sh --use-precomputed-smiles --tokenizer=hsent --coarsening=sc  # Use precomputed SMILES (run export_moses_smiles.py first)
+./bash_scripts/precompute_benchmarks.sh --use-precomputed-smiles --tokenizer=hsent --coarsening=sc  # Use precomputed SMILES (run scripts/preprocess/export_moses_smiles.py first)
 ./bash_scripts/stop_precompute_benchmarks.sh --tokenizer=hsent --coarsening=sc   # Cancel running precompute jobs
 
 # Step 1: Train all tokenizer variants from scratch
@@ -158,6 +158,9 @@ MOSAIC/
 │   └── realistic_gen/     # Generation quality analysis
 ├── configs/               # Hydra configuration
 ├── scripts/               # Training, evaluation, and visualization scripts
+│   ├── preprocess/        # Data preprocessing and caching
+│   ├── comparison/        # Result comparison and benchmarking
+│   └── visualization/     # Visualization and demo scripts
 ├── bash_scripts/          # Batch benchmark automation scripts
 ├── property_experiment/   # Post-hoc analysis experiments
 ├── tests/                 # Test suite

@@ -680,13 +680,15 @@ class MolecularDataModule(pl.LightningDataModule):
             "labeled": labeled,
         }
 
-        # Save cache file
+        # Save cache file using len(smiles_list) (the config count) so the
+        # filename matches what _try_load_cache looks up. If some SMILES failed
+        # conversion, len(tokens) < len(smiles_list).
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         cache_filename = get_cache_filename(
             self.dataset_name,
             split,
             getattr(self.tokenizer, "tokenizer_type", "unknown"),
-            len(tokens),
+            len(smiles_list),
             tokenizer_config,
         )
         cache_path = self.cache_dir / cache_filename

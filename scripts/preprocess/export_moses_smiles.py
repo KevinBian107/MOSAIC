@@ -7,8 +7,8 @@ datamodule and precompute_benchmarks.sh chunks load from it instead of re-readin
 See docs/commands_reference.md and docs/setup_training.md.
 
 Usage:
-    python scripts/export_moses_smiles.py
-    python scripts/export_moses_smiles.py --output-dir data/moses_smiles
+    python scripts/preprocess/export_moses_smiles.py
+    python scripts/preprocess/export_moses_smiles.py --output-dir data/moses_smiles
 """
 
 import argparse

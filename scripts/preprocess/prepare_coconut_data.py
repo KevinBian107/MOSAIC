@@ -8,10 +8,10 @@ Downloads the CSV lite format (~191MB) and extracts SMILES.
 
 Usage:
     # Download and filter COCONUT data (default)
-    python scripts/prepare_coconut_data.py
+    python scripts/preprocess/prepare_coconut_data.py
 
     # Custom output and settings
-    python scripts/prepare_coconut_data.py \
+    python scripts/preprocess/prepare_coconut_data.py \
         --output data/coconut_complex.smi \
         --n-molecules 10000 \
         --min-atoms 25 \

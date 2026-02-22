@@ -5,9 +5,9 @@ This script tests different parameter combinations for SpectralCoarsening
 to find optimal trade-offs between compute efficiency and modularity quality.
 
 Usage:
-    python scripts/benchmark_spectral.py
-    python scripts/benchmark_spectral.py --num-samples 1000
-    python scripts/benchmark_spectral.py --output results.json
+    python scripts/comparison/compare_spectral.py
+    python scripts/comparison/compare_spectral.py --num-samples 1000
+    python scripts/comparison/compare_spectral.py --output results.json
 """
 
 import argparse

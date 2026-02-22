@@ -7,7 +7,7 @@ metrics.reference_graphs_path to the printed path in test.yaml or pass it to tes
 See docs/commands_reference.md.
 
 Usage:
-    python scripts/precompute_reference_graphs.py experiment=moses reference_graphs.output_dir=outputs/eval_run
+    python scripts/preprocess/precompute_reference_graphs.py experiment=moses reference_graphs.output_dir=outputs/eval_run
     # Script prints the path to the saved file (e.g. outputs/eval_run/reference_graphs/reference_graphs_moses_test_100.pt)
 """
 
@@ -113,7 +113,7 @@ if __name__ == "__main__":
     else:
         overrides = sys.argv[1:]
     if not overrides or "reference_graphs.output_dir" not in " ".join(overrides):
-        print("Usage: python scripts/precompute_reference_graphs.py experiment=NAME reference_graphs.output_dir=OUTPUT_DIR", file=sys.stderr)
+        print("Usage: python scripts/preprocess/precompute_reference_graphs.py experiment=NAME reference_graphs.output_dir=OUTPUT_DIR", file=sys.stderr)
         sys.exit(1)
     out_path = main_with_overrides(overrides)
     print(out_path)

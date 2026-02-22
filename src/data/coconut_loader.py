@@ -70,7 +70,7 @@ class CoconutLoader:
         if not self.data_file.exists():
             raise FileNotFoundError(
                 f"COCONUT data file not found: {self.data_file}. "
-                "Generate it with: python scripts/prepare_coconut_data.py"
+                "Generate it with: python scripts/preprocess/prepare_coconut_data.py"
             )
 
         molecules: list[Chem.Mol] = []

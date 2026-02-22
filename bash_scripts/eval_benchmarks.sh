@@ -224,7 +224,7 @@ done
 echo "========================================"
 echo "Generating comparison table..."
 echo "========================================"
-python scripts/compare_results.py --test-dir "$TEST_OUTPUT_DIR" --realistic-gen-dir "$REALISTIC_GEN_OUTPUT_DIR" --output "$COMPARISON_OUTPUT"
+python scripts/comparison/compare_results.py --test-dir "$TEST_OUTPUT_DIR" --realistic-gen-dir "$REALISTIC_GEN_OUTPUT_DIR" --output "$COMPARISON_OUTPUT"
 
 echo ""
 echo "Done! Results saved to:"

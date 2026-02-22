@@ -168,6 +168,25 @@ supports_coarsening() {
     fi
 }
 
+# Get recommended sampling.max_length per tokenizer for COCONUT.
+# Values derived from tokenization stats on 1000 COCONUT samples with ~15% buffer.
+get_coconut_max_length() {
+    local tok="$1"
+    local coarse="$2"
+
+    case "${tok}_${coarse}" in
+        sent_*)              echo 512  ;;
+        hsent_motif_community)  echo 1536 ;;
+        hsent_spectral)      echo 1536 ;;
+        hsent_hac)           echo 2048 ;;
+        hdt_motif_community) echo 1024 ;;
+        hdt_spectral)        echo 1024 ;;
+        hdt_hac)             echo 1280 ;;
+        hdtc_*)              echo 1536 ;;
+        *)                   echo 2048 ;;
+    esac
+}
+
 # Get short name for output directory
 get_short_name() {
     local ckpt_path="$1"
@@ -235,6 +254,10 @@ echo "$CHECKPOINTS" | while read -r ckpt; do
         CMD="$CMD tokenizer.coarsening_strategy=$COARSENING"
     fi
 
+    # Set per-tokenizer max_length for position embeddings
+    TOK_MAX_LENGTH=$(get_coconut_max_length "$TOKENIZER" "$COARSENING")
+    CMD="$CMD sampling.max_length=$TOK_MAX_LENGTH"
+
     echo "========================================"
 
     if [ "$DRY_RUN" = true ]; then
@@ -249,5 +272,4 @@ echo "$CHECKPOINTS" | while read -r ckpt; do
 done
 
 echo "========================================"
-echo "Done! Fine-tuned models saved to: $OUTPUT_DIR/"
-echo "========================================"
+echo "Done! Fine-tuned models saved to $OUTPUT_DIR"
