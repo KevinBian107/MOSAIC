@@ -295,6 +295,7 @@ def main(cfg: DictConfig) -> None:
             {
                 "node_order": cfg.tokenizer.get("node_order", "BFS"),
                 "include_rings": cfg.tokenizer.get("include_rings", True),
+                "undirected": cfg.tokenizer.get("undirected", True),
             }
         )
 
