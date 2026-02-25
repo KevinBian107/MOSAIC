@@ -1407,6 +1407,7 @@ def main(cfg: DictConfig) -> None:
         check_val_every_n_epoch=cfg.trainer.get("check_val_every_n_epoch"),
         limit_val_batches=limit_val_batches,
         num_sanity_val_steps=cfg.trainer.get("num_sanity_val_steps", 2),
+        accumulate_grad_batches=cfg.trainer.get("accumulate_grad_batches", 1),
         precision=cfg.trainer.precision,
         gradient_clip_val=cfg.trainer.gradient_clip_val,
         accelerator=cfg.trainer.accelerator,

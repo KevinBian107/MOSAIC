@@ -8,6 +8,7 @@ Utility scripts for running batch operations.
 0. precompute_benchmarks.sh       → Precompute tokenized cache (optional, speeds up training)
     stop_precompute_benchmarks.sh → Stop precompute screen sessions (cancel running jobs)
 1. train_benchmarks.sh            → Pretrain on MOSES (or COCONUT)
+    train_lr_sweep.sh             → LR sweep for SC/HAC coarsening (4 LRs × 2 tokenizers, MIG parallel)
 2. eval_benchmarks.sh             → Evaluate pretrained models (discovers checkpoints automatically)
     eval_benchmarks_auto.sh       → Evaluate checkpoints from a mapping file (with optional caching, precomputed SMILES, reference graphs)
 3. finetune_benchmarks.sh         → Fine-tune on COCONUT (transfer learning)
@@ -182,6 +183,91 @@ Checkpoints are looked for under `BENCHMARK_DIR` (default `outputs/benchmark`) a
 - Test outputs: `OUTPUT_PATH/test/<directory_name>/results.json`, `generated_smiles.txt`
 - Realistic gen: `OUTPUT_PATH/realistic_gen/<directory_name>/...`
 - Comparison table: `OUTPUT_PATH/comparison.png`
+
+---
+
+## train_lr_sweep.sh
+
+Finds good learning rates for SC (spectral clustering) and HAC coarsening strategies before committing to long training runs. Trains HSENT and HDT at 4 learning rates (6e-4, 1e-3, 2e-3, 4e-3) using **task parallelism** on 4 MIG GPUs, then evaluates and generates comparison tables.
+
+### What it does
+
+1. Detects MIG GPUs (4 required for parallel execution, falls back to sequential)
+2. Precomputes tokenized data caches for needed tokenizer+coarsening combos
+3. For each coarsening (SC, HAC, or both):
+   a. Trains HSENT at 4 LRs on 4 MIG GPUs in parallel
+   b. Trains HDT at 4 LRs on 4 MIG GPUs in parallel
+   c. Evaluates all 8 models sequentially
+   d. Generates a comparison table PNG
+4. Prints summary of all runs
+
+Each model trains with `accumulate_grad_batches=2` and `batch_size=32`, giving an effective batch of 64. With 25K optimizer steps, this equals 50K equivalent base steps.
+
+### Usage
+
+```bash
+# Both SC+HAC on COCONUT (default)
+./bash_scripts/train_lr_sweep.sh
+
+# SC only on COCONUT
+./bash_scripts/train_lr_sweep.sh --sc --coconut
+
+# HAC only on MOSES
+./bash_scripts/train_lr_sweep.sh --hac --moses
+
+# Dry run (show commands without executing)
+./bash_scripts/train_lr_sweep.sh --sc --coconut --dry-run
+
+# Skip training, only evaluate existing checkpoints
+./bash_scripts/train_lr_sweep.sh --eval-only
+
+# Train without evaluation
+./bash_scripts/train_lr_sweep.sh --sc --no-eval
+
+# Re-run even if checkpoints exist
+./bash_scripts/train_lr_sweep.sh --force
+
+# Custom step count
+./bash_scripts/train_lr_sweep.sh --steps=50000
+```
+
+### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--sc` | | Only SC coarsening |
+| `--hac` | | Only HAC coarsening |
+| `--both` | default | Both SC and HAC |
+| `--coconut` | default | Train on COCONUT |
+| `--moses` | | Train on MOSES |
+| `--dry-run` | | Show commands without executing |
+| `--no-wandb` | | Disable WandB logging |
+| `--eval-only` | | Skip training, only evaluate |
+| `--no-eval` | | Skip evaluation |
+| `--force` | | Re-run even if checkpoints exist |
+| `--steps=N` | 25000 | Optimizer steps (with accum=2, equivalent to 2N base steps) |
+
+### Sweep grid
+
+2 tokenizers (HSENT, HDT) x 4 LRs (6e-4, 1e-3, 2e-3, 4e-3) = 8 models per coarsening type.
+
+### Output
+
+```
+outputs/lr_sweep/
+    coconut_hsent_sc_lr6e-4_20260222-.../best.ckpt
+    coconut_hsent_sc_lr1e-3_20260222-.../best.ckpt
+    ...
+outputs/lr_sweep_eval/
+    coconut_sc/
+        coconut_hsent_sc_lr6e-4/results.json
+        ...
+        comparison_sc.png
+    coconut_hac/
+        coconut_hsent_hac_lr6e-4/results.json
+        ...
+        comparison_hac.png
+```
 
 ---
 
