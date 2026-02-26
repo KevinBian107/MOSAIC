@@ -5,6 +5,7 @@ metric that measures the quality of generated graphs by training a binary classi
 to distinguish between reference and generated distributions.
 """
 
+import logging
 from typing import Optional
 
 import networkx as nx
@@ -103,12 +104,9 @@ class PolygraphMetric:
             generated_graphs: List of generated graphs (Data objects or NetworkX).
 
         Returns:
-            Dictionary with single key 'pgd' mapping to score in [0, 1].
-            Lower values indicate better generation quality:
-            - < 0.1: Excellent (indistinguishable from reference)
-            - < 0.3: Good
-            - < 0.5: Moderate
-            - >= 0.5: Poor (easily distinguishable)
+            Dictionary with single key 'pgd' mapping to score in [0, 1], or -1 on failure.
+            Valid scores: lower is better (< 0.1 excellent, < 0.3 good, < 0.5 moderate).
+            -1 indicates failure (no valid graphs or exception).
         """
         self._precompute_reference()
 
@@ -116,47 +114,41 @@ class PolygraphMetric:
         generated_nx = self._to_networkx_list(generated_graphs)
 
         if len(generated_nx) == 0:
-            # No valid generated graphs - return worst score
-            return {"pgd": 1.0}
+            logging.error("PGD: no valid generated graphs")
+            return {"pgd": -1.0}
 
         try:
-            # PGD requires balanced datasets (same number of ref and gen graphs)
-            # Sample reference graphs to match generated graph count
-            import random
-
-            if len(self._reference_nx) > len(generated_nx):
-                # Sample without replacement to match generated size
-                sampled_ref = random.sample(self._reference_nx, len(generated_nx))
+            # PGD requires equal ref and gen counts. Use all generated; match ref to gen.
+            n_ref = len(self._reference_nx)
+            n_gen = len(generated_nx)
+            if n_ref >= n_gen:
+                # Use all generated; take first n_gen reference graphs
+                sampled_ref = self._reference_nx[:n_gen]
+                sampled_gen = generated_nx
             else:
-                # Use all reference graphs
+                # Not enough reference to pair with all generated; use first n_ref of each and warn
+                logging.warning(
+                    "PGD: reference count (%d) < generated count (%d). "
+                    "Using first %d generated. Set metrics.pgd_reference_size >= sampling.num_samples to use all generated.",
+                    n_ref,
+                    n_gen,
+                    n_ref,
+                )
                 sampled_ref = self._reference_nx
+                sampled_gen = generated_nx[:n_ref]
 
-            # Re-initialize PGD with balanced reference set
             from polygraph.metrics import StandardPGD
 
             balanced_pgd = StandardPGD(reference_graphs=sampled_ref)
+            pgd_result = balanced_pgd.compute(generated_graphs=sampled_gen)
 
-            # Compute PGD using polygraph library
-            # The metric trains a classifier and returns discrimination score
-            pgd_result = balanced_pgd.compute(generated_graphs=generated_nx)
-
-            # Extract the main PGD score from the result
-            # PolyGraphDiscrepancyResult has key 'polygraphscore'
-            pgd_score = pgd_result.get("polygraphscore", pgd_result.get("pgd", 1.0))
-
-            # PGD should return a value in [0, 1]
-            # Ensure it's properly bounded
-            pgd_score = float(pgd_score)
+            pgd_score = float(pgd_result.get("pgd", -1.0))
             pgd_score = max(0.0, min(1.0, pgd_score))
-
             return {"pgd": pgd_score}
 
         except Exception as e:
-            # If computation fails, log warning and return invalid score
-            import logging
-
-            logging.warning(f"PGD computation failed: {e}")
-            return {"pgd": 1.0}
+            logging.error("PGD computation failed: %s", e)
+            return {"pgd": -1.0}
 
     def __call__(self, generated_graphs: list[Data | nx.Graph]) -> dict[str, float]:
         """Compute PGD score (callable interface).
