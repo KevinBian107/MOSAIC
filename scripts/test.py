@@ -526,6 +526,18 @@ def main(cfg: DictConfig) -> None:
                 log.info(f"Successfully converted {len(reference_graphs)} reference graphs")
 
             if len(reference_graphs) > 0:
+                num_samples = cfg.sampling.num_samples
+                if num_samples < 0:
+                    num_samples = len(generated_graphs)
+                if max_ref_size < num_samples:
+                    log.warning(
+                        "PGD: metrics.pgd_reference_size (%d) < sampling.num_samples (%d). "
+                        "Only first %d generated will be used. Set metrics.pgd_reference_size >= %d to use all generated.",
+                        max_ref_size,
+                        num_samples,
+                        min(max_ref_size, len(generated_graphs)),
+                        num_samples,
+                    )
                 polygraph_metric = PolygraphMetric(
                     reference_graphs=reference_graphs,
                     max_reference_size=max_ref_size,
@@ -533,11 +545,13 @@ def main(cfg: DictConfig) -> None:
                 polygraph_results = polygraph_metric(generated_graphs)
                 pgd_score = polygraph_results.get("pgd")
 
-                if pgd_score is not None:
+                if pgd_score is not None and pgd_score >= 0:
                     log.info(f"  pgd                 : {pgd_score:.6f}")
                     log.info(
                         "  (Lower is better: <0.1 excellent, <0.3 good, <0.5 moderate)"
                     )
+                elif pgd_score is not None and pgd_score < 0:
+                    log.info("  pgd                 : N/A (computation failed)")
                 else:
                     log.info("  PGD computation returned None")
             else:

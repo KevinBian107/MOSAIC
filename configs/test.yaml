@@ -41,7 +41,7 @@ metrics:
   compute_motif: true  # Compute motif distribution metrics (MSC, MFD)
   compute_fcd: true  # Requires moses or fcd package
   compute_pgd: true  # Requires polygraph-benchmark package
-  pgd_reference_size: 100  # Max number of reference molecules for PGD (memory constraint)
+  pgd_reference_size: 500  # Should be >= sampling.num_samples to use all generated; PGD needs equal ref/gen counts
   reference_size: 100000  # Max reference set size for FCD, molecular, and motif metrics
   reference_split: "test"  # Reference population: "test" (default) or "full" (train+test combined)
   reference_graphs_path: null  # If set, load PGD reference graphs from this .pt file (skip SMILES->graph conversion)

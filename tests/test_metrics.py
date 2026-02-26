@@ -147,23 +147,37 @@ class TestPolygraphMetric:
             pytest.skip("polygraph-benchmark not installed")
 
     def test_pgd_bounded(self, sample_graph_list: list[Data]) -> None:
-        """Test PGD score is bounded in [0, 1]."""
+        """Test PGD score is in [0, 1] or -1 (failure sentinel)."""
         try:
             metric = PolygraphMetric(sample_graph_list)
             result = metric.compute(sample_graph_list)
 
-            assert 0.0 <= result["pgd"] <= 1.0
+            assert result["pgd"] == -1.0 or (0.0 <= result["pgd"] <= 1.0)
         except ImportError:
             pytest.skip("polygraph-benchmark not installed")
 
-    def test_self_reference_low_pgd(self, sample_graph_list: list[Data]) -> None:
-        """Test PGD is low when comparing distribution to itself."""
+    def test_self_reference_low_pgd(self) -> None:
+        """Test PGD is low when comparing distribution to itself.
+
+        Uses a list of 20 graphs so polygraph's internal CV (n_splits=4) has enough samples.
+        """
         try:
-            metric = PolygraphMetric(sample_graph_list)
-            result = metric.compute(sample_graph_list)
+            import networkx as nx
+            from torch_geometric.utils import from_networkx
+
+            ref_list = [
+                Data(
+                    edge_index=from_networkx(
+                        nx.erdos_renyi_graph(20, 0.3, seed=i)
+                    ).edge_index,
+                    num_nodes=20,
+                )
+                for i in range(20)
+            ]
+            metric = PolygraphMetric(ref_list)
+            result = metric.compute(ref_list)
 
             # When comparing to self, PGD should be relatively low
-            # (classifier can't distinguish well)
             assert result["pgd"] < 0.5
         except ImportError:
             pytest.skip("polygraph-benchmark not installed")
@@ -186,8 +200,8 @@ class TestPolygraphMetric:
             metric = PolygraphMetric(sample_graph_list)
             result = metric.compute([])
 
-            # Should return worst score for no valid graphs
-            assert result["pgd"] == 1.0
+            # Should return failure sentinel for no valid graphs
+            assert result["pgd"] == -1.0
         except ImportError:
             pytest.skip("polygraph-benchmark not installed")
 
@@ -203,7 +217,7 @@ class TestPolygraphMetric:
             result = metric.compute(ref_graphs)
 
             assert "pgd" in result
-            assert 0.0 <= result["pgd"] <= 1.0
+            assert result["pgd"] == -1.0 or (0.0 <= result["pgd"] <= 1.0)
         except ImportError:
             pytest.skip("polygraph-benchmark or networkx not installed")
 

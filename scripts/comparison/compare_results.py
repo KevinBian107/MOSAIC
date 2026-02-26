@@ -579,6 +579,9 @@ def format_value(value: float | int | None, metric: str) -> str:
     """
     if value is None:
         return "-"
+    # PGD uses -1 as sentinel for computation failure
+    if metric == "pgd" and isinstance(value, (int, float)) and value < 0:
+        return "-"
     # Use display names for coarsening strategy
     if metric == "coarsening_strategy" and isinstance(value, str):
         return COARSENING_DISPLAY_NAMES.get(value, value)
@@ -619,10 +622,14 @@ def select_best_per_tokenizer_and_coarsening(runs: list[dict]) -> list[dict]:
 
     best_runs = []
     for (tokenizer_type, coarsening), group_runs in grouped_runs.items():
-        # Sort by PGD (lower is better), treating None as infinity
+        # Sort by PGD (lower is better), treating None and -1 (failure sentinel) as infinity
         def get_pgd(r: dict) -> float:
             pgd = r["results"].get("pgd")
-            return pgd if pgd is not None else float("inf")
+            return (
+                pgd
+                if pgd is not None and (not isinstance(pgd, (int, float)) or pgd >= 0)
+                else float("inf")
+            )
 
         sorted_runs = sorted(group_runs, key=get_pgd)
         best_runs.append(sorted_runs[0])
@@ -707,9 +714,15 @@ def build_table_data(
             for run in runs:
                 value = run["results"].get(metric)
                 row_values.append(format_value(value, metric))
+                # Treat PGD -1 (failure sentinel) as missing for ranking/highlighting
+                is_invalid = value is None or (
+                    metric == "pgd"
+                    and isinstance(value, (int, float))
+                    and value < 0
+                )
                 raw_values.append(
                     value
-                    if value is not None
+                    if not is_invalid
                     else float("inf")
                     if metric in LOWER_IS_BETTER
                     else float("-inf")
