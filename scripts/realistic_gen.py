@@ -61,6 +61,41 @@ from src.tokenizers import (  # noqa: E402
 log = logging.getLogger(__name__)
 
 
+def _compute_samples_seen(checkpoint_path: str) -> dict:
+    """Compute samples_seen from a checkpoint and its co-located training config.
+
+    Args:
+        checkpoint_path: Path to the .ckpt file.
+
+    Returns:
+        Dict with global_step, effective_batch_size, samples_seen (None if unavailable).
+    """
+    result = {"global_step": None, "effective_batch_size": None, "samples_seen": None}
+    try:
+        ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        result["global_step"] = ckpt.get("global_step")
+    except Exception:
+        return result
+
+    config_path = Path(checkpoint_path).parent / "config.yaml"
+    if config_path.exists():
+        try:
+            train_cfg = OmegaConf.load(config_path)
+            B = train_cfg.data.batch_size
+            G = train_cfg.trainer.get("devices", 1)
+            if not isinstance(G, int) or G < 1:
+                G = 1
+            A = train_cfg.trainer.get("accumulate_grad_batches", 1)
+            result["effective_batch_size"] = B * G * A
+        except Exception:
+            pass
+
+    if result["global_step"] is not None and result["effective_batch_size"] is not None:
+        result["samples_seen"] = result["global_step"] * result["effective_batch_size"]
+
+    return result
+
+
 def get_tokenizer(cfg: DictConfig):
     """Create tokenizer based on configuration.
 
@@ -324,6 +359,15 @@ def main(cfg: DictConfig) -> None:
     )
     model.eval()
 
+    # Compute samples_seen for this checkpoint
+    ckpt_info = _compute_samples_seen(cfg.model.checkpoint_path)
+    if ckpt_info["samples_seen"] is not None:
+        log.info(
+            f"Checkpoint trained for {ckpt_info['global_step']:,} steps "
+            f"(B_eff={ckpt_info['effective_batch_size']}, "
+            f"samples_seen={ckpt_info['samples_seen']:,})"
+        )
+
     # Generate molecules
     num_samples = cfg.generation.num_samples
     log.info("\n" + "=" * 60)
@@ -487,6 +531,9 @@ def main(cfg: DictConfig) -> None:
         "functional_group_tv": fg_metrics["total_variation"],
         "functional_group_kl": fg_metrics["kl_divergence"],
         "reference_split": reference_split,
+        "global_step": ckpt_info["global_step"],
+        "effective_batch_size": ckpt_info["effective_batch_size"],
+        "samples_seen": ckpt_info["samples_seen"],
     }
 
     results_file = output_dir / "results.json"

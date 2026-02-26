@@ -1353,7 +1353,14 @@ def main(cfg: DictConfig) -> None:
     # Print DDP speedup estimation
     num_gpus = world_size
     current_batch_size = cfg.data.batch_size
-    effective_batch_size = current_batch_size * num_gpus
+    accum = cfg.trainer.get("accumulate_grad_batches", 1)
+    effective_batch_size = current_batch_size * num_gpus * accum
+
+    # Log effective_batch_size to WandB config for cross-run comparison
+    if wandb_logger is not None:
+        wandb_logger.experiment.config.update({
+            "effective_batch_size": effective_batch_size,
+        }, allow_val_change=True)
 
     # Baseline: 1 GPU, batch_size=32, 20 epochs
     baseline_batch = 32

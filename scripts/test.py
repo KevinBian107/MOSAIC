@@ -76,6 +76,65 @@ def autograph_graph_to_smiles(graph, atom_decoder: list[str]) -> Optional[str]:
         return None
 
 
+def compute_samples_seen(checkpoint_path: str, checkpoint: Optional[dict] = None) -> dict:
+    """Compute samples_seen from a checkpoint and its co-located training config.
+
+    Tries to load config.yaml from the same directory as the checkpoint to get
+    the original training batch_size, devices, and accumulate_grad_batches.
+    Falls back gracefully when the config is missing (old/moved checkpoints).
+
+    Args:
+        checkpoint_path: Path to the .ckpt file.
+        checkpoint: Pre-loaded checkpoint dict (avoids re-loading).
+
+    Returns:
+        Dict with global_step, epoch, effective_batch_size, samples_seen.
+        Missing fields are set to None.
+    """
+    result = {
+        "global_step": None,
+        "epoch": None,
+        "effective_batch_size": None,
+        "samples_seen": None,
+    }
+
+    # Load checkpoint if not provided
+    if checkpoint is None:
+        try:
+            checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        except Exception:
+            return result
+
+    result["global_step"] = checkpoint.get("global_step")
+    result["epoch"] = checkpoint.get("epoch")
+
+    # Try to load training config from the same directory
+    ckpt_dir = Path(checkpoint_path).parent
+    config_path = ckpt_dir / "config.yaml"
+    if config_path.exists():
+        try:
+            train_cfg = OmegaConf.load(config_path)
+            B = train_cfg.data.batch_size
+            G = train_cfg.trainer.get("devices", 1)
+            if not isinstance(G, int) or G < 1:
+                G = 1
+            A = train_cfg.trainer.get("accumulate_grad_batches", 1)
+            result["effective_batch_size"] = B * G * A
+        except Exception as e:
+            log.warning(f"Could not parse training config for samples_seen: {e}")
+
+    if result["global_step"] is not None and result["effective_batch_size"] is not None:
+        result["samples_seen"] = result["global_step"] * result["effective_batch_size"]
+    elif result["global_step"] is not None:
+        log.warning(
+            f"No config.yaml found next to checkpoint — cannot compute samples_seen. "
+            f"global_step={result['global_step']}. To convert manually: "
+            f"samples_seen = global_step × batch_size × num_GPUs × accumulate_grad_batches"
+        )
+
+    return result
+
+
 def is_autograph_checkpoint(checkpoint_path: str) -> bool:
     """Detect if a checkpoint is from AutoGraph or MOSAIC.
 
@@ -316,6 +375,20 @@ def main(cfg: DictConfig) -> None:
             **load_kwargs,
         )
     model.eval()
+
+    # Compute samples_seen for this checkpoint (works for old and new checkpoints)
+    ckpt_info = compute_samples_seen(
+        cfg.model.checkpoint_path,
+        checkpoint=checkpoint if not use_autograph else None,
+    )
+    if ckpt_info["samples_seen"] is not None:
+        log.info(
+            f"Checkpoint trained for {ckpt_info['global_step']:,} steps "
+            f"(B_eff={ckpt_info['effective_batch_size']}, "
+            f"samples_seen={ckpt_info['samples_seen']:,})"
+        )
+    elif ckpt_info["global_step"] is not None:
+        log.info(f"Checkpoint trained for {ckpt_info['global_step']:,} steps")
 
     num_test = len(datamodule.test_smiles)
 
@@ -615,6 +688,9 @@ def main(cfg: DictConfig) -> None:
         "num_samples": num_samples,
         "num_valid_smiles": valid_count,
         "reference_split": reference_split,
+        "global_step": ckpt_info["global_step"],
+        "effective_batch_size": ckpt_info["effective_batch_size"],
+        "samples_seen": ckpt_info["samples_seen"],
     }
     if token_lengths:
         all_results["token_lengths"] = token_lengths

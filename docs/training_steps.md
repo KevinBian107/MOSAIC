@@ -54,13 +54,56 @@ Run: `moses_hdtc_20260221-224537`, finished at step 250,000. To see the same 16M
 
 Same data seen, same number of epochs — but the 1-GPU run needs **4x the global_steps** on WandB to get there. If you compare the two WandB curves by step, the 4-GPU run looks 4x faster to converge, but it's just the x-axis scaling.
 
-## Comparing Runs Fairly
+## Unified X-Axis: `train/samples_seen`
 
 **Do not compare WandB loss curves by `global_step` when $B_{\text{eff}}$ differs.** At the same step, a larger effective batch has seen more data.
 
-Compare by:
-- **Samples seen**: $s \times B_{\text{eff}}$
-- **Epochs**: WandB logs `train/loss_epoch`
+We log `train/samples_seen` every training step so you can normalize across any combination of $B$, $G$, $A$:
+
+$$\texttt{train/samples\_seen} = \texttt{global\_step} \times B \times G \times A$$
+
+### How to use in WandB
+
+1. Open your WandB panel with `train/loss`
+2. Click the **x-axis** dropdown (bottom-left of chart)
+3. Select **`train/samples_seen`** instead of `Step`
+4. All runs now share a comparable x-axis regardless of batch/GPU/accum config
+
+`effective_batch_size` is also logged to each run's WandB config for quick reference.
+
+### Conversion table
+
+To convert a `global_step` $s$ to `samples_seen`, look up $B_{\text{eff}}$ from the run's config:
+
+| Run config | $B_{\text{eff}}$ | step 10K = | step 100K = | step 250K = |
+|-----------|-------------------|------------|-------------|-------------|
+| $B$=16, $G$=1, $A$=1 | 16 | 160K samples | 1.6M | 4M |
+| $B$=16, $G$=4, $A$=1 | 64 | 640K samples | 6.4M | 16M |
+| $B$=32, $G$=1, $A$=2 | 64 | 640K samples | 6.4M | 16M |
+| $B$=8, $G$=1, $A$=8 | 64 | 640K samples | 6.4M | 16M |
+| $B$=32, $G$=4, $A$=1 | 128 | 1.28M samples | 12.8M | 32M |
+
+The last three rows all have $B_{\text{eff}} = 64$ — their WandB curves align perfectly when plotted against `train/samples_seen`, even though their `global_step` counts differ by up to 4x.
+
+## Eval Pipeline: `samples_seen` in `results.json`
+
+Both `test.py` and `realistic_gen.py` automatically compute `samples_seen` for any checkpoint and include it in `results.json`:
+
+```json
+{
+  "global_step": 250000,
+  "effective_batch_size": 64,
+  "samples_seen": 16000000
+}
+```
+
+**How it works:** the eval scripts read `global_step` from the checkpoint, then look for `config.yaml` in the same directory (saved during training) to recover $B$, $G$, $A$.
+
+**Old checkpoints** (trained before this change): `global_step` is always available in the `.ckpt` file. If the `config.yaml` is co-located, `samples_seen` is computed automatically. If the checkpoint was moved and `config.yaml` is missing, the script logs a warning and sets `effective_batch_size` and `samples_seen` to `null` — you can compute it manually:
+
+```
+samples_seen = global_step × batch_size × num_GPUs × accumulate_grad_batches
+```
 
 ## Gotcha: Logged `Steps per epoch` is Wrong When $A > 1$
 
