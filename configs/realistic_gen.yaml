@@ -22,6 +22,9 @@ data:
   num_workers: 0
   include_hydrogens: false
   data_root: data
+  # Optional: load from precomputed SMILES file (e.g. data/moses_smiles/moses_smiles.txt)
+  use_precomputed_smiles: false
+  precomputed_smiles_dir: data/moses_smiles
 
 # Generation configuration
 generation:
