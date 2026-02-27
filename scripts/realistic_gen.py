@@ -85,8 +85,11 @@ def _compute_samples_seen(checkpoint_path: str) -> dict:
             G = train_cfg.trainer.get("devices", 1)
             if not isinstance(G, int) or G < 1:
                 G = 1
+            N = train_cfg.trainer.get("num_nodes", 1)
+            if not isinstance(N, int) or N < 1:
+                N = 1
             A = train_cfg.trainer.get("accumulate_grad_batches", 1)
-            result["effective_batch_size"] = B * G * A
+            result["effective_batch_size"] = B * G * N * A
         except Exception:
             pass
 
@@ -94,6 +97,32 @@ def _compute_samples_seen(checkpoint_path: str) -> dict:
         result["samples_seen"] = result["global_step"] * result["effective_batch_size"]
 
     return result
+
+
+def _resolve_coarsening_strategy(cfg: DictConfig, tokenizer_name: str) -> tuple[str, bool]:
+    """Resolve coarsening strategy with backward-compatible motif_aware fallback."""
+    strategy = cfg.tokenizer.get("coarsening_strategy")
+    motif_aware = bool(cfg.tokenizer.get("motif_aware", False))
+
+    if strategy is None:
+        if motif_aware:
+            strategy = "motif_aware_spectral"
+            log.warning(
+                "tokenizer.motif_aware is deprecated for %s. "
+                "Using tokenizer.coarsening_strategy=motif_aware_spectral.",
+                tokenizer_name,
+            )
+        else:
+            strategy = "spectral"
+    elif motif_aware and strategy != "motif_aware_spectral":
+        log.warning(
+            "Both tokenizer.motif_aware=true and tokenizer.coarsening_strategy=%s "
+            "are set for %s. Using coarsening_strategy and ignoring motif_aware.",
+            strategy,
+            tokenizer_name,
+        )
+
+    return strategy, motif_aware
 
 
 def get_tokenizer(cfg: DictConfig):
@@ -108,23 +137,25 @@ def get_tokenizer(cfg: DictConfig):
     tokenizer_type = cfg.tokenizer.get("type", "sent").lower()
 
     if tokenizer_type == "hdt":
-        log.info("Using HDT tokenizer")
+        coarsening_strategy, motif_aware = _resolve_coarsening_strategy(cfg, "hdt")
+        log.info(f"Using HDT tokenizer with {coarsening_strategy} coarsening")
         tokenizer = HDTTokenizer(
             max_length=cfg.tokenizer.max_length,
             truncation_length=cfg.tokenizer.truncation_length,
             node_order=cfg.tokenizer.get("node_order", "BFS"),
             min_community_size=cfg.tokenizer.get("min_community_size", 4),
-            coarsening_strategy=cfg.tokenizer.get("coarsening_strategy", None),
+            coarsening_strategy=coarsening_strategy,
+            motif_aware=motif_aware,
             labeled_graph=cfg.tokenizer.get("labeled_graph", True),
             seed=cfg.seed,
         )
     elif tokenizer_type == "hsent":
-        motif_aware = cfg.tokenizer.get("motif_aware", False)
-        if motif_aware:
-            log.info("Using hierarchical H-SENT tokenizer with motif-aware coarsening")
+        coarsening_strategy, motif_aware = _resolve_coarsening_strategy(cfg, "hsent")
+        log.info(
+            f"Using hierarchical H-SENT tokenizer with {coarsening_strategy} coarsening"
+        )
+        if coarsening_strategy in ("motif_aware_spectral", "motif_community"):
             log.info(f"  motif_alpha: {cfg.tokenizer.get('motif_alpha', 1.0)}")
-        else:
-            log.info("Using hierarchical H-SENT tokenizer with spectral coarsening")
         log.info(f"  node_order: {cfg.tokenizer.get('node_order', 'BFS')}")
         log.info(f"  min_community_size: {cfg.tokenizer.get('min_community_size', 4)}")
 
@@ -133,7 +164,7 @@ def get_tokenizer(cfg: DictConfig):
             truncation_length=cfg.tokenizer.truncation_length,
             node_order=cfg.tokenizer.get("node_order", "BFS"),
             min_community_size=cfg.tokenizer.get("min_community_size", 4),
-            coarsening_strategy=cfg.tokenizer.get("coarsening_strategy", None),
+            coarsening_strategy=coarsening_strategy,
             motif_aware=motif_aware,
             motif_alpha=cfg.tokenizer.get("motif_alpha", 1.0),
             normalize_by_motif_size=cfg.tokenizer.get("normalize_by_motif_size", False),
@@ -342,6 +373,29 @@ def main(cfg: DictConfig) -> None:
         ref_label = "test"
 
     log.info(f"Loaded {len(ref_smiles)} {ref_label} SMILES for reference")
+    log.info("=" * 70)
+    log.info("RESOLVED REALISTIC_GEN CONFIG SUMMARY")
+    log.info("=" * 70)
+    log.info(f"Dataset: {cfg.data.dataset_name}")
+    log.info(f"Tokenizer: {tokenizer_type}")
+    if tokenizer_type in ("hdt", "hsent"):
+        log.info(
+            f"Coarsening strategy: {cfg.tokenizer.get('coarsening_strategy', 'spectral')}"
+        )
+    log.info(
+        "Generation: "
+        f"num_samples={cfg.generation.num_samples}, batch_size={cfg.generation.batch_size}"
+    )
+    log.info(
+        "Sampling: "
+        f"top_k={cfg.sampling.top_k}, temperature={cfg.sampling.temperature}, "
+        f"max_length={cfg.sampling.max_length}"
+    )
+    log.info(
+        "Reference: "
+        f"split={reference_split}, reference_count={len(ref_smiles)}"
+    )
+    log.info("=" * 70)
 
     # Configure tokenizer from checkpoint (force-corrects max_num_nodes
     # after any inflation by datamodule.setup())

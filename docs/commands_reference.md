@@ -107,7 +107,7 @@ python scripts/train.py \
     model.model_name=gpt2-xxs \
     data.num_train=1000 \
     data.num_val=100 \
-    trainer.max_steps=10 \
+    trainer.target_samples_seen=32000 \
     wandb.enabled=false
 ```
 
@@ -120,8 +120,9 @@ python scripts/train.py \
     data.num_val=-1 \
     data.num_test=-1 \
     data.num_workers=2 \
-    trainer.max_steps=700000 \
-    trainer.val_check_interval=10000 \
+    trainer.target_samples_seen=16000000 \
+    trainer.val_checks_per_epoch=5 \
+    trainer.validate_every_n_epochs=1 \
     sampling.num_samples=1000 \
     wandb.enabled=true \
     wandb.project=mosaic-labeled-sent \
@@ -148,6 +149,11 @@ python scripts/test.py \
 ---
 
 ## H-SENT and HDT training
+
+Preferred controls:
+- Budget: `trainer.target_samples_seen`
+- Validation cadence: `trainer.val_checks_per_epoch` + `trainer.validate_every_n_epochs`
+- Legacy step-based validation controls remain supported for backward compatibility.
 
 ### Short runs (no cache)
 
@@ -185,7 +191,7 @@ python scripts/train.py \
     data.num_test=5000 \
     data.batch_size=32 \
     data.num_workers=2 \
-    trainer.max_steps=100000 \
+    trainer.target_samples_seen=16000000 \
     trainer.val_check_interval=2000 \
     trainer.gradient_clip_val=1.0 \
     model.learning_rate=0.0006 \
@@ -207,7 +213,7 @@ python scripts/train.py \
     data.num_test=5000 \
     data.batch_size=32 \
     data.num_workers=2 \
-    trainer.max_steps=100000 \
+    trainer.target_samples_seen=16000000 \
     trainer.val_check_interval=2000 \
     trainer.gradient_clip_val=1.0 \
     model.learning_rate=0.0006 \

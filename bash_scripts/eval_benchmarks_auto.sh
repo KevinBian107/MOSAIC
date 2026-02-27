@@ -44,6 +44,7 @@ RECOMPUTE_DIRS=""
 CORE_ONLY=false
 # If true, pass data.use_precomputed_smiles=true (load from data/moses_smiles/moses_smiles.txt; run scripts/preprocess/export_moses_smiles.py once first)
 USE_PRECOMPUTED_SMILES=false
+REFERENCE_SPLIT="test"
 
 usage() {
     echo "Usage: $0 MAPPING_FILE OUTPUT_PATH [OPTIONS]"
@@ -61,6 +62,7 @@ usage() {
     echo "  --test-only    Only run test.py (skip realistic_gen.py)"
     echo "  --gen-only     Only run realistic_gen.py (skip test.py)"
     echo "  --core-only       Only run core metrics: validity, uniqueness, novelty (no FCD, PGD, motif, realistic_gen)"
+    echo "  --full-ref     Use train+test combined as reference population for distributional metrics"
     echo "  --use-precomputed-smiles   Load train/test SMILES from data/moses_smiles/moses_smiles.txt (run scripts/preprocess/export_moses_smiles.py once first)"
     echo "  --recompute DIR[,DIR2,...]   Force re-run test and/or gen for these checkpoint dirs (still included in table)"
     echo "  -h, --help     Show this help"
@@ -116,6 +118,9 @@ while [ $# -gt 0 ]; do
         --core-only)
             CORE_ONLY=true
             RUN_GEN=false
+            ;;
+        --full-ref)
+            REFERENCE_SPLIT="full"
             ;;
         --use-precomputed-smiles)
             USE_PRECOMPUTED_SMILES=true
@@ -214,6 +219,7 @@ done <<< "$MAP_CONTENT"
 
 NUM_RUNS=${#RUN_DIRS[@]}
 echo "Dataset: $DATASET"
+echo "Reference split: $REFERENCE_SPLIT"
 echo "Benchmark dir: $BENCHMARK_DIR"
 echo "Checkpoint type: $CKPT_NAME"
 echo "Output path: $OUTPUT_PATH"
@@ -346,12 +352,12 @@ for i in "${!RUN_DIRS[@]}"; do
             if [ "$CORE_ONLY" = true ]; then
                 echo "[1/2] Running test.py (core only: validity, uniqueness, novelty)..."
                 PREC_ARGS=""; [ "$USE_PRECOMPUTED_SMILES" = true ] && PREC_ARGS="data.use_precomputed_smiles=true"
-                python scripts/test.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.path="$LOGS_PATH_TEST" metrics.core_only=true $PREC_ARGS $COARSENING_ARGS
+                python scripts/test.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.path="$LOGS_PATH_TEST" metrics.core_only=true metrics.reference_split=$REFERENCE_SPLIT $PREC_ARGS $COARSENING_ARGS
             else
                 echo "[1/2] Running test.py..."
                 REF_ARGS=""; [ -n "$REF_GRAPHS_PATH" ] && REF_ARGS="metrics.reference_graphs_path=$REF_GRAPHS_PATH"
                 PREC_ARGS=""; [ "$USE_PRECOMPUTED_SMILES" = true ] && PREC_ARGS="data.use_precomputed_smiles=true"
-                python scripts/test.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.path="$LOGS_PATH_TEST" $REF_ARGS $PREC_ARGS $COARSENING_ARGS
+                python scripts/test.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.path="$LOGS_PATH_TEST" metrics.reference_split=$REFERENCE_SPLIT $REF_ARGS $PREC_ARGS $COARSENING_ARGS
             fi
         else
             echo "[1/2] Test already done (results.json + generated_smiles.txt present), skipping."
@@ -362,7 +368,7 @@ for i in "${!RUN_DIRS[@]}"; do
         if [ "$FORCE_RUN" = true ] || ! gen_already_done "$LOGS_PATH_GEN"; then
             echo "[2/2] Running realistic_gen.py..."
             PREC_ARGS=""; [ "$USE_PRECOMPUTED_SMILES" = true ] && PREC_ARGS="data.use_precomputed_smiles=true"
-            python scripts/realistic_gen.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.path="$LOGS_PATH_GEN" $PREC_ARGS $COARSENING_ARGS
+            python scripts/realistic_gen.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.path="$LOGS_PATH_GEN" metrics.reference_split=$REFERENCE_SPLIT $PREC_ARGS $COARSENING_ARGS
         else
             echo "[2/2] Realistic gen already done (results.json + generated_smiles.txt present), skipping."
         fi

@@ -23,19 +23,19 @@ data:
   include_hydrogens: false
   data_root: data
   # Optional: load from precomputed SMILES file (e.g. data/moses_smiles/moses_smiles.txt)
-  use_precomputed_smiles: false
+  use_precomputed_smiles: true
   precomputed_smiles_dir: data/moses_smiles
 
 # Generation configuration
 generation:
-  num_samples: 500
+  num_samples: 1000
   batch_size: 32
 
 # Sampling configuration
 sampling:
   top_k: 10
   temperature: 1.0
-  max_length: 2048
+  max_length: 512
 
 # Metrics configuration
 metrics:

@@ -118,8 +118,11 @@ def compute_samples_seen(checkpoint_path: str, checkpoint: Optional[dict] = None
             G = train_cfg.trainer.get("devices", 1)
             if not isinstance(G, int) or G < 1:
                 G = 1
+            N = train_cfg.trainer.get("num_nodes", 1)
+            if not isinstance(N, int) or N < 1:
+                N = 1
             A = train_cfg.trainer.get("accumulate_grad_batches", 1)
-            result["effective_batch_size"] = B * G * A
+            result["effective_batch_size"] = B * G * N * A
         except Exception as e:
             log.warning(f"Could not parse training config for samples_seen: {e}")
 
@@ -129,10 +132,36 @@ def compute_samples_seen(checkpoint_path: str, checkpoint: Optional[dict] = None
         log.warning(
             f"No config.yaml found next to checkpoint — cannot compute samples_seen. "
             f"global_step={result['global_step']}. To convert manually: "
-            f"samples_seen = global_step × batch_size × num_GPUs × accumulate_grad_batches"
+            f"samples_seen = global_step × batch_size × num_GPUs × num_nodes × accumulate_grad_batches"
         )
 
     return result
+
+
+def _resolve_coarsening_strategy(cfg: DictConfig, tokenizer_name: str) -> tuple[str, bool]:
+    """Resolve coarsening strategy with backward-compatible motif_aware fallback."""
+    strategy = cfg.tokenizer.get("coarsening_strategy")
+    motif_aware = bool(cfg.tokenizer.get("motif_aware", False))
+
+    if strategy is None:
+        if motif_aware:
+            strategy = "motif_aware_spectral"
+            log.warning(
+                "tokenizer.motif_aware is deprecated for %s. "
+                "Using tokenizer.coarsening_strategy=motif_aware_spectral.",
+                tokenizer_name,
+            )
+        else:
+            strategy = "spectral"
+    elif motif_aware and strategy != "motif_aware_spectral":
+        log.warning(
+            "Both tokenizer.motif_aware=true and tokenizer.coarsening_strategy=%s "
+            "are set for %s. Using coarsening_strategy and ignoring motif_aware.",
+            strategy,
+            tokenizer_name,
+        )
+
+    return strategy, motif_aware
 
 
 def is_autograph_checkpoint(checkpoint_path: str) -> bool:
@@ -183,12 +212,12 @@ def main(cfg: DictConfig) -> None:
     # Select tokenizer based on config
     tokenizer_type = cfg.tokenizer.get("type", "sent").lower()
     if tokenizer_type == "hdt":
-        motif_aware = cfg.tokenizer.get("motif_aware", False)
-        if motif_aware:
-            log.info("Using hierarchical HDT tokenizer with motif-aware coarsening")
+        coarsening_strategy, motif_aware = _resolve_coarsening_strategy(cfg, "hdt")
+        log.info(
+            f"Using hierarchical HDT tokenizer with {coarsening_strategy} coarsening"
+        )
+        if coarsening_strategy in ("motif_aware_spectral", "motif_community"):
             log.info(f"  motif_alpha: {cfg.tokenizer.get('motif_alpha', 1.0)}")
-        else:
-            log.info("Using hierarchical HDT tokenizer with spectral coarsening")
         log.info(f"  node_order: {cfg.tokenizer.get('node_order', 'BFS')}")
         log.info(f"  min_community_size: {cfg.tokenizer.get('min_community_size', 4)}")
 
@@ -197,7 +226,7 @@ def main(cfg: DictConfig) -> None:
             truncation_length=cfg.tokenizer.truncation_length,
             node_order=cfg.tokenizer.get("node_order", "BFS"),
             min_community_size=cfg.tokenizer.get("min_community_size", 4),
-            coarsening_strategy=cfg.tokenizer.get("coarsening_strategy", None),
+            coarsening_strategy=coarsening_strategy,
             motif_aware=motif_aware,
             motif_alpha=cfg.tokenizer.get("motif_alpha", 1.0),
             normalize_by_motif_size=cfg.tokenizer.get("normalize_by_motif_size", False),
@@ -205,12 +234,12 @@ def main(cfg: DictConfig) -> None:
             seed=cfg.seed,
         )
     elif tokenizer_type == "hsent":
-        motif_aware = cfg.tokenizer.get("motif_aware", False)
-        if motif_aware:
-            log.info("Using hierarchical H-SENT tokenizer with motif-aware coarsening")
+        coarsening_strategy, motif_aware = _resolve_coarsening_strategy(cfg, "hsent")
+        log.info(
+            f"Using hierarchical H-SENT tokenizer with {coarsening_strategy} coarsening"
+        )
+        if coarsening_strategy in ("motif_aware_spectral", "motif_community"):
             log.info(f"  motif_alpha: {cfg.tokenizer.get('motif_alpha', 1.0)}")
-        else:
-            log.info("Using hierarchical H-SENT tokenizer with spectral coarsening")
         log.info(f"  node_order: {cfg.tokenizer.get('node_order', 'BFS')}")
         log.info(f"  min_community_size: {cfg.tokenizer.get('min_community_size', 4)}")
 
@@ -219,7 +248,7 @@ def main(cfg: DictConfig) -> None:
             truncation_length=cfg.tokenizer.truncation_length,
             node_order=cfg.tokenizer.get("node_order", "BFS"),
             min_community_size=cfg.tokenizer.get("min_community_size", 4),
-            coarsening_strategy=cfg.tokenizer.get("coarsening_strategy", None),
+            coarsening_strategy=coarsening_strategy,
             motif_aware=motif_aware,
             motif_alpha=cfg.tokenizer.get("motif_alpha", 1.0),
             normalize_by_motif_size=cfg.tokenizer.get("normalize_by_motif_size", False),
@@ -491,30 +520,83 @@ def main(cfg: DictConfig) -> None:
     # Reference sets for metrics
     # Distributional metrics (FCD, SNN, Frag, Scaf) use test or train+test as reference
     # Novelty always uses training set (measures memorization)
-    ref_size = cfg.metrics.get("reference_size", 100000)
+    configured_ref_size = cfg.metrics.get("reference_size")
     reference_split = cfg.metrics.get("reference_split", "test")
-    train_smiles = datamodule.train_smiles
+    train_smiles = list(datamodule.train_smiles)
+
+    if configured_ref_size is None or int(configured_ref_size) <= 0:
+        target_ref_size = max(1, int(0.1 * len(train_smiles)))
+        log.info(
+            "Auto reference_size enabled: using 10%% of train size "
+            f"({len(train_smiles):,}) => target {target_ref_size:,} reference molecules"
+        )
+    else:
+        target_ref_size = int(configured_ref_size)
+        log.info(f"Using configured reference_size target={target_ref_size:,}")
 
     if reference_split == "full":
+        reference_pool_available = len(train_smiles) + len(datamodule.test_smiles)
+        actual_ref_size = min(target_ref_size, reference_pool_available)
         if len(train_smiles) == 0:
             log.warning(
                 "reference_split='full' but train_smiles is empty; "
                 "falling back to test-only reference"
             )
-            reference_smiles = datamodule.test_smiles[:ref_size]
+            reference_pool_available = len(datamodule.test_smiles)
+            actual_ref_size = min(target_ref_size, reference_pool_available)
+            reference_smiles = datamodule.test_smiles[:actual_ref_size]
         else:
             combined = list(train_smiles) + list(datamodule.test_smiles)
             random.Random(cfg.seed).shuffle(combined)
-            reference_smiles = combined[:ref_size]
+            reference_smiles = combined[:actual_ref_size]
         ref_label = "train+test"
     else:
-        reference_smiles = datamodule.test_smiles[:ref_size]
+        reference_pool_available = len(datamodule.test_smiles)
+        actual_ref_size = min(target_ref_size, reference_pool_available)
+        reference_smiles = datamodule.test_smiles[:actual_ref_size]
         ref_label = "test"
+
+    if actual_ref_size < target_ref_size:
+        log.warning(
+            "Requested reference_size target (%d) exceeds available %s pool (%d). "
+            "Capping to %d.",
+            target_ref_size,
+            ref_label,
+            reference_pool_available,
+            actual_ref_size,
+        )
 
     log.info(
         f"Using {len(reference_smiles)} {ref_label} SMILES for distributional metrics"
     )
     log.info(f"Using {len(train_smiles)} train SMILES for novelty")
+    log.info("=" * 70)
+    log.info("RESOLVED EVAL CONFIG SUMMARY")
+    log.info("=" * 70)
+    log.info(f"Dataset: {cfg.data.dataset_name}")
+    log.info(f"Tokenizer: {tokenizer_type}")
+    if tokenizer_type in ("hdt", "hsent"):
+        log.info(
+            f"Coarsening strategy: {cfg.tokenizer.get('coarsening_strategy', 'spectral')}"
+        )
+    log.info(
+        "Sampling: "
+        f"num_samples={num_samples}, top_k={cfg.sampling.top_k}, "
+        f"temperature={cfg.sampling.temperature}, max_length={cfg.sampling.max_length}"
+    )
+    log.info(
+        "Reference: "
+        f"split={reference_split}, target_size={target_ref_size}, "
+        f"actual_size={actual_ref_size}, pool_available={reference_pool_available}"
+    )
+    log.info(
+        "Metrics: "
+        f"core_only={cfg.metrics.get('core_only', False)}, "
+        f"compute_fcd={cfg.metrics.get('compute_fcd', True)}, "
+        f"compute_pgd={cfg.metrics.get('compute_pgd', True)}, "
+        f"compute_motif={cfg.metrics.get('compute_motif', True)}"
+    )
+    log.info("=" * 70)
 
     log.info("\n" + "=" * 50)
     log.info("MOLECULAR METRICS")
@@ -688,6 +770,9 @@ def main(cfg: DictConfig) -> None:
         "num_samples": num_samples,
         "num_valid_smiles": valid_count,
         "reference_split": reference_split,
+        "reference_size": actual_ref_size,
+        "reference_size_target": target_ref_size,
+        "reference_pool_available": reference_pool_available,
         "global_step": ckpt_info["global_step"],
         "effective_batch_size": ckpt_info["effective_batch_size"],
         "samples_seen": ckpt_info["samples_seen"],

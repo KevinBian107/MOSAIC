@@ -160,32 +160,20 @@ supports_coarsening() {
     fi
 }
 
-# Check if a checkpoint has already been evaluated in a given output directory
-# Returns 0 (true) if a completed evaluation (results.json) exists for this checkpoint
+# Check if a run directory has a completed evaluation.
+# Returns 0 (true) only when both results and generated_smiles exist.
 is_already_evaluated() {
-    local ckpt_path="$1"
-    local output_base_dir="$2"
-
-    [ -d "$output_base_dir" ] || return 1
-
-    for config_file in "$output_base_dir"/*/config.yaml; do
-        [ -f "$config_file" ] || continue
-        if grep -q "checkpoint_path: ${ckpt_path}" "$config_file"; then
-            local result_dir
-            result_dir=$(dirname "$config_file")
-            if [ -f "$result_dir/results.json" ]; then
-                return 0  # already evaluated
-            fi
-        fi
-    done
-
-    return 1
+    local run_dir="$1"
+    [ -f "$run_dir/results.json" ] && [ -f "$run_dir/generated_smiles.txt" ] && [ -s "$run_dir/generated_smiles.txt" ]
 }
 
 # Evaluate each checkpoint
 echo "$CHECKPOINTS" | while read -r ckpt; do
     TOKENIZER=$(get_tokenizer_type "$ckpt")
     COARSENING=$(get_coarsening_strategy "$ckpt")
+    RUN_DIR_NAME=$(basename "$(dirname "$ckpt")")
+    LOGS_PATH_TEST="${TEST_OUTPUT_DIR}/${RUN_DIR_NAME}"
+    LOGS_PATH_GEN="${REALISTIC_GEN_OUTPUT_DIR}/${RUN_DIR_NAME}"
 
     echo "========================================"
     echo "Evaluating: $ckpt"
@@ -200,20 +188,20 @@ echo "$CHECKPOINTS" | while read -r ckpt; do
     echo "========================================"
 
     if [ "$RUN_TEST" = true ]; then
-        if [ "$FORCE_REEVAL" = false ] && is_already_evaluated "$ckpt" "$TEST_OUTPUT_DIR"; then
+        if [ "$FORCE_REEVAL" = false ] && is_already_evaluated "$LOGS_PATH_TEST"; then
             echo "[1/2] Skipping test.py (already evaluated)"
         else
             echo "[1/2] Running test.py..."
-            python scripts/test.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.base_dir=$TEST_OUTPUT_DIR metrics.reference_split=$REFERENCE_SPLIT $COARSENING_ARGS
+            python scripts/test.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.path="$LOGS_PATH_TEST" metrics.reference_split=$REFERENCE_SPLIT $COARSENING_ARGS
         fi
     fi
 
     if [ "$RUN_GEN" = true ]; then
-        if [ "$FORCE_REEVAL" = false ] && is_already_evaluated "$ckpt" "$REALISTIC_GEN_OUTPUT_DIR"; then
+        if [ "$FORCE_REEVAL" = false ] && is_already_evaluated "$LOGS_PATH_GEN"; then
             echo "[2/2] Skipping realistic_gen.py (already evaluated)"
         else
             echo "[2/2] Running realistic_gen.py..."
-            python scripts/realistic_gen.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.base_dir=$REALISTIC_GEN_OUTPUT_DIR metrics.reference_split=$REFERENCE_SPLIT $COARSENING_ARGS
+            python scripts/realistic_gen.py model.checkpoint_path="$ckpt" tokenizer=$TOKENIZER experiment=$DATASET logs.path="$LOGS_PATH_GEN" metrics.reference_split=$REFERENCE_SPLIT $COARSENING_ARGS
         fi
     fi
 

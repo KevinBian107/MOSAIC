@@ -14,9 +14,9 @@ resume: false
 # Model configuration
 model:
   model_name: gpt2-xs
-  learning_rate: 6e-4  # Baseline for batch_size=32. Scale with sqrt or linear when increasing batch
+  learning_rate: 8.49e-4  # Baseline for batch_size=32. Scale with sqrt or linear when increasing batch
   weight_decay: 0.1
-  warmup_steps: 1000   # Scale proportionally with batch size (e.g., 2000 for batch=128)
+  warmup_steps: 1414   # Scale proportionally with batch size (e.g., 2000 for batch=128)
   max_steps: ${trainer.max_steps}
 
 # Data configuration
@@ -32,10 +32,13 @@ data:
 
 # Training configuration
 trainer:
+  target_samples_seen: 16000000  # Primary training budget (samples seen across all devices/accumulation)
   max_epochs: null  # Set this for epoch-based training (e.g., 20)
-  max_steps: 250000  # Set to -1 when using max_epochs. Reduce proportionally with batch size (e.g., 62500 for batch=128)
-  val_check_interval: 1000
-  check_val_every_n_epoch: null  # Set to 1 for validation every epoch (only used when max_epochs is set)
+  max_steps: 250000  # Fallback when target_samples_seen is null
+  val_checks_per_epoch: 5  # Preferred: validations per epoch (1=once/epoch, 4=four times/epoch)
+  validate_every_n_epochs: 1  # Preferred: run validation every N epochs
+  val_check_interval: 1000  # Legacy fallback (steps-based) when val_checks_per_epoch is null
+  check_val_every_n_epoch: 1  # Legacy fallback when val_checks_per_epoch is null
   precision: 32
   gradient_clip_val: 1.0
   accelerator: auto
@@ -50,11 +53,11 @@ trainer:
 
 # Sampling configuration for evaluation
 sampling:
-  num_samples: 100
+  num_samples: 1000
   batch_size: 32
   top_k: 10
   temperature: 1.0
-  max_length: 1024  # Sufficient for most molecular datasets
+  max_length: 512
 
 # Logging configuration
 logs:

@@ -12,15 +12,17 @@ The x-axis on WandB is PyTorch Lightning's `global_step` — the **number of opt
 |--------|---------|-----------------|
 | $N$ | Training dataset size (number of molecules) | `data.num_train` |
 | $B$ | Per-GPU batch size | `data.batch_size` |
-| $G$ | Number of GPUs (DDP world size) | `trainer.devices` or `WORLD_SIZE` env |
+| $G$ | GPUs per node | `trainer.devices` |
+| $M$ | Number of nodes | `trainer.num_nodes` |
 | $A$ | Gradient accumulation steps | `trainer.accumulate_grad_batches` |
+| $T$ | Target samples seen | `trainer.target_samples_seen` |
 | $S$ | `max_steps` (WandB x-axis limit) | `trainer.max_steps` |
 
 ## Core Formulas
 
 **Effective batch size:**
 
-$$B_{\text{eff}} = B \times G \times A$$
+$$B_{\text{eff}} = B \times G \times M \times A$$
 
 **Optimizer steps per epoch:**
 
@@ -29,6 +31,10 @@ $$S_{\text{epoch}} = \left\lfloor \frac{N}{B_{\text{eff}}} \right\rfloor$$
 **Total samples seen at step $s$:**
 
 $$\text{samples\_seen}(s) = s \times B_{\text{eff}}$$
+
+**Samples-seen budget to steps (current default policy):**
+
+$$S = \left\lceil \frac{T}{B_{\text{eff}}} \right\rceil$$
 
 **Total epochs completed:**
 
@@ -102,7 +108,7 @@ Both `test.py` and `realistic_gen.py` automatically compute `samples_seen` for a
 **Old checkpoints** (trained before this change): `global_step` is always available in the `.ckpt` file. If the `config.yaml` is co-located, `samples_seen` is computed automatically. If the checkpoint was moved and `config.yaml` is missing, the script logs a warning and sets `effective_batch_size` and `samples_seen` to `null` — you can compute it manually:
 
 ```
-samples_seen = global_step × batch_size × num_GPUs × accumulate_grad_batches
+samples_seen = global_step × batch_size × num_GPUs × num_nodes × accumulate_grad_batches
 ```
 
 ## Gotcha: Logged `Steps per epoch` is Wrong When $A > 1$
@@ -120,4 +126,6 @@ This does **not** divide by $A$. So the logged value is **batches per epoch**, n
 - `accum` ($A$): `configs/train.yaml` → `trainer.accumulate_grad_batches` (default 1)
 - Step logging: `src/models/transformer.py` → `_shared_step()` logs `train/loss` with `on_step=True` (keyed to `global_step`)
 - LR scheduler: `src/models/transformer.py` → `configure_optimizers()` uses `interval="step"`
-- `val_check_interval`: validation every this many **global_steps** (default 1000)
+- `val_checks_per_epoch`: preferred validation cadence (default 5)
+- `validate_every_n_epochs`: preferred epoch interval (default 1)
+- Legacy fallback: `val_check_interval` / `check_val_every_n_epoch`

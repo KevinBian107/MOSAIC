@@ -24,16 +24,16 @@ data:
   include_hydrogens: false
   data_root: data
   # Load from single precomputed file (run scripts/preprocess/export_moses_smiles.py once → data/moses_smiles/moses_smiles.txt)
-  use_precomputed_smiles: false
+  use_precomputed_smiles: true
   precomputed_smiles_dir: data/moses_smiles
 
 # Sampling configuration
 sampling:
-  num_samples: 500  # -1 to use all test set (number of molecules to generate for metrics)
+  num_samples: 1000  # -1 to use all test set (number of molecules to generate for metrics)
   batch_size: 32
   top_k: 10
   temperature: 1.0
-  max_length: 2048
+  max_length: 512
 
 # Metrics configuration
 metrics:
@@ -41,8 +41,8 @@ metrics:
   compute_motif: true  # Compute motif distribution metrics (MSC, MFD)
   compute_fcd: true  # Requires moses or fcd package
   compute_pgd: true  # Requires polygraph-benchmark package
-  pgd_reference_size: 500  # Should be >= sampling.num_samples to use all generated; PGD needs equal ref/gen counts
-  reference_size: 100000  # Max reference set size for FCD, molecular, and motif metrics
+  pgd_reference_size: 1000  # Should be >= sampling.num_samples to use all generated; PGD needs equal ref/gen counts
+  reference_size: null  # Auto: 10% of train size (sampled from test when reference_split='test')
   reference_split: "test"  # Reference population: "test" (default) or "full" (train+test combined)
   reference_graphs_path: null  # If set, load PGD reference graphs from this .pt file (skip SMILES->graph conversion)
 

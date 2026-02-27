@@ -1214,10 +1214,6 @@ def main(cfg: DictConfig) -> None:
 
     datamodule.setup()
 
-    # Determine training duration (epochs vs steps) - define early for use throughout
-    max_epochs = cfg.trainer.get("max_epochs")
-    max_steps = cfg.trainer.max_steps if max_epochs is None else -1
-
     # DDP world size: prefer WORLD_SIZE env (set by torchrun) over config devices
     world_size = int(os.environ.get("WORLD_SIZE", 1))
     if world_size <= 1:
@@ -1226,50 +1222,156 @@ def main(cfg: DictConfig) -> None:
             devices_cfg if isinstance(devices_cfg, int) and devices_cfg > 1 else 1
         )
 
-    # Calculate steps per epoch and adjust val_check_interval if needed
-    # Skip this if validation is disabled (limit_val_batches=0)
+    train_dataset_size = len(datamodule.train_dataset)
+    if train_dataset_size <= 0:
+        raise ValueError("Training dataset is empty. Cannot start training.")
+
+    # Compute effective batch and steps/epoch once; both are reused throughout training.
+    current_batch_size = cfg.data.batch_size
+    accum = cfg.trainer.get("accumulate_grad_batches", 1)
+    effective_batch_size = current_batch_size * world_size * accum
+    # In DDP each process gets ~1/world_size via DistributedSampler.
+    steps_per_epoch = max(train_dataset_size // (current_batch_size * world_size), 1)
+
+    # Determine training duration:
+    # 1) target_samples_seen (preferred, hardware-agnostic)
+    # 2) max_epochs
+    # 3) max_steps (fallback)
+    target_samples_seen = cfg.trainer.get("target_samples_seen")
+    max_epochs = cfg.trainer.get("max_epochs")
+    configured_max_steps = cfg.trainer.get("max_steps")
+
+    if target_samples_seen is not None:
+        target_samples_seen = int(target_samples_seen)
+        if target_samples_seen <= 0:
+            raise ValueError("trainer.target_samples_seen must be a positive integer")
+        if max_epochs is not None:
+            log.warning(
+                "trainer.target_samples_seen is set; ignoring trainer.max_epochs"
+            )
+
+        max_steps = max(1, -(-target_samples_seen // effective_batch_size))  # ceil div
+        total_steps = max_steps
+        planned_samples_seen = total_steps * effective_batch_size
+        planned_epochs = planned_samples_seen / train_dataset_size
+
+        log.info("=" * 80)
+        log.info("TRAINING BUDGET (SAMPLES-SEEN MODE)")
+        log.info("=" * 80)
+        log.info(f"Target samples seen: {target_samples_seen:,}")
+        log.info(f"Effective batch size: {effective_batch_size:,}")
+        log.info(f"Derived max_steps: {max_steps:,}")
+        log.info(f"Planned samples seen: {planned_samples_seen:,}")
+        log.info(f"Planned epochs (equivalent): {planned_epochs:.2f}")
+        log.info("=" * 80)
+    elif max_epochs is not None:
+        max_steps = -1
+        total_steps = steps_per_epoch * max_epochs
+        log.info(f"Estimated total steps for {max_epochs} epochs: {total_steps:,}")
+    else:
+        max_steps = configured_max_steps
+        total_steps = configured_max_steps
+
+    # Configure validation cadence.
+    # Preferred controls:
+    # - trainer.val_checks_per_epoch (e.g., 1 => once per epoch, 4 => 4x per epoch)
+    # - trainer.validate_every_n_epochs (e.g., 2 => validate every 2 epochs)
+    # Legacy fallback:
+    # - trainer.val_check_interval (steps), trainer.check_val_every_n_epoch
     limit_val_batches = cfg.trainer.get("limit_val_batches", 1.0)
 
     if limit_val_batches == 0:
-        # Validation disabled - set val_check_interval to None to avoid validation setup
+        # Validation disabled.
         val_check_interval = None
+        check_val_every_n_epoch = 1
         log.info("Validation disabled (limit_val_batches=0)")
     else:
-        train_dataset_size = len(datamodule.train_dataset)
-        # In DDP each GPU gets 1/world_size of the data via DistributedSampler
-        steps_per_epoch = train_dataset_size // (cfg.data.batch_size * world_size)
-        val_check_interval = cfg.trainer.val_check_interval
+        val_checks_per_epoch = cfg.trainer.get("val_checks_per_epoch")
+        validate_every_n_epochs = int(cfg.trainer.get("validate_every_n_epochs", 1))
+        if validate_every_n_epochs < 1:
+            raise ValueError("trainer.validate_every_n_epochs must be >= 1")
 
-        # If val_check_interval exceeds steps per epoch, use steps per epoch (1 eval per epoch)
-        if val_check_interval > steps_per_epoch:
-            log.warning(
-                f"val_check_interval ({val_check_interval}) exceeds steps per epoch ({steps_per_epoch}). "
-                f"Setting val_check_interval={steps_per_epoch} (1 validation per epoch)"
-            )
-            val_check_interval = steps_per_epoch
+        if val_checks_per_epoch is not None:
+            val_checks_per_epoch = int(val_checks_per_epoch)
+            if val_checks_per_epoch < 1:
+                raise ValueError("trainer.val_checks_per_epoch must be >= 1")
+            val_check_interval = 1.0 / val_checks_per_epoch
+            check_val_every_n_epoch = validate_every_n_epochs
+            legacy_steps = cfg.trainer.get("val_check_interval")
+            if legacy_steps is not None:
+                log.warning(
+                    "trainer.val_checks_per_epoch is set; ignoring legacy "
+                    "trainer.val_check_interval (steps-based)."
+                )
+        else:
+            # Backward-compatible legacy path (steps-based cadence).
+            val_check_interval = cfg.trainer.val_check_interval
+            if val_check_interval > steps_per_epoch:
+                log.warning(
+                    f"val_check_interval ({val_check_interval}) exceeds steps per epoch ({steps_per_epoch}). "
+                    f"Setting val_check_interval={steps_per_epoch} (1 validation per epoch)"
+                )
+                val_check_interval = steps_per_epoch
+            check_val_every_n_epoch = cfg.trainer.get("check_val_every_n_epoch")
 
         log.info(f"Training dataset size: {train_dataset_size:,} samples")
         if world_size > 1:
             log.info(f"DDP world size: {world_size} (steps per epoch adjusted)")
         log.info(f"Steps per epoch: {steps_per_epoch:,}")
-        log.info(f"Validation check interval: {val_check_interval:,} steps")
+        if isinstance(val_check_interval, float):
+            log.info(
+                "Validation cadence: "
+                f"{val_checks_per_epoch}x per epoch, every {check_val_every_n_epochs} epoch(s)"
+            )
+        else:
+            log.info(f"Validation check interval: {val_check_interval:,} steps")
+
+    resolved_coarsening = cfg.tokenizer.get("coarsening_strategy")
+    if tokenizer_type not in ("hdt", "hsent"):
+        resolved_coarsening = None
+    log.info("=" * 80)
+    log.info("RESOLVED TRAIN CONFIG SUMMARY")
+    log.info("=" * 80)
+    log.info(f"Dataset: {cfg.data.dataset_name}")
+    log.info(f"Tokenizer: {tokenizer_type}")
+    if resolved_coarsening:
+        log.info(f"Coarsening strategy: {resolved_coarsening}")
+    log.info(
+        "Batching: "
+        f"batch_size={current_batch_size}, world_size={world_size}, "
+        f"accumulate_grad_batches={accum}, effective_batch_size={effective_batch_size}"
+    )
+    log.info(
+        "Budget: "
+        f"target_samples_seen={target_samples_seen}, max_steps={max_steps}, "
+        f"planned_samples_seen={total_steps * effective_batch_size}"
+    )
+    if limit_val_batches == 0:
+        log.info("Validation: disabled (limit_val_batches=0)")
+    elif isinstance(val_check_interval, float):
+        log.info(
+            "Validation: "
+            f"{cfg.trainer.get('val_checks_per_epoch')}x per epoch, "
+            f"every {check_val_every_n_epoch} epoch(s)"
+        )
+    else:
+        log.info(
+            "Validation (legacy): "
+            f"val_check_interval={val_check_interval}, "
+            f"check_val_every_n_epoch={check_val_every_n_epoch}"
+        )
+    log.info(
+        "Sampling: "
+        f"num_samples={cfg.sampling.num_samples}, top_k={cfg.sampling.top_k}, "
+        f"temperature={cfg.sampling.temperature}, max_length={cfg.sampling.max_length}"
+    )
+    log.info("=" * 80)
 
     # Ensure model position embeddings can handle any sequence the tokenizer produces
     model_max_length = max(
         cfg.sampling.max_length,
         cfg.tokenizer.get("truncation_length", cfg.sampling.max_length),
     )
-
-    # Calculate total training steps for lr scheduler
-    # If using max_epochs, estimate total steps; if using max_steps, use that directly
-    if max_epochs is not None:
-        train_dataset_size = len(datamodule.train_dataset)
-        # Account for DDP: each GPU sees a fraction of the data
-        steps_per_epoch = train_dataset_size // (cfg.data.batch_size * world_size)
-        total_steps = steps_per_epoch * max_epochs
-        log.info(f"Estimated total steps for {max_epochs} epochs: {total_steps:,}")
-    else:
-        total_steps = cfg.trainer.max_steps
 
     model = GraphGeneratorModule(
         tokenizer=tokenizer,
@@ -1352,15 +1454,23 @@ def main(cfg: DictConfig) -> None:
 
     # Print DDP speedup estimation
     num_gpus = world_size
-    current_batch_size = cfg.data.batch_size
-    accum = cfg.trainer.get("accumulate_grad_batches", 1)
-    effective_batch_size = current_batch_size * num_gpus * accum
 
     # Log effective_batch_size to WandB config for cross-run comparison
     if wandb_logger is not None:
-        wandb_logger.experiment.config.update({
-            "effective_batch_size": effective_batch_size,
-        }, allow_val_change=True)
+        wandb_logger.experiment.config.update(
+            {
+                "effective_batch_size": effective_batch_size,
+                "steps_per_epoch": steps_per_epoch,
+                "target_samples_seen": target_samples_seen,
+                "planned_total_steps": total_steps,
+                "planned_samples_seen": total_steps * effective_batch_size,
+                "planned_epochs_equivalent": (total_steps * effective_batch_size)
+                / train_dataset_size,
+                "validation/checks_per_epoch": cfg.trainer.get("val_checks_per_epoch"),
+                "validation/every_n_epochs": check_val_every_n_epoch,
+            },
+            allow_val_change=True,
+        )
 
     # Baseline: 1 GPU, batch_size=32, 20 epochs
     baseline_batch = 32
@@ -1368,7 +1478,7 @@ def main(cfg: DictConfig) -> None:
     baseline_epochs = 20
     baseline_effective_batch = baseline_batch * baseline_gpus
 
-    if max_epochs is not None:
+    if max_epochs is not None and target_samples_seen is None:
         current_epochs = max_epochs
 
         # Calculate relative training time
@@ -1406,12 +1516,12 @@ def main(cfg: DictConfig) -> None:
         log.info("=" * 80)
 
     trainer = pl.Trainer(
-        max_epochs=max_epochs if max_epochs is not None else 1000,
+        max_epochs=max_epochs if (max_epochs is not None and target_samples_seen is None) else 1000,
         max_steps=max_steps,
         val_check_interval=val_check_interval
         if val_check_interval is not None
         else 1.0,
-        check_val_every_n_epoch=cfg.trainer.get("check_val_every_n_epoch"),
+        check_val_every_n_epoch=check_val_every_n_epoch,
         limit_val_batches=limit_val_batches,
         num_sanity_val_steps=cfg.trainer.get("num_sanity_val_steps", 2),
         accumulate_grad_batches=cfg.trainer.get("accumulate_grad_batches", 1),
@@ -1433,6 +1543,30 @@ def main(cfg: DictConfig) -> None:
 
     log.info("Starting training...")
     trainer.fit(model, datamodule, ckpt_path=ckpt_path)
+
+    final_samples_seen = trainer.global_step * effective_batch_size
+    final_epochs_equivalent = final_samples_seen / train_dataset_size
+    log.info("=" * 80)
+    log.info("TRAINING COMPLETION REPORT")
+    log.info("=" * 80)
+    log.info(f"Final global_step: {trainer.global_step:,}")
+    log.info(f"Effective batch size: {effective_batch_size:,}")
+    log.info(f"Final samples seen: {final_samples_seen:,}")
+    log.info(f"Final epochs (equivalent): {final_epochs_equivalent:.2f}")
+    if target_samples_seen is not None:
+        log.info(f"Target samples seen: {target_samples_seen:,}")
+        log.info(f"Target completion ratio: {final_samples_seen / target_samples_seen:.4f}")
+    log.info("=" * 80)
+
+    if wandb_logger is not None:
+        wandb_logger.experiment.log(
+            {
+                "final/global_step": trainer.global_step,
+                "final/effective_batch_size": effective_batch_size,
+                "final/samples_seen": final_samples_seen,
+                "final/epochs_equivalent": final_epochs_equivalent,
+            }
+        )
 
     # Explicitly save last.ckpt with final model weights.
     # PL 2.x only updates last.ckpt when best.ckpt also updates (i.e., when
