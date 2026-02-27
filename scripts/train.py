@@ -1321,7 +1321,7 @@ def main(cfg: DictConfig) -> None:
         if isinstance(val_check_interval, float):
             log.info(
                 "Validation cadence: "
-                f"{val_checks_per_epoch}x per epoch, every {check_val_every_n_epochs} epoch(s)"
+                f"{val_checks_per_epoch}x per epoch, every {check_val_every_n_epoch} epoch(s)"
             )
         else:
             log.info(f"Validation check interval: {val_check_interval:,} steps")
