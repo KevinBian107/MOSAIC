@@ -19,7 +19,8 @@ model:
   learning_rate: 1e-5    # Lower LR for fine-tuning
 
 trainer:
-  max_steps: 50000
+  target_samples_seen: 1600000  # 1.6M total samples seen (batch_size=32 → 50k steps)
+  max_steps: 50000  # Fallback when target_samples_seen is null
   val_checks_per_epoch: 1
   validate_every_n_epochs: 1
 
