@@ -1,9 +1,9 @@
 # @package _global_
 
 defaults:
-  - experiment: moses
   - tokenizer: hdtc    # Options: sent, hsent, hdt, hdtc
-  - _self_  # Applied last so train.yaml settings override experiment defaults
+  - _self_
+  - experiment: moses  # Applied last so experiment can override (e.g. coconut target_samples_seen)
 
 # Random seed
 seed: 42
