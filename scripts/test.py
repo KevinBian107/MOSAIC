@@ -103,6 +103,51 @@ def _resolve_coarsening_strategy(cfg: DictConfig, tokenizer_name: str) -> tuple[
     return strategy, motif_aware
 
 
+def extract_training_info(checkpoint_path: str) -> dict:
+    """Extract training metadata from a checkpoint for results reporting.
+
+    Reads global_step from the checkpoint and attempts to recover
+    effective_batch_size from the co-located training config.yaml.
+    Returns a dict with global_step, effective_batch_size, and samples_seen
+    (or None for fields that can't be recovered).
+    """
+    info: dict = {
+        "global_step": None,
+        "effective_batch_size": None,
+        "samples_seen": None,
+    }
+    try:
+        ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        info["global_step"] = ckpt.get("global_step")
+    except Exception as e:
+        log.warning(f"Could not read global_step from checkpoint: {e}")
+        return info
+
+    # Try to recover effective_batch_size from co-located config.yaml
+    ckpt_dir = Path(checkpoint_path).parent
+    config_path = ckpt_dir / "config.yaml"
+    if config_path.exists():
+        try:
+            train_cfg = OmegaConf.load(config_path)
+            batch_size = OmegaConf.select(train_cfg, "data.batch_size", default=None)
+            devices = OmegaConf.select(train_cfg, "trainer.devices", default=1)
+            num_nodes = OmegaConf.select(train_cfg, "trainer.num_nodes", default=1)
+            accum = OmegaConf.select(
+                train_cfg, "trainer.accumulate_grad_batches", default=1
+            )
+            if batch_size is not None:
+                eff = int(batch_size) * int(devices) * int(num_nodes) * int(accum)
+                info["effective_batch_size"] = eff
+        except Exception as e:
+            log.warning(f"Could not parse training config for effective_batch_size: {e}")
+
+    # Compute samples_seen if both pieces are available
+    if info["global_step"] is not None and info["effective_batch_size"] is not None:
+        info["samples_seen"] = info["global_step"] * info["effective_batch_size"]
+
+    return info
+
+
 def is_autograph_checkpoint(checkpoint_path: str) -> bool:
     """Detect if a checkpoint is from AutoGraph or MOSAIC.
 
@@ -136,6 +181,15 @@ def main(cfg: DictConfig) -> None:
 
     if cfg.model.checkpoint_path is None:
         raise ValueError("model.checkpoint_path must be specified")
+
+    # Extract training metadata (global_step, effective_batch_size, samples_seen)
+    training_info = extract_training_info(cfg.model.checkpoint_path)
+    if training_info["global_step"] is not None:
+        log.info(f"Checkpoint global_step: {training_info['global_step']:,}")
+    if training_info["effective_batch_size"] is not None:
+        log.info(f"Training effective_batch_size: {training_info['effective_batch_size']}")
+    if training_info["samples_seen"] is not None:
+        log.info(f"Training samples_seen: {training_info['samples_seen']:,}")
 
     # Create output directory and save configuration
     output_dir = Path(cfg.logs.path)
@@ -698,6 +752,10 @@ def main(cfg: DictConfig) -> None:
         "reference_size": actual_ref_size,
         "reference_size_target": target_ref_size,
         "reference_pool_available": reference_pool_available,
+        # Training metadata (from checkpoint + co-located config.yaml)
+        "global_step": training_info["global_step"],
+        "effective_batch_size": training_info["effective_batch_size"],
+        "samples_seen": training_info["samples_seen"],
     }
     if token_lengths:
         all_results["token_lengths"] = token_lengths
