@@ -36,6 +36,7 @@ sampling:
 # Metrics configuration
 metrics:
   reference_split: "test"  # Reference population: "test" (default) or "full" (train+test combined)
+  reference_size: 5000     # Max reference molecules for analysis (avoids slow RDKit on 500K MOSES)
 
 # Analysis configuration
 analysis:

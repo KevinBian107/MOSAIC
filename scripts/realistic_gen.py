@@ -369,8 +369,11 @@ def main(cfg: DictConfig) -> None:
     )
     datamodule.setup(stage="test")
 
-    # Build reference set based on reference_split config
+    # Build reference set based on reference_split config.
+    # Cap the reference pool to avoid spending hours on RDKit analysis
+    # of 500K molecules.  Default cap = 5000 (aligned with COCONUT scale).
     reference_split = cfg.get("metrics", {}).get("reference_split", "test")
+    reference_cap = int(cfg.get("metrics", {}).get("reference_size", 5000))
     train_smiles = datamodule.train_smiles
 
     if reference_split == "full":
@@ -381,14 +384,15 @@ def main(cfg: DictConfig) -> None:
             )
             ref_smiles = list(datamodule.test_smiles)
         else:
-            ref_smiles = list(train_smiles) + list(datamodule.test_smiles)
-            random.Random(cfg.seed).shuffle(ref_smiles)
+            combined = list(train_smiles) + list(datamodule.test_smiles)
+            random.Random(cfg.seed).shuffle(combined)
+            ref_smiles = combined[:reference_cap]
         ref_label = "train+test"
     else:
-        ref_smiles = list(datamodule.test_smiles)
+        ref_smiles = list(datamodule.test_smiles)[:reference_cap]
         ref_label = "test"
 
-    log.info(f"Loaded {len(ref_smiles)} {ref_label} SMILES for reference")
+    log.info(f"Loaded {len(ref_smiles)} {ref_label} SMILES for reference (cap={reference_cap})")
     log.info("=" * 70)
     log.info("RESOLVED REALISTIC_GEN CONFIG SUMMARY")
     log.info("=" * 70)
