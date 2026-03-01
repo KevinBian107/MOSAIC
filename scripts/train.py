@@ -1255,11 +1255,20 @@ def main(cfg: DictConfig) -> None:
         planned_samples_seen = total_steps * effective_batch_size
         planned_epochs = planned_samples_seen / train_dataset_size
 
+        # Verify configured max_steps (if set) won't cut training short
+        if configured_max_steps is not None and configured_max_steps < max_steps:
+            log.warning(
+                f"trainer.max_steps ({configured_max_steps:,}) < derived steps needed "
+                f"({max_steps:,}) to reach target_samples_seen ({target_samples_seen:,}). "
+                f"target_samples_seen takes priority; max_steps will be overridden."
+            )
+
         log.info("=" * 80)
         log.info("TRAINING BUDGET (SAMPLES-SEEN MODE)")
         log.info("=" * 80)
         log.info(f"Target samples seen: {target_samples_seen:,}")
-        log.info(f"Effective batch size: {effective_batch_size:,}")
+        log.info(f"Effective batch size: {effective_batch_size:,} "
+                 f"(batch={current_batch_size} × devices={world_size} × accum={accum})")
         log.info(f"Derived max_steps: {max_steps:,}")
         log.info(f"Planned samples seen: {planned_samples_seen:,}")
         log.info(f"Planned epochs (equivalent): {planned_epochs:.2f}")

@@ -5,7 +5,7 @@ Reads results from test output directories and creates a table image comparing
 metrics across tokenization schemes. Incorporates realistic generation metrics
 when available, matching by checkpoint path. Table sections include Training Info
 (coarsening_strategy, reference_split, generation_time), Core Quality, Distribution
-Matching, Structural, Motif MMD, and Realistic Generation. See docs/commands_reference.md.
+Matching, Structural, Motif MMD, and Realistic Generation. See bash_scripts/README.md.
 
 Usage:
     python scripts/comparison/compare_results.py
@@ -256,9 +256,6 @@ def load_run_data(run_dir: Path) -> dict | None:
 
         # Extract training info and add to results
         training_info = extract_training_info(config)
-        # Prefer existing samples_seen from results (test.py or training) when present
-        if results.get("samples_seen") is not None:
-            training_info["total_samples_seen"] = results["samples_seen"]
         results.update(training_info)
 
         return {
@@ -431,23 +428,10 @@ def extract_training_info(config: dict) -> dict:
         if model_cfg.get("warmup_steps") is not None:
             info["warmup_steps"] = model_cfg["warmup_steps"]
 
-        # Total samples seen = global_step * (batch_size * num_gpus * accumulate_grad_batches)
-        num_gpus = trainer_cfg.get("devices", 1)
-        if isinstance(num_gpus, (list, tuple)):
-            num_gpus = len(num_gpus) if num_gpus else 1
-        if not isinstance(num_gpus, int) or num_gpus < 1:
-            num_gpus = 1
-        accum = trainer_cfg.get("accumulate_grad_batches", 1)
-        if not isinstance(accum, int) or accum < 1:
-            accum = 1
-        if (
-            info["train_max_steps"] is not None
-            and info["batch_size"] is not None
-        ):
-            effective_batch = info["batch_size"] * num_gpus * accum
-            info["total_samples_seen"] = (
-                info["train_max_steps"] * effective_batch
-            )
+        # total_samples_seen comes from trainer.target_samples_seen in config
+        target = trainer_cfg.get("target_samples_seen")
+        if target is not None:
+            info["total_samples_seen"] = target
 
         # If num_train is -1 (full dataset), try to parse from directory name
         if num_train is not None and num_train != -1:

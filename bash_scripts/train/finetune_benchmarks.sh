@@ -5,11 +5,11 @@
 # on the COCONUT complex natural products dataset.
 #
 # Usage:
-#   ./bash_scripts/finetune_benchmarks.sh              # Fine-tune all (5000 samples)
-#   ./bash_scripts/finetune_benchmarks.sh --few-shot   # Few-shot mode (200 samples)
-#   ./bash_scripts/finetune_benchmarks.sh --few-shot=500  # Custom few-shot size
-#   ./bash_scripts/finetune_benchmarks.sh --dry-run    # Show what would be run
-#   ./bash_scripts/finetune_benchmarks.sh --help       # Show help
+#   ./bash_scripts/train/finetune_benchmarks.sh              # Fine-tune all (5000 samples)
+#   ./bash_scripts/train/finetune_benchmarks.sh --few-shot   # Few-shot mode (200 samples)
+#   ./bash_scripts/train/finetune_benchmarks.sh --few-shot=500  # Custom few-shot size
+#   ./bash_scripts/train/finetune_benchmarks.sh --dry-run    # Show what would be run
+#   ./bash_scripts/train/finetune_benchmarks.sh --help       # Show help
 #
 # Few-shot mode saves to outputs/finetune_fewshot/ instead of outputs/finetune/
 

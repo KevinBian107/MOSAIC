@@ -6,8 +6,9 @@ This document describes the architecture and design decisions of MOSAIC, a motif
 
 MOSAIC (MOtif-aware Structural Abstraction for graph tokenIzation and Composition) is a framework for state-of-the-art methods in motif-preserving graph generation. The codebase supports:
 
-- **Multiple datasets**: Synthetic and real molecular graphs (MOSES, QM9)
-- **Multiple tokenization schemes**: Flat (SENT) and hierarchical (H-SENT, HDT)
+- **Multiple datasets**: MOSES (drug-like), COCONUT (natural products), QM9
+- **Multiple tokenization schemes**: Flat (SENT), hierarchical (H-SENT, HDT), compositional (HDTC)
+- **Multiple coarsening strategies**: Spectral, HAC, Motif Community
 - **Multiple evaluation metrics**: Standard graph metrics and molecular-specific measures
 
 ## Directory Structure
@@ -18,22 +19,33 @@ MOSAIC/
 │   ├── data/                     # Data loading and processing
 │   ├── tokenizers/               # Graph tokenization schemes
 │   │   ├── base.py               # Abstract tokenizer interface
-│   │   ├── sent.py               # Flat SENT tokenizer
-│   │   └── hierarchical/         # Hierarchical tokenizers
-│   │       ├── hsent.py          # H-SENT tokenizer class
-│   │       ├── hdt.py            # HDT tokenizer class (DFS-based)
-│   │       ├── structures.py     # Partition, Bipartite, HierarchicalGraph
-│   │       ├── coarsening.py     # Spectral clustering
-│   │       ├── ordering.py       # Node ordering strategies
-│   │       └── visualization.py  # Visualization utilities
+│   │   ├── structures.py         # Partition, Bipartite, HierarchicalGraph
+│   │   ├── ordering.py           # Node ordering strategies
+│   │   ├── visualization.py      # Visualization utilities
+│   │   ├── sent/                 # Flat SENT tokenizer
+│   │   ├── hsent/                # H-SENT tokenizer (hierarchical SENT)
+│   │   ├── hdt/                  # HDT tokenizer (hierarchical DFS)
+│   │   ├── hdtc/                 # HDTC tokenizer (compositional)
+│   │   ├── coarsening/           # Coarsening strategies
+│   │   │   ├── spectral.py       # Spectral clustering
+│   │   │   ├── hac.py            # Hierarchical agglomerative clustering
+│   │   │   ├── motif_community.py # Motif-aware community detection
+│   │   │   └── functional_hierarchy.py # HDTC functional hierarchy
+│   │   └── motif/                # Motif detection and patterns
 │   ├── models/                   # Neural network models
-│   └── evaluation/               # Evaluation metrics
-├── tests/                        # Test suite
-│   └── fixtures/                 # Reusable test fixtures
+│   ├── evaluation/               # Evaluation metrics
+│   └── realistic_gen/            # Generation quality analysis
 ├── scripts/                      # Entry point scripts
+│   ├── preprocess/               # Data preprocessing and caching
+│   ├── comparison/               # Result comparison and benchmarking
+│   └── visualization/            # Visualization and demo scripts
+├── bash_scripts/                 # Batch benchmark automation
+│   ├── train/                    # Training scripts
+│   └── eval/                     # Evaluation scripts
 ├── configs/                      # Hydra configuration files
-├── docs/                         # Documentation
-└── scratch/                      # Development workspace
+├── tests/                        # Test suite
+├── property_experiment/          # Post-hoc analysis experiments
+└── docs/                         # Documentation
 ```
 
 ## Pipeline Overview
@@ -44,7 +56,7 @@ MOSAIC/
 ├───────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                    │
 │  SMILES String        ┌──────────────────┐                                        │
-│  (MOSES/QM9)          │   Molecular      │     PyG Data                           │
+│  (MOSES/COCONUT)      │   Molecular      │     PyG Data                           │
 │       │               │   Conversion     │                                        │
 │       ▼               │                  │                                        │
 │  "CCO"               │  - Atom features │     edge_index,                        │
@@ -55,17 +67,16 @@ MOSAIC/
 │          ┌───────────────────┼───────────────────┐                                │
 │          │                   │                   │                                │
 │          ▼                   ▼                   ▼                                │
-│  ┌───────────────┐   ┌───────────────┐   ┌───────────────┐                       │
-│  │ SENT          │   │ H-SENT        │   │ HDT           │                       │
-│  │ (Flat)        │   │ (Hierarchical)│   │ (Hierarchical)│                       │
-│  │               │   │               │   │               │                       │
-│  │ - Random walk │   │ - Spectral    │   │ - Spectral    │                       │
-│  │ - Back-edges  │   │   clustering  │   │   clustering  │                       │
-│  │               │   │ - Partition + │   │ - DFS nesting │                       │
-│  │               │   │   bipartite   │   │ - Back-edges  │                       │
-│  └───────┬───────┘   └───────┬───────┘   └───────┬───────┘                       │
-│          │                   │                   │                                │
-│          └───────────────────┼───────────────────┘                                │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐                          │
+│  │ SENT     │  │ H-SENT   │  │ HDT      │  │ HDTC     │                          │
+│  │ (Flat)   │  │ (Hier.)  │  │ (Hier.)  │  │ (Comp.)  │                          │
+│  │          │  │          │  │          │  │          │                          │
+│  │ Random   │  │ Spectral/│  │ Spectral/│  │ Func.    │                          │
+│  │ walk +   │  │ HAC/MC + │  │ HAC/MC + │  │ hierarchy│                          │
+│  │ back-edge│  │ partition│  │ DFS nest │  │ + DFS    │                          │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘                          │
+│       │              │              │              │                               │
+│       └──────────────┴──────────────┴──────────────┘                               │
 │                              │                                                     │
 │                              ▼                                                     │
 │                      ┌──────────────────┐                                         │
@@ -93,12 +104,11 @@ MOSAIC/
 - `smiles_to_graph()`: Convert SMILES to PyG Data with atom/bond features
 - `graph_to_smiles()`: Convert PyG Data back to SMILES
 - `load_moses_dataset()`: Load MOSES benchmark data
-- `load_qm9_smiles()`: Load QM9 dataset
 - `MolecularDataset`: Dataset class for molecular graphs
 
 **datamodule.py**
 - `MolecularDataModule`: PyTorch Lightning data module
-  - Supports MOSES and QM9 datasets
+  - Supports MOSES, COCONUT, and QM9 datasets
   - Handles tokenization and batching
   - Provides train/val/test SMILES lists for metrics
 
@@ -111,52 +121,39 @@ MOSAIC/
   - `batch_converter()`: Collation function
 - `BatchConverter`: Pads and batches token sequences
 
-**sent.py**
-- `SENTTokenizer`: Flat SENT tokenization from AutoGraph
-  - Random walk traversal with deterministic seeding
-  - Back-edge encoding with bracket tokens
-  - Special tokens: SOS, EOS, RESET, LADJ, RADJ, PAD
-  - Linear sequence length in number of edges
+**sent/** - Flat SENT tokenizer (from AutoGraph)
+- Random walk traversal with deterministic seeding
+- Back-edge encoding with bracket tokens
+- Special tokens: SOS, EOS, RESET, LADJ, RADJ, PAD (IDX_OFFSET=6)
 
-**hierarchical/** - Hierarchical Tokenization
+**hsent/** - H-SENT tokenizer (hierarchical SENT)
+- Recursive partition encoding with SENT-style walks
+- Explicit bipartite encoding for inter-community edges
+- Special tokens: SOS, EOS, PAD, RESET, LADJ, RADJ, LCOM, RCOM, LBIP, RBIP, SEP (IDX_OFFSET=11)
 
-*H-SENT (hsent.py)*
-- `HSENTTokenizer`: H-SENT tokenizer class
-  - Hierarchical decomposition via spectral clustering
-  - Recursive partition encoding with SENT-style walks
-  - Explicit bipartite encoding for inter-community edges
-  - Special tokens: SOS, EOS, PAD, RESET, LADJ, RADJ, LCOM, RCOM, LBIP, RBIP, SEP
+**hdt/** - HDT tokenizer (hierarchical DFS)
+- ~45% fewer tokens than H-SENT via implicit hierarchy encoding
+- DFS traversal through hierarchy with ENTER/EXIT tokens
+- Cross-community edges encoded as back-edges (no bipartite blocks)
+- Special tokens: SOS, EOS, PAD, ENTER, EXIT, LEDGE, REDGE (IDX_OFFSET=7)
 
-*HDT (hdt.py)*
-- `HDTTokenizer`: Hierarchical DFS-based tokenizer
-  - ~45% fewer tokens than H-SENT via implicit hierarchy encoding
-  - DFS traversal through hierarchy with ENTER/EXIT tokens
-  - Cross-community edges encoded as back-edges (no bipartite blocks)
-  - Special tokens: SOS, EOS, PAD, ENTER, EXIT, LEDGE, REDGE (IDX_OFFSET=7)
-  - Smaller vocabulary than H-SENT
+**hdtc/** - HDTC tokenizer (compositional)
+- Functional hierarchy: Ring systems → Functional groups → Scaffolds
+- DFS-based encoding like HDT, with typed abstract nodes
+- Special tokens: SOS, EOS, PAD, ENTER, EXIT, LEDGE, REDGE + R/F/S type tokens (IDX_OFFSET=12)
 
-*Shared Components*
+**coarsening/** - Coarsening strategies
+- `SpectralCoarsening`: Modularity-optimized spectral clustering
+- `HACCoarsening`: Agglomerative clustering with connectivity constraint
+- `MotifCommunityCoarsening`: Motif-aware community detection
+- `FunctionalHierarchy`: HDTC functional group hierarchy (no coarsening needed)
+
+**Shared components**
 - `Partition`, `Bipartite`, `HierarchicalGraph`: Data structures (structures.py)
-  - `Partition`: Induced subgraph within a community
-  - `Bipartite`: Edges between two communities
-  - `HierarchicalGraph`: Container with `reconstruct()` method
-- `SpectralCoarsening`, `MotifAwareCoarsening`: Graph partitioning (coarsening.py)
-  - Modularity-optimized spectral clustering
-  - Optional motif-aware clustering with affinity augmentation
-  - Configurable `min_community_size` for recursion depth
-- `HACCoarsening`: Agglomerative clustering with connectivity constraint (hac.py)
-  - Bottom-up merging with adjacency features and connectivity constraint
-  - Supports ward, complete, average, single linkage criteria
-  - Same recursive hierarchy building as SpectralCoarsening
-- Node ordering strategies (ordering.py)
-  - BFS, DFS: Standard traversals from highest-degree node
-  - BFSAC, BFSDC: BFS with ascending/descending cutset weight
+- Node ordering strategies: BFS, DFS, BFSAC, BFSDC (ordering.py)
 - Visualization utilities (visualization.py)
-  - `visualize_hierarchy()`: HiGen-style block matrix visualization
-  - `visualize_graph_communities()`: Graph with community coloring
-  - `quick_visualize()`: Combined visualization
 
-See [Hierarchical Graph Guide](hgraph.md) and [Tokenization Guide](tokenization.md) for mathematical details.
+See [Hierarchical Graph Guide](hgraph.md) and [Tokenization Guide](tokenization.md) for details.
 
 ### `src/models/` - Model Module
 
@@ -203,24 +200,24 @@ See [Hierarchical Graph Guide](hgraph.md) and [Tokenization Guide](tokenization.
 
 ## Configuration System
 
-The codebase uses Hydra for configuration management:
+The codebase uses [Hydra](https://hydra.cc/) for configuration. See [configs/README.md](../configs/README.md) for the full parameter comparison table.
 
 ```
 configs/
-├── train.yaml          # Training configuration
-├── test.yaml           # Testing configuration
+├── train.yaml          # Base training configuration
+├── test.yaml           # Base evaluation configuration
+├── realistic_gen.yaml  # Base generation analysis configuration
 ├── tokenizer/          # Tokenizer configurations
-│   ├── hdt.yaml        # HDT with standard spectral clustering
-│   └── hdt_motif.yaml  # HDT with motif-aware clustering
+│   ├── sent.yaml       # SENT
+│   ├── hsent.yaml      # H-SENT
+│   ├── hdt.yaml        # HDT
+│   └── hdtc.yaml       # HDTC (default)
 └── experiment/
-    ├── moses.yaml      # MOSES dataset defaults
-    └── qm9.yaml        # QM9 dataset defaults
+    ├── moses.yaml      # MOSES dataset overrides
+    └── coconut.yaml    # COCONUT dataset overrides
 ```
 
-Configuration hierarchy:
-1. `train.yaml` provides base defaults
-2. `experiment/*.yaml` overrides for specific datasets
-3. Command-line arguments override everything
+Override order: `tokenizer → base (train/test.yaml) → experiment → CLI`
 
 ## Node and Edge Features
 

@@ -3,7 +3,6 @@
 This guide covers environment setup, configuration, and training workflows for MOSAIC.
 
 - **UCSD DSMLP / GCP:** [Server Quick Reference](server_setup.md), [GCP Setup](setup_gcp.md)
-- **Command cheat sheet (GCP, DSMLP, setup, precompute, training, eval):** [commands_reference.md](commands_reference.md)
 
 ---
 
@@ -61,7 +60,7 @@ python scripts/preprocess/export_moses_smiles.py
 # Creates data/moses_smiles/moses_smiles.txt
 ```
 
-Then use `data.use_precomputed_smiles=true` in training/test, or `--use-precomputed-smiles` with `eval_benchmarks_auto.sh`. See [commands_reference.md](commands_reference.md).
+Then use `data.use_precomputed_smiles=true` in training/test, or `--use-precomputed-smiles` with `eval_benchmarks_auto.sh`.
 
 ### Optional: Precomputed PGD reference graphs (faster evaluation)
 
@@ -248,7 +247,7 @@ Results are saved to:
 - `outputs/test/YYYY-MM-DD/HH-MM-SS/results.json`
 - `outputs/test/YYYY-MM-DD/HH-MM-SS/generated_smiles.txt`
 
-For evaluating multiple checkpoints with a mapping file, precomputed SMILES, and cached reference graphs, use `./bash_scripts/eval_benchmarks_auto.sh`; see [commands_reference.md](commands_reference.md) and [bash_scripts/README.md](../bash_scripts/README.md).
+For evaluating multiple checkpoints with a mapping file, precomputed SMILES, and cached reference graphs, use `./bash_scripts/eval/eval_benchmarks_auto.sh`; see [bash_scripts/README.md](../../bash_scripts/README.md).
 
 ---
 

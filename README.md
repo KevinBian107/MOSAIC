@@ -25,123 +25,47 @@ conda env create -f environment.yaml
 conda activate mosaic
 ```
 
-### Training from Scratch
+### Training
+
+The configs in `configs/` are the default hyperparameters used for our experiments. Training uses [Hydra](https://hydra.cc/) for configuration — experiment-specific overrides (dataset size, LR, steps) are in `configs/experiment/`, and tokenizer defaults in `configs/tokenizer/`.
 
 ```bash
-# Train on MOSES dataset (default) with HDTC tokenizer
-python scripts/train.py experiment=moses
+# Train HDTC on MOSES (default)
+python scripts/train.py
 
 # Train with different tokenizers
-python scripts/train.py experiment=moses tokenizer=sent    # Flat SENT (baseline)
-python scripts/train.py experiment=moses tokenizer=hsent   # Hierarchical SENT
-python scripts/train.py experiment=moses tokenizer=hdt     # Hierarchical DFS
-python scripts/train.py experiment=moses tokenizer=hdtc    # Compositional (default)
+python scripts/train.py tokenizer=sent     # Flat SENT (baseline)
+python scripts/train.py tokenizer=hsent    # Hierarchical SENT
+python scripts/train.py tokenizer=hdt      # Hierarchical DFS
+python scripts/train.py tokenizer=hdtc     # Compositional (default)
 
-# Train on moses dataset
-python scripts/train.py experiment=moses
-
-# Train on COCONUT dataset (complex natural products)
+# Train on COCONUT dataset
 python scripts/train.py experiment=coconut
 
-# Train with custom model and settings
-python scripts/train.py \
-    experiment=moses \
-    model.model_name=gpt2-s \
-    trainer.max_steps=100000 \
-    tokenizer=hsent
+# Evaluate trained model
+python scripts/test.py model.checkpoint_path=outputs/train/.../best.ckpt
+python scripts/realistic_gen.py model.checkpoint_path=outputs/train/.../best.ckpt
 
-# Run different test on unconditional generations
-python scripts/test.py
-python scripts/realistic_gen.py
-
-# Create output table
+# Create comparison table
 python scripts/comparison/compare_results.py
 ```
 
+### Trained Checkpoints
 
-### Transfer Learning / Fine-tuning
-
-Fine-tune a pretrained model on COCONUT complex natural products to evaluate transfer learning capabilities.
-
-```bash
-# First, prepare the complex molecule dataset (one-time setup, ~191MB download)
-python scripts/preprocess/prepare_coconut_data.py
-
-# Custom filtering thresholds
-python scripts/preprocess/prepare_coconut_data.py \
-    --n-molecules 10000 \
-    --min-atoms 25 \
-    --min-rings 3
-
-# Fine-tune from MOSES checkpoint
-python scripts/finetune.py \
-    model.pretrained_path=outputs/benchmark/moses_hdtc_n500000_20260129-171812/best.ckpt \
-    experiment=coconut \
-    trainer.max_steps=50000
-
-# Or use train.py directly with COCONUT experiment
-python scripts/train.py \
-    experiment=coconut \
-    model.pretrained_path=outputs/moses_hdtc/best.ckpt
-
-# Evaluate fine-tuned model
-python scripts/eval_finetune.py \
-    model.checkpoint_path=outputs/coconut_finetune/best.ckpt \
-    generation.num_samples=1000
-
-# Compare the results of fine-tuned model
-python scripts/comparison/compare_finetune_results.py
-```
-
-### Trained Checkpoint
-gdown our trained checkpoint for different models from [this google drive](https://drive.google.com/drive/folders/1aMo5cQvexJ11GyIXACQys_UlA1CxKv7e?usp=drive_link).
-
-
-### Running Tests
-
-```bash
-pytest tests/ -v
-```
+Download our trained checkpoints from [Google Drive](https://drive.google.com/drive/folders/1aMo5cQvexJ11GyIXACQys_UlA1CxKv7e?usp=drive_link).
 
 ### Batch Benchmark Scripts
 
-The `bash_scripts/` directory provides end-to-end automation for the full benchmark pipeline. Each script supports `--dry-run`, `--force`, and `--help` flags. See [bash_scripts/README.md](bash_scripts/README.md) for detailed options. For a full command cheat sheet (GCP, DSMLP, setup, precompute, training, eval), see [docs/commands_reference.md](docs/commands_reference.md).
-
-```
-0. precompute_benchmarks.sh       -> Precompute tokenized cache (optional, speeds up training)
-   stop_precompute_benchmarks.sh  -> Stop precompute screen sessions
-1. train_benchmarks.sh            -> Pretrain all tokenizer variants on MOSES (or COCONUT)
-2. eval_benchmarks.sh             -> Evaluate pretrained models (validity, FCD, motif rate, etc.)
-   eval_benchmarks_auto.sh        -> Evaluate checkpoints from a mapping file (with caching, precomputed SMILES/reference graphs)
-3. finetune_benchmarks.sh         -> Fine-tune on COCONUT (transfer learning)
-4. eval_finetune_benchmarks.sh   -> Evaluate fine-tuned models
-```
+The `bash_scripts/` directory automates the full benchmark pipeline. See [bash_scripts/README.md](bash_scripts/README.md) for details.
 
 ```bash
-# Step 0: Precompute tokenized cache (optional, speeds up training)
-./bash_scripts/precompute_benchmarks.sh              # MOSES (1M samples, parallel screen sessions)
-./bash_scripts/precompute_benchmarks.sh --coconut    # COCONUT (5K samples, runs directly)
-./bash_scripts/precompute_benchmarks.sh --all        # Both datasets
-./bash_scripts/precompute_benchmarks.sh --use-precomputed-smiles --tokenizer=hsent --coarsening=sc  # Use precomputed SMILES (run scripts/preprocess/export_moses_smiles.py first)
-./bash_scripts/stop_precompute_benchmarks.sh --tokenizer=hsent --coarsening=sc   # Cancel running precompute jobs
+# Train all tokenizer variants
+./bash_scripts/train/train_benchmarks.sh
+./bash_scripts/train/train_benchmarks.sh --coconut
 
-# Step 1: Train all tokenizer variants from scratch
-./bash_scripts/train_benchmarks.sh                   # MOSES (default, 500K steps)
-./bash_scripts/train_benchmarks.sh --coconut         # COCONUT (50K steps)
-./bash_scripts/train_benchmarks.sh --skip-sc-hac     # Only MC coarsening variants
-
-# Step 2: Evaluate pretrained models
-./bash_scripts/eval_benchmarks.sh                    # MOSES benchmarks (auto-discovers checkpoints)
-./bash_scripts/eval_benchmarks.sh --coconut          # COCONUT benchmarks
-./bash_scripts/eval_benchmarks_auto.sh MAPPING.txt outputs/eval --use-precomputed-smiles   # Custom list + caching + precomputed SMILES
-
-# Step 3: Fine-tune pretrained models on COCONUT
-./bash_scripts/finetune_benchmarks.sh                # Full fine-tuning (5K samples)
-./bash_scripts/finetune_benchmarks.sh --few-shot     # Few-shot (200 samples)
-
-# Step 4: Evaluate fine-tuned models
-./bash_scripts/eval_finetune_benchmarks.sh           # Full mode
-./bash_scripts/eval_finetune_benchmarks.sh --few-shot  # Few-shot mode
+# Evaluate all trained models
+./bash_scripts/eval/eval_benchmarks.sh
+./bash_scripts/eval/eval_benchmarks.sh --coconut
 ```
 
 ## Project Structure
@@ -170,18 +94,20 @@ MOSAIC/
 ## Documentation
 
 See the [docs/](docs/) directory for:
-- [Command Reference](docs/commands_reference.md) — GCP, DSMLP, setup, precompute, training, and eval cheat sheet
 - [Codebase Guide](docs/codebase.md)
-- [Server Setup Guide](docs/server_setup.md)
-- [GCP Setup](docs/setup_gcp.md)
-- [Training Setup Guide](docs/setup_training.md)
-- [Contributing Guide](docs/contributing.md)
-- [H-graph Construction](docs/hgraph.md)
-- [Tokenization](docs/tokenization.md)
-- [Evaluation Metrics](docs/metric.md)
-- [Realistic Generation](docs/realistic.md)
-- [Visualize Tokenization](docs/visualization.md)
-- [Property Experiments](docs/property_experiment.md)
+- [Samples Seen](docs/designs/samples_seen.md)
+
+Setup guides (`docs/setups/`):
+- [Server Setup Guide](docs/setups/server_setup.md)
+- [GCP Setup](docs/setups/setup_gcp.md)
+- [Training Setup Guide](docs/setups/setup_training.md)
+
+Design docs (`docs/designs/`):
+- [H-graph Construction](docs/designs/hgraph.md)
+- [Tokenization](docs/designs/tokenization.md)
+- [Evaluation Metrics](docs/designs/metric.md)
+- [Visualize Tokenization](docs/designs/visualization.md)
+- [Property Experiments](docs/designs/property_experiment.md)
 
 ## Acknowledgement
 

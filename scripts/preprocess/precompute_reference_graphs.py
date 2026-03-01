@@ -4,7 +4,7 @@
 Used by eval_benchmarks_auto.sh so that each checkpoint eval can load the same
 reference graphs instead of reconverting SMILES every time. Set
 metrics.reference_graphs_path to the printed path in test.yaml or pass it to test.py.
-See docs/commands_reference.md.
+See bash_scripts/README.md.
 
 Usage:
     python scripts/preprocess/precompute_reference_graphs.py experiment=moses reference_graphs.output_dir=outputs/eval_run

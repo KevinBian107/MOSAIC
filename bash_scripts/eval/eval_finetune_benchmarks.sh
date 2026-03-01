@@ -139,7 +139,7 @@ if [ "$COMPARE_ONLY" = false ]; then
         echo "Expected to find best.ckpt files in the finetune directory."
         echo ""
         echo "Run fine-tuning first:"
-        echo "  ./bash_scripts/finetune_benchmarks.sh"
+        echo "  ./bash_scripts/train/finetune_benchmarks.sh"
         exit 1
     fi
 

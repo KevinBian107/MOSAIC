@@ -5,10 +5,10 @@
 # computing cross-entropy loss on the held-out test split.
 #
 # Usage:
-#   ./bash_scripts/test_loss_benchmarks.sh              # Evaluate MOSES benchmarks
-#   ./bash_scripts/test_loss_benchmarks.sh --coconut    # Evaluate COCONUT benchmarks
-#   ./bash_scripts/test_loss_benchmarks.sh --dry-run    # Show what would be run
-#   ./bash_scripts/test_loss_benchmarks.sh --help       # Show help
+#   ./bash_scripts/eval/eval_loss_benchmarks.sh              # Evaluate MOSES benchmarks
+#   ./bash_scripts/eval/eval_loss_benchmarks.sh --coconut    # Evaluate COCONUT benchmarks
+#   ./bash_scripts/eval/eval_loss_benchmarks.sh --dry-run    # Show what would be run
+#   ./bash_scripts/eval/eval_loss_benchmarks.sh --help       # Show help
 #
 # Output:
 #   outputs/test_loss/{dataset}_{tokenizer}_test_loss_{timestamp}/results.json

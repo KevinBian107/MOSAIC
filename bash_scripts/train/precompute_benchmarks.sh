@@ -8,16 +8,16 @@
 # (MC, MAS) are fast enough to run on-the-fly during training.
 #
 # Usage:
-#   ./bash_scripts/precompute_benchmarks.sh              # Precompute MOSES (default)
-#   ./bash_scripts/precompute_benchmarks.sh --coconut    # Precompute COCONUT
-#   ./bash_scripts/precompute_benchmarks.sh --all        # Precompute both datasets
-#   ./bash_scripts/precompute_benchmarks.sh --dry-run    # Show what would be run
-#   ./bash_scripts/precompute_benchmarks.sh --help       # Show help
+#   ./bash_scripts/train/precompute_benchmarks.sh              # Precompute MOSES (default)
+#   ./bash_scripts/train/precompute_benchmarks.sh --coconut    # Precompute COCONUT
+#   ./bash_scripts/train/precompute_benchmarks.sh --all        # Precompute both datasets
+#   ./bash_scripts/train/precompute_benchmarks.sh --dry-run    # Show what would be run
+#   ./bash_scripts/train/precompute_benchmarks.sh --help       # Show help
 #
 # Output:
 #   data/cache/{dataset}_{split}_{tokenizer}_{num_samples}_{hash}.pt
 #
-# See docs/commands_reference.md and bash_scripts/README.md for more examples.
+# See bash_scripts/README.md for more examples.
 
 set -e  # Exit on error
 

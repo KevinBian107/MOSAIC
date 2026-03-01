@@ -5,12 +5,12 @@
 # in outputs/benchmark/, then generates a comparison table.
 #
 # Usage:
-#   ./bash_scripts/eval_benchmarks.sh              # Evaluate MOSES benchmarks
-#   ./bash_scripts/eval_benchmarks.sh --coconut    # Evaluate COCONUT benchmarks
-#   ./bash_scripts/eval_benchmarks.sh --full-ref   # Use train+test as reference population
-#   ./bash_scripts/eval_benchmarks.sh --test-only  # Skip realistic_gen
-#   ./bash_scripts/eval_benchmarks.sh --gen-only   # Skip test, only realistic_gen
-#   ./bash_scripts/eval_benchmarks.sh --force      # Re-evaluate even if results exist
+#   ./bash_scripts/eval/eval_benchmarks.sh              # Evaluate MOSES benchmarks
+#   ./bash_scripts/eval/eval_benchmarks.sh --coconut    # Evaluate COCONUT benchmarks
+#   ./bash_scripts/eval/eval_benchmarks.sh --full-ref   # Use train+test as reference population
+#   ./bash_scripts/eval/eval_benchmarks.sh --test-only  # Skip realistic_gen
+#   ./bash_scripts/eval/eval_benchmarks.sh --gen-only   # Skip test, only realistic_gen
+#   ./bash_scripts/eval/eval_benchmarks.sh --force      # Re-evaluate even if results exist
 
 set -e  # Exit on error
 

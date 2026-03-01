@@ -7,12 +7,12 @@
 # After training, evaluates all models and generates comparison tables.
 #
 # Usage:
-#   ./bash_scripts/train_lr_sweep.sh                    # Both SC+HAC on COCONUT
-#   ./bash_scripts/train_lr_sweep.sh --sc --coconut     # SC only on COCONUT
-#   ./bash_scripts/train_lr_sweep.sh --hac --moses      # HAC only on MOSES
-#   ./bash_scripts/train_lr_sweep.sh --dry-run          # Show commands only
-#   ./bash_scripts/train_lr_sweep.sh --eval-only        # Skip training, eval existing
-#   ./bash_scripts/train_lr_sweep.sh --help
+#   ./bash_scripts/train/train_lr_sweep.sh                    # Both SC+HAC on COCONUT
+#   ./bash_scripts/train/train_lr_sweep.sh --sc --coconut     # SC only on COCONUT
+#   ./bash_scripts/train/train_lr_sweep.sh --hac --moses      # HAC only on MOSES
+#   ./bash_scripts/train/train_lr_sweep.sh --dry-run          # Show commands only
+#   ./bash_scripts/train/train_lr_sweep.sh --eval-only        # Skip training, eval existing
+#   ./bash_scripts/train/train_lr_sweep.sh --help
 
 set -e
 
