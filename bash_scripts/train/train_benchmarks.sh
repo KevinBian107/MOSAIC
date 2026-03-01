@@ -161,7 +161,11 @@ if [ "$NUM_DEVICES" -gt 1 ]; then
     # Fix: launch N separate processes, each with CUDA_VISIBLE_DEVICES set to one
     # MIG UUID, LOCAL_RANK=0, and trainer.num_nodes=N to satisfy PL validation.
     MIG_UUIDS=$(nvidia-smi -L 2>/dev/null | grep -oP 'MIG-[0-9a-f-]+' | paste -sd, 2>/dev/null || true)
-    MIG_COUNT=$(echo "$MIG_UUIDS" | tr ',' '\n' | grep -c 'MIG' 2>/dev/null || echo 0)
+    if [ -n "$MIG_UUIDS" ]; then
+        MIG_COUNT=$(echo "$MIG_UUIDS" | tr ',' '\n' | grep -c 'MIG' 2>/dev/null || echo 0)
+    else
+        MIG_COUNT=0
+    fi
     if [ "$MIG_COUNT" -ge "$NUM_DEVICES" ]; then
         USE_MIG=true
     fi
