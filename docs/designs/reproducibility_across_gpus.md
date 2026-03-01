@@ -112,6 +112,8 @@ $$\text{max\_steps} = \left\lceil \frac{\text{target\_samples\_seen}}{B_{\text{e
 
 ## 6. Real Examples from Our Checkpoints
 
+The goal is to make sure that we have the same sampels seen, if we fix the same batch size across GPU, then we just need less max steps to achieve so.
+
 ### MOSES HDTC — 4-GPU DDP vs equivalent 1-GPU
 
 Run: `moses_hdtc_20260221-224537`, finished at step 250,000.
