@@ -94,8 +94,8 @@ for arg in "$@"; do
             echo "  --devices=N       Set number of GPUs (implies DDP when N > 1)"
             echo "  --skip-sc-hac     Only train MC variants (skip SC and HAC coarsening)"
             echo "  --no-wandb        Disable WandB logging"
-            echo "  --steps=N         Set max training steps for single-GPU (default: 500000 MOSES, 50000 COCONUT)"
-            echo "                    With DDP, steps are derived from target_samples_seen in experiment config"
+            echo "  --steps=N         Set max training steps (default: 500000 MOSES, 50000 COCONUT)"
+            echo "                    Same step count is used regardless of GPU count (fair benchmarking)"
             echo ""
             echo "Tokenizers trained (default: all 8 variants):"
             echo "  - SENT (flat, no coarsening)"
@@ -130,31 +130,29 @@ fi
 
 cd "$PROJECT_ROOT"
 
-# DDP scaling: increase batch/GPU to use available memory, keep target_samples_seen constant.
-# train.py derives max_steps = target_samples_seen / effective_batch_size automatically.
-# LR and warmup scale with sqrt(effective_batch / base_batch).
+# Fair benchmarking: hold effective batch size constant regardless of GPU count.
+# DDP replicates the batch to each GPU, so we REDUCE per-GPU batch size to
+# keep B_eff = batch_per_gpu × num_gpus × accum_grad_batches unchanged.
+# LR, warmup, and max_steps do NOT change — the optimization trajectory
+# is mathematically identical regardless of hardware.
 #
-# Example (COCONUT, 4 GPUs):
-#   effective_batch = 64 × 4 = 256, target_samples_seen = 1.6M
-#   max_steps = 1.6M / 256 = 6,250 (vs 50,000 on 1 GPU with batch=32)
-DDP_BATCH_SIZE=64
-SCALED_LR=""
-SCALED_WARMUP=""
+# See docs/designs/reproducibility_across_gpus.md for full details.
+#
+# Example (4 GPUs):
+#   B_eff = 8 × 4 × 1 = 32 (same as 32 × 1 × 1 on single GPU)
+#   max_steps = 500,000 (unchanged), LR = 8.49e-4 (unchanged)
+EFFECTIVE_BATCH_SIZE=32  # Must stay constant across all benchmarking runs
+DDP_BATCH_SIZE=""
 USE_MIG=false
 MIG_UUIDS=""
 if [ "$NUM_DEVICES" -gt 1 ]; then
-    if [ "$DATASET" = "coconut" ]; then
-        BASE_LR="6e-4"
-        BASE_WARMUP=1000
-    else
-        BASE_LR="8.49e-4"
-        BASE_WARMUP=1414
+    # Compute per-GPU batch size to keep B_eff constant
+    if (( EFFECTIVE_BATCH_SIZE % NUM_DEVICES != 0 )); then
+        echo "ERROR: effective_batch_size ($EFFECTIVE_BATCH_SIZE) is not divisible by num_devices ($NUM_DEVICES)"
+        echo "  Supported GPU counts for B_eff=$EFFECTIVE_BATCH_SIZE: 1, 2, 4, 8, 16, 32"
+        exit 1
     fi
-    BASE_BATCH=32
-    EFFECTIVE_BATCH=$((DDP_BATCH_SIZE * NUM_DEVICES))
-
-    SCALED_LR=$(awk "BEGIN {printf \"%.2e\", $BASE_LR * sqrt($EFFECTIVE_BATCH / $BASE_BATCH)}")
-    SCALED_WARMUP=$(awk "BEGIN {printf \"%d\", $BASE_WARMUP * sqrt($EFFECTIVE_BATCH / $BASE_BATCH)}")
+    DDP_BATCH_SIZE=$((EFFECTIVE_BATCH_SIZE / NUM_DEVICES))
 
     # Detect MIG instances (Multi-Instance GPU).
     # With MIG, each process can only access one MIG instance via the CUDA Runtime.
@@ -175,17 +173,15 @@ echo "========================================"
 echo ""
 echo "Settings:"
 echo "  Dataset: $DATASET"
+echo "  Max steps: $MAX_STEPS"
+echo "  Effective batch size: $EFFECTIVE_BATCH_SIZE (constant)"
 if [ "$NUM_DEVICES" -gt 1 ]; then
-    echo "  DDP: ${NUM_DEVICES} GPUs (batch=${DDP_BATCH_SIZE}/GPU)"
+    echo "  DDP: ${NUM_DEVICES} GPUs (batch=${DDP_BATCH_SIZE}/GPU × ${NUM_DEVICES} GPUs = ${EFFECTIVE_BATCH_SIZE})"
     if [ "$USE_MIG" = true ]; then
         echo "  MIG: detected (manual per-process launching)"
     fi
-    echo "  Effective batch: ${EFFECTIVE_BATCH} (${DDP_BATCH_SIZE} × ${NUM_DEVICES})"
-    echo "  LR: $BASE_LR → $SCALED_LR (×√(${EFFECTIVE_BATCH}/${BASE_BATCH}))"
-    echo "  Warmup: $BASE_WARMUP → $SCALED_WARMUP"
-    echo "  Steps: derived from target_samples_seen / ${EFFECTIVE_BATCH}"
 else
-    echo "  Max steps: $MAX_STEPS (fallback; target_samples_seen takes priority)"
+    echo "  GPUs: 1 (batch=${EFFECTIVE_BATCH_SIZE})"
 fi
 echo "  WandB: $WANDB_ENABLED"
 echo "  Output: $OUTPUT_DIR"
@@ -392,13 +388,11 @@ print(ckpt.get('global_step', 0))
     echo "========================================"
 
     # Build Hydra arguments (common to all launch modes)
-    # Note: max_steps is only set for single-GPU as fallback; with DDP,
-    # train.py derives steps from target_samples_seen / effective_batch_size.
+    # max_steps and LR/warmup are always set identically regardless of GPU count.
+    # Only per-GPU batch_size changes to keep B_eff constant.
     ARGS="experiment=$DATASET"
     ARGS="$ARGS tokenizer=$TOKENIZER"
-    if [ "$NUM_DEVICES" -le 1 ]; then
-        ARGS="$ARGS trainer.max_steps=$MAX_STEPS"
-    fi
+    ARGS="$ARGS trainer.max_steps=$MAX_STEPS"
     ARGS="$ARGS logs.run_name=$RUN_NAME"
     ARGS="$ARGS logs.base_dir=$OUTPUT_DIR"
     ARGS="$ARGS wandb.enabled=$WANDB_ENABLED"
@@ -409,7 +403,8 @@ print(ckpt.get('global_step', 0))
         ARGS="$ARGS logs.path=$RESUME_CKPT"
     fi
 
-    # Add DDP settings
+    # Add DDP settings — only device topology and per-GPU batch size change.
+    # LR and warmup are NOT overridden; they come from the experiment config.
     if [ "$NUM_DEVICES" -gt 1 ]; then
         if [ "$USE_MIG" = true ]; then
             # MIG: 1 device per process, N "nodes" to satisfy PL validation
@@ -422,8 +417,6 @@ print(ckpt.get('global_step', 0))
             ARGS="$ARGS trainer.strategy=ddp"
         fi
         ARGS="$ARGS data.batch_size=$DDP_BATCH_SIZE"
-        ARGS="$ARGS model.learning_rate=$SCALED_LR"
-        ARGS="$ARGS model.warmup_steps=$SCALED_WARMUP"
     fi
 
     # Add coarsening for hierarchical tokenizers

@@ -18,43 +18,45 @@ bash_scripts/
     └── eval_loss_benchmarks.sh      # Compute test loss
 ```
 
-## Multi-GPU Parallelism
+## Fair Benchmarking Across Tokenizers
 
-### Data Parallelism (DDP)
+We benchmark 8 tokenizer variants on the same model architecture (GPT-xs). Different tokenizers produce **different sequence lengths** for the same molecules — this is the variable we're studying. Everything else must be identical for a fair comparison.
 
-Splits batches across GPUs. The training budget is controlled by `target_samples_seen` in the experiment config (e.g., 1.6M for COCONUT, 16M for MOSES). With more GPUs, the effective batch size increases, so fewer steps are needed to reach the same `target_samples_seen`:
+> For full details on the math, see [Reproducibility Across GPUs](../docs/designs/reproducibility_across_gpus.md).
 
-```
-target_samples_seen = effective_batch_size × max_steps
-effective_batch_size = batch_size_per_gpu × num_gpus × accumulate_grad_batches
-```
+### What must stay constant across all runs
 
-When you pass `--ddp` or `--devices=N`, `train_benchmarks.sh` auto-adjusts:
+| Parameter | Value (MOSES) | Value (COCONUT) | Why |
+|-----------|---------------|-----------------|-----|
+| Effective batch size ($B_{\text{eff}}$) | 32 | 32 | Gradient variance must be identical |
+| Max steps | 500,000 | 50,000 | Same number of optimizer updates |
+| Peak learning rate | 8.49e-4 | 6e-4 | Same optimization trajectory |
+| Warmup steps | 1,414 | 1,000 | Same LR ramp (absolute, not %) |
+| Seed | 42 | 42 | Reproducible init + data order |
 
-1. **Batch size** → increased to 64/GPU (more VRAM available vs MIG)
-2. **LR** → scaled by sqrt(effective_batch / base_batch)
-3. **Warmup** → scaled by sqrt(effective_batch / base_batch)
-4. **Steps** → NOT set by the script; `train.py` derives it automatically from `target_samples_seen / effective_batch_size`
+### Using DDP to speed up training
 
-| Setting | 1 GPU | 4 GPUs (`--devices=4`) |
-|---------|-------|------------------------|
-| Batch/GPU | 32 | 64 (auto) |
-| Effective batch | 32 | 256 (auto) |
-| LR | 6e-4 | 1.70e-3 (auto) |
-| Warmup | 1000 | 2828 (auto) |
-| Steps | 50,000 | 6,250 (auto, from train.py) |
-| Samples seen | 1.6M | 1.6M (same) |
+DDP replicates the model to each GPU. Each GPU processes its own batch of $B$ samples, so the effective batch size becomes $B \times \text{GPUs} \times \text{accum}$.
 
-`train.py` validates that `target_samples_seen` can be reached and warns if `max_steps` would be too low.
+To keep the comparison fair when adding GPUs, we must **hold $B_{\text{eff}}$ constant** by compensating with `accumulate_grad_batches`:
 
-```bash
-# Auto-scales everything for 4 GPUs
-./bash_scripts/train/train_benchmarks.sh --ddp --devices=4
-```
+| Setup | batch/GPU | GPUs | accum | $B_{\text{eff}}$ | Wall time |
+|-------|-----------|------|-------|-------------------|-----------|
+| 1 GPU (baseline) | 32 | 1 | 1 | **32** | 1x |
+| 2 GPUs | 16 | 2 | 1 | **32** | ~0.5x |
+| 4 GPUs | 8 | 4 | 1 | **32** | ~0.25x |
+
+The key insight: **LR, warmup, and max_steps do NOT change with GPUs.** Only `batch_size` per GPU is adjusted so the product stays constant. This means the optimization trajectory (gradient noise, LR schedule shape, total weight updates) is mathematically identical regardless of hardware.
+
+> **Note:** DDP introduces microscopic floating-point non-determinism from asynchronous gradient reductions. This is negligible for benchmarking — downstream metric differences will be far larger.
+
+### What NOT to use for comparison
+
+**Do not compare validation loss across tokenizers.** Cross-entropy loss depends on vocabulary size and token distribution. A tokenizer with vocab 50 has fundamentally different loss dynamics than one with vocab 150. Always evaluate using downstream generation metrics: Validity, Uniqueness, Novelty, FCD, etc.
 
 ### Task Parallelism (MIG)
 
-Runs independent training jobs on separate MIG GPU instances. Used by `train_lr_sweep.sh` to train multiple LR configurations simultaneously (4 LRs on 4 MIG GPUs). Each job is a single-GPU run.
+Runs independent training jobs on separate MIG GPU instances. Used by `train_lr_sweep.sh` to train multiple LR configurations simultaneously (4 LRs on 4 MIG GPUs). Each job is a single-GPU run — no DDP math involved.
 
 ## Quick Reference
 
@@ -67,7 +69,7 @@ Runs independent training jobs on separate MIG GPU instances. Used by `train_lr_
 # Train on COCONUT
 ./bash_scripts/train/train_benchmarks.sh --coconut
 
-# Multi-GPU DDP
+# Multi-GPU DDP (keeps effective batch size constant)
 ./bash_scripts/train/train_benchmarks.sh --ddp              # 4 GPUs (default)
 ./bash_scripts/train/train_benchmarks.sh --devices=2         # 2 GPUs
 

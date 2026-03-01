@@ -95,7 +95,7 @@ MOSAIC/
 
 See the [docs/](docs/) directory for:
 - [Codebase Guide](docs/codebase.md)
-- [Samples Seen](docs/designs/samples_seen.md)
+- [Reproducibility Across GPUs](docs/designs/reproducibility_across_gpus.md)
 
 Setup guides (`docs/setups/`):
 - [Server Setup Guide](docs/setups/server_setup.md)
