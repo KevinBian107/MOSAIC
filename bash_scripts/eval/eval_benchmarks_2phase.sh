@@ -135,8 +135,9 @@ echo "$CHECKPOINTS" | while read -r ckpt; do
 done
 
 echo ""
-echo "========== PHASE 2: METRICS ONLY (parallel, CPU) =========="
-pids=()
+echo "========== PHASE 2: METRICS ONLY (parallel, CPU, one screen per run) =========="
+echo "Spawning a detached screen session for each checkpoint (attach with: screen -r <name>)"
+
 echo "$CHECKPOINTS" | while read -r ckpt; do
     TOKENIZER=$(get_tokenizer_type "$ckpt")
     RUN_DIR_NAME=$(basename "$(dirname "$ckpt")")
@@ -147,23 +148,27 @@ echo "$CHECKPOINTS" | while read -r ckpt; do
         continue
     fi
 
-    echo "Starting metrics_only for $RUN_DIR_NAME ..."
-    python scripts/test.py \
-      model.checkpoint_path="$ckpt" \
-      tokenizer="$TOKENIZER" \
-      experiment="$DATASET" \
-      logs.path="$LOGS_PATH_TEST" \
-      metrics.reference_split="$REFERENCE_SPLIT" \
-      metrics.generate_only=false \
-      metrics.metrics_only=true \
-      $COARSENING_ARGS &
-    pids+=($!)
+    SESSION_NAME="mosaic_metrics_${RUN_DIR_NAME}"
+    echo "Starting metrics_only for $RUN_DIR_NAME in screen session '$SESSION_NAME' ..."
+
+    # Use a detached screen session running bash -lc so it inherits the env/conda activation.
+    # If 'screen' is not in PATH, adjust to full path (e.g., /usr/bin/screen).
+    usr/bin/screen -S "$SESSION_NAME" -dm bash -lc "
+cd \"$PROJECT_ROOT\" && \
+python scripts/test.py \
+  model.checkpoint_path=\"$ckpt\" \
+  tokenizer=\"$TOKENIZER\" \
+  experiment=\"$DATASET\" \
+  logs.path=\"$LOGS_PATH_TEST\" \
+  metrics.reference_split=\"$REFERENCE_SPLIT\" \
+  metrics.generate_only=false \
+  metrics.metrics_only=true \
+  $COARSENING_ARGS
+"
 done
 
-if [ "${#pids[@]}" -gt 0 ]; then
-    echo "Waiting for metrics_only jobs to finish..."
-    wait "${pids[@]}"
-fi
-
-echo "Two-phase evaluation complete. Results are under $TEST_OUTPUT_DIR"
+echo ""
+echo "Phase 2 metrics_only jobs have been started in screen sessions."
+echo "Attach to a session with:  screen -r mosaic_metrics_<run_dir_name>"
+echo "Logs and results are under $TEST_OUTPUT_DIR"
 
