@@ -74,8 +74,13 @@ wandb/
 *.pth
 *.ckpt
 
+# Checkpoints and export artifacts
+checkpoints/
+exports/
+
 # Nested website repo
 MOSAIC-website/
+mosaic-live-demo/
 
 # OS
 .DS_Store
