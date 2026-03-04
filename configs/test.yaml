@@ -38,7 +38,7 @@ metrics:
   compute_fcd: true  # Requires moses or fcd package
   compute_pgd: true  # Requires polygraph-benchmark package
   pgd_reference_size: 1000  # Should be >= sampling.num_samples to use all generated; PGD needs equal ref/gen counts
-  reference_size: null  # Auto: test split -> 10% of train; full split -> 5000 train + 500 test
+  reference_size: null  # Auto: test split -> 10% of train; full split -> 5000 from train+test combined
   reference_split: "test"  # Reference population: "test" (default) or "full" (train+test combined)
   reference_graphs_path: null  # If set, load PGD reference graphs from this .pt file (skip SMILES->graph conversion)
   motif_cache_dir: data/motif_cache  # Cache reference motif features here (null = disable); reused across model runs
