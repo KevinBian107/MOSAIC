@@ -1,6 +1,6 @@
 # DSMLP Server Quick Reference
 
-Quick reference commands for running MOSAIC on UCSD DSMLP cluster. See also [commands_reference.md](commands_reference.md) for a combined GCP + DSMLP + setup + training cheat sheet.
+Quick reference commands for running MOSAIC on UCSD DSMLP cluster.
 
 ## SSH Access
 

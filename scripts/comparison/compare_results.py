@@ -5,7 +5,7 @@ Reads results from test output directories and creates a table image comparing
 metrics across tokenization schemes. Incorporates realistic generation metrics
 when available, matching by checkpoint path. Table sections include Training Info
 (coarsening_strategy, reference_split, generation_time), Core Quality, Distribution
-Matching, Structural, Motif MMD, and Realistic Generation. See docs/commands_reference.md.
+Matching, Structural, Motif MMD, and Realistic Generation. See bash_scripts/README.md.
 
 Usage:
     python scripts/comparison/compare_results.py
@@ -34,7 +34,9 @@ METRIC_SECTIONS = [
         [
             "train_data_size",
             "train_max_steps",
+            "effective_batch_size",
             "total_samples_seen",
+            "samples_seen",
             "batch_size",
             "learning_rate",
             "weight_decay",
@@ -100,7 +102,9 @@ METRIC_SECTIONS = [
 TRAINING_INFO_METRICS = [
     "train_data_size",
     "train_max_steps",
+    "effective_batch_size",
     "total_samples_seen",
+    "samples_seen",
     "batch_size",
     "learning_rate",
     "weight_decay",
@@ -110,7 +114,12 @@ TRAINING_INFO_METRICS = [
 ]
 
 # Categorical metrics that should not have best/second-best highlighting
-CATEGORICAL_METRICS = {"coarsening_strategy", "reference_split"}
+CATEGORICAL_METRICS = {
+    "coarsening_strategy",
+    "reference_split",
+    "effective_batch_size",  # Should be identical across fair benchmarks
+    "batch_size",  # Per-GPU batch size (informational)
+}
 DEFAULT_TEST_METRICS = [
     "validity",
     "uniqueness",
@@ -153,6 +162,7 @@ LOWER_IS_BETTER = {
     "train_data_size",
     "train_max_steps",
     "total_samples_seen",
+    "samples_seen",
     # Test metrics
     "pgd",
     "fcd",
@@ -176,7 +186,9 @@ METRIC_DISPLAY_NAMES = {
     # Training info
     "train_data_size": "Train Data Size",
     "train_max_steps": "Train Steps",
-    "total_samples_seen": "Total Samples Seen",
+    "effective_batch_size": "Eff Batch Size",
+    "total_samples_seen": "Target Samples",
+    "samples_seen": "Actual Samples Seen",
     "batch_size": "Batch Size",
     "learning_rate": "LR",
     "weight_decay": "Weight Decay",
@@ -254,9 +266,13 @@ def load_run_data(run_dir: Path) -> dict | None:
             with open(config_path) as f:
                 config = yaml.safe_load(f)
 
-        # Extract training info and add to results
+        # Extract training info from config, but don't overwrite values
+        # already present in results.json (e.g. effective_batch_size, samples_seen
+        # written by test.py/realistic_gen.py from the checkpoint itself)
         training_info = extract_training_info(config)
-        results.update(training_info)
+        for key, value in training_info.items():
+            if key not in results or results[key] is None:
+                results[key] = value
 
         return {
             "name": run_dir.name,
@@ -375,7 +391,9 @@ def extract_training_info(config: dict) -> dict:
     info = {
         "train_data_size": None,
         "train_max_steps": None,
+        "effective_batch_size": None,
         "total_samples_seen": None,
+        "samples_seen": None,
         "batch_size": None,
         "learning_rate": None,
         "weight_decay": None,
@@ -428,18 +446,23 @@ def extract_training_info(config: dict) -> dict:
         if model_cfg.get("warmup_steps") is not None:
             info["warmup_steps"] = model_cfg["warmup_steps"]
 
-        # Total samples seen = train_max_steps * (batch_size * num_gpus)
-        num_gpus = trainer_cfg.get("devices", 1)
-        if isinstance(num_gpus, (list, tuple)):
-            num_gpus = len(num_gpus) if num_gpus else 1
-        if (
-            info["train_max_steps"] is not None
-            and info["batch_size"] is not None
-            and num_gpus is not None
-        ):
-            info["total_samples_seen"] = (
-                info["train_max_steps"] * info["batch_size"] * num_gpus
-            )
+        # Compute effective_batch_size from training config
+        batch_size = data_cfg.get("batch_size")
+        devices = trainer_cfg.get("devices", 1)
+        num_nodes = trainer_cfg.get("num_nodes", 1)
+        accum = trainer_cfg.get("accumulate_grad_batches", 1)
+        if batch_size is not None:
+            eff = int(batch_size) * int(devices) * int(num_nodes) * int(accum)
+            info["effective_batch_size"] = eff
+
+        # total_samples_seen comes from trainer.target_samples_seen in config
+        target = trainer_cfg.get("target_samples_seen")
+        if target is not None:
+            info["total_samples_seen"] = target
+
+        # Compute actual samples_seen = global_step × effective_batch_size
+        if actual_steps is not None and info["effective_batch_size"] is not None:
+            info["samples_seen"] = actual_steps * info["effective_batch_size"]
 
         # If num_train is -1 (full dataset), try to parse from directory name
         if num_train is not None and num_train != -1:

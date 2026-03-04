@@ -377,7 +377,17 @@ class GraphGeneratorModule(pl.LightningModule):
 
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
         """Training step."""
-        return self._shared_step(batch, "train")
+        loss = self._shared_step(batch, "train")
+
+        # Log samples_seen so WandB runs with different B, G, A can share an x-axis
+        if self.trainer is not None:
+            B = batch.shape[0]
+            G = self.trainer.world_size
+            A = self.trainer.accumulate_grad_batches
+            samples_seen = self.trainer.global_step * B * G * A
+            self.log("train/samples_seen", float(samples_seen), on_step=True, on_epoch=False, sync_dist=False)
+
+        return loss
 
     def validation_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
         """Validation step."""

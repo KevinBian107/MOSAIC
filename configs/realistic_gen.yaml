@@ -1,9 +1,9 @@
 # @package _global_
 
 defaults:
-  - /experiment: moses
   - /tokenizer: hdt
   - _self_
+  - /experiment: moses  # Applied last so experiment can override
 
 # Random seed
 seed: 42
@@ -11,10 +11,6 @@ seed: 42
 # Model configuration
 model:
   checkpoint_path: outputs/train/moses_hdt_andrew/best.ckpt
-  # outputs/train/moses_hdtc_n100000_20260126-204311/best.ckpt
-  # outputs/train/moses_hdt_n1000000_20260125-233951/best.ckpt
-  # outputs/train/moses_hsent_n50000_20260122-093526/best.ckpt
-  # outputs/train/moses_sent_n1000000_20260123-140906/best.ckpt
 
 # Data configuration (dataset_name comes from experiment config)
 data:
@@ -23,23 +19,24 @@ data:
   include_hydrogens: false
   data_root: data
   # Optional: load from precomputed SMILES file (e.g. data/moses_smiles/moses_smiles.txt)
-  use_precomputed_smiles: false
+  use_precomputed_smiles: true
   precomputed_smiles_dir: data/moses_smiles
 
 # Generation configuration
 generation:
-  num_samples: 500
+  num_samples: 1000
   batch_size: 32
 
 # Sampling configuration
 sampling:
   top_k: 10
   temperature: 1.0
-  max_length: 2048
+  max_length: 512
 
 # Metrics configuration
 metrics:
   reference_split: "test"  # Reference population: "test" (default) or "full" (train+test combined)
+  reference_size: 5000     # Max reference molecules for analysis (avoids slow RDKit on 500K MOSES)
 
 # Analysis configuration
 analysis:

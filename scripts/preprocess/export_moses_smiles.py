@@ -4,7 +4,7 @@
 Run once to create data/moses_smiles/moses_smiles.txt. Then set
 data.use_precomputed_smiles=true (and optionally data.precomputed_smiles_dir) so the
 datamodule and precompute_benchmarks.sh chunks load from it instead of re-reading CSV.
-See docs/commands_reference.md and docs/setup_training.md.
+See docs/setups/setup_training.md.
 
 Usage:
     python scripts/preprocess/export_moses_smiles.py

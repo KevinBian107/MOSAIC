@@ -16,16 +16,22 @@ data:
 
 model:
   pretrained_path: null  # Set via CLI: model.pretrained_path=path/to/best.ckpt
-  learning_rate: 1e-5    # Lower LR for fine-tuning
+  learning_rate: 6e-4    # From-scratch LR (override base 8.49e-4 for smaller dataset)
+  warmup_steps: 1000     # Override base 1414
 
 trainer:
-  max_steps: 50000
-  val_check_interval: 500
+  target_samples_seen: 1600000  # 1.6M total samples seen (batch_size=32 × 1 GPU → 50k steps)
+  max_steps: 50000  # Fallback when target_samples_seen is null
+  val_checks_per_epoch: 1
+  validate_every_n_epochs: 1
+
+tokenizer:
+  truncation_length: 2048
 
 sampling:
   num_samples: 100
   top_k: 10
-  max_length: 1024  # COCONUT molecules are <1000 tokens (99th pct: 950)
+  max_length: 2048
 
 # Finetuning evaluation callback settings
 # Logs generated molecules and reference molecules periodically during training

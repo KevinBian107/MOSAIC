@@ -2,8 +2,6 @@
 
 This guide covers setting up GCP for training MOSAIC models, including running multiple experiments in parallel.
 
-For a short command cheat sheet (SSH, setup, training, precompute, eval), see [commands_reference.md](commands_reference.md).
-
 ---
 
 ## Quick SSH

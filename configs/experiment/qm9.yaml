@@ -12,7 +12,11 @@ data:
 
 trainer:
   max_steps: 50000
-  val_check_interval: 1000
+  val_checks_per_epoch: 1
+  validate_every_n_epochs: 1
+
+tokenizer:
+  truncation_length: 2048
 
 sampling:
   num_samples: 1000

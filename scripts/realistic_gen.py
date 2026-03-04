@@ -61,6 +61,77 @@ from src.tokenizers import (  # noqa: E402
 log = logging.getLogger(__name__)
 
 
+def extract_training_info(checkpoint_path: str) -> dict:
+    """Extract training metadata from a checkpoint for results reporting.
+
+    Reads global_step from the checkpoint and attempts to recover
+    effective_batch_size from the co-located training config.yaml.
+    Returns a dict with global_step, effective_batch_size, and samples_seen
+    (or None for fields that can't be recovered).
+    """
+    info: dict = {
+        "global_step": None,
+        "effective_batch_size": None,
+        "samples_seen": None,
+    }
+    try:
+        ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        info["global_step"] = ckpt.get("global_step")
+    except Exception as e:
+        log.warning(f"Could not read global_step from checkpoint: {e}")
+        return info
+
+    # Try to recover effective_batch_size from co-located config.yaml
+    ckpt_dir = Path(checkpoint_path).parent
+    config_path = ckpt_dir / "config.yaml"
+    if config_path.exists():
+        try:
+            train_cfg = OmegaConf.load(config_path)
+            batch_size = OmegaConf.select(train_cfg, "data.batch_size", default=None)
+            devices = OmegaConf.select(train_cfg, "trainer.devices", default=1)
+            num_nodes = OmegaConf.select(train_cfg, "trainer.num_nodes", default=1)
+            accum = OmegaConf.select(
+                train_cfg, "trainer.accumulate_grad_batches", default=1
+            )
+            if batch_size is not None:
+                eff = int(batch_size) * int(devices) * int(num_nodes) * int(accum)
+                info["effective_batch_size"] = eff
+        except Exception as e:
+            log.warning(f"Could not parse training config for effective_batch_size: {e}")
+
+    # Compute samples_seen if both pieces are available
+    if info["global_step"] is not None and info["effective_batch_size"] is not None:
+        info["samples_seen"] = info["global_step"] * info["effective_batch_size"]
+
+    return info
+
+
+def _resolve_coarsening_strategy(cfg: DictConfig, tokenizer_name: str) -> tuple[str, bool]:
+    """Resolve coarsening strategy with backward-compatible motif_aware fallback."""
+    strategy = cfg.tokenizer.get("coarsening_strategy")
+    motif_aware = bool(cfg.tokenizer.get("motif_aware", False))
+
+    if strategy is None:
+        if motif_aware:
+            strategy = "motif_aware_spectral"
+            log.warning(
+                "tokenizer.motif_aware is deprecated for %s. "
+                "Using tokenizer.coarsening_strategy=motif_aware_spectral.",
+                tokenizer_name,
+            )
+        else:
+            strategy = "spectral"
+    elif motif_aware and strategy != "motif_aware_spectral":
+        log.warning(
+            "Both tokenizer.motif_aware=true and tokenizer.coarsening_strategy=%s "
+            "are set for %s. Using coarsening_strategy and ignoring motif_aware.",
+            strategy,
+            tokenizer_name,
+        )
+
+    return strategy, motif_aware
+
+
 def get_tokenizer(cfg: DictConfig):
     """Create tokenizer based on configuration.
 
@@ -73,23 +144,25 @@ def get_tokenizer(cfg: DictConfig):
     tokenizer_type = cfg.tokenizer.get("type", "sent").lower()
 
     if tokenizer_type == "hdt":
-        log.info("Using HDT tokenizer")
+        coarsening_strategy, motif_aware = _resolve_coarsening_strategy(cfg, "hdt")
+        log.info(f"Using HDT tokenizer with {coarsening_strategy} coarsening")
         tokenizer = HDTTokenizer(
             max_length=cfg.tokenizer.max_length,
             truncation_length=cfg.tokenizer.truncation_length,
             node_order=cfg.tokenizer.get("node_order", "BFS"),
             min_community_size=cfg.tokenizer.get("min_community_size", 4),
-            coarsening_strategy=cfg.tokenizer.get("coarsening_strategy", None),
+            coarsening_strategy=coarsening_strategy,
+            motif_aware=motif_aware,
             labeled_graph=cfg.tokenizer.get("labeled_graph", True),
             seed=cfg.seed,
         )
     elif tokenizer_type == "hsent":
-        motif_aware = cfg.tokenizer.get("motif_aware", False)
-        if motif_aware:
-            log.info("Using hierarchical H-SENT tokenizer with motif-aware coarsening")
+        coarsening_strategy, motif_aware = _resolve_coarsening_strategy(cfg, "hsent")
+        log.info(
+            f"Using hierarchical H-SENT tokenizer with {coarsening_strategy} coarsening"
+        )
+        if coarsening_strategy in ("motif_aware_spectral", "motif_community"):
             log.info(f"  motif_alpha: {cfg.tokenizer.get('motif_alpha', 1.0)}")
-        else:
-            log.info("Using hierarchical H-SENT tokenizer with spectral coarsening")
         log.info(f"  node_order: {cfg.tokenizer.get('node_order', 'BFS')}")
         log.info(f"  min_community_size: {cfg.tokenizer.get('min_community_size', 4)}")
 
@@ -98,7 +171,7 @@ def get_tokenizer(cfg: DictConfig):
             truncation_length=cfg.tokenizer.truncation_length,
             node_order=cfg.tokenizer.get("node_order", "BFS"),
             min_community_size=cfg.tokenizer.get("min_community_size", 4),
-            coarsening_strategy=cfg.tokenizer.get("coarsening_strategy", None),
+            coarsening_strategy=coarsening_strategy,
             motif_aware=motif_aware,
             motif_alpha=cfg.tokenizer.get("motif_alpha", 1.0),
             normalize_by_motif_size=cfg.tokenizer.get("normalize_by_motif_size", False),
@@ -248,6 +321,15 @@ def main(cfg: DictConfig) -> None:
     if cfg.model.checkpoint_path is None:
         raise ValueError("model.checkpoint_path must be specified")
 
+    # Extract training metadata (global_step, effective_batch_size, samples_seen)
+    training_info = extract_training_info(cfg.model.checkpoint_path)
+    if training_info["global_step"] is not None:
+        log.info(f"Checkpoint global_step: {training_info['global_step']:,}")
+    if training_info["effective_batch_size"] is not None:
+        log.info(f"Training effective_batch_size: {training_info['effective_batch_size']}")
+    if training_info["samples_seen"] is not None:
+        log.info(f"Training samples_seen: {training_info['samples_seen']:,}")
+
     # Create output directory
     output_dir = Path(cfg.logs.path)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -287,8 +369,11 @@ def main(cfg: DictConfig) -> None:
     )
     datamodule.setup(stage="test")
 
-    # Build reference set based on reference_split config
+    # Build reference set based on reference_split config.
+    # Cap the reference pool to avoid spending hours on RDKit analysis
+    # of 500K molecules.  Default cap = 5000 (aligned with COCONUT scale).
     reference_split = cfg.get("metrics", {}).get("reference_split", "test")
+    reference_cap = int(cfg.get("metrics", {}).get("reference_size", 5000))
     train_smiles = datamodule.train_smiles
 
     if reference_split == "full":
@@ -299,14 +384,38 @@ def main(cfg: DictConfig) -> None:
             )
             ref_smiles = list(datamodule.test_smiles)
         else:
-            ref_smiles = list(train_smiles) + list(datamodule.test_smiles)
-            random.Random(cfg.seed).shuffle(ref_smiles)
+            combined = list(train_smiles) + list(datamodule.test_smiles)
+            random.Random(cfg.seed).shuffle(combined)
+            ref_smiles = combined[:reference_cap]
         ref_label = "train+test"
     else:
-        ref_smiles = list(datamodule.test_smiles)
+        ref_smiles = list(datamodule.test_smiles)[:reference_cap]
         ref_label = "test"
 
-    log.info(f"Loaded {len(ref_smiles)} {ref_label} SMILES for reference")
+    log.info(f"Loaded {len(ref_smiles)} {ref_label} SMILES for reference (cap={reference_cap})")
+    log.info("=" * 70)
+    log.info("RESOLVED REALISTIC_GEN CONFIG SUMMARY")
+    log.info("=" * 70)
+    log.info(f"Dataset: {cfg.data.dataset_name}")
+    log.info(f"Tokenizer: {tokenizer_type}")
+    if tokenizer_type in ("hdt", "hsent"):
+        log.info(
+            f"Coarsening strategy: {cfg.tokenizer.get('coarsening_strategy', 'spectral')}"
+        )
+    log.info(
+        "Generation: "
+        f"num_samples={cfg.generation.num_samples}, batch_size={cfg.generation.batch_size}"
+    )
+    log.info(
+        "Sampling: "
+        f"top_k={cfg.sampling.top_k}, temperature={cfg.sampling.temperature}, "
+        f"max_length={cfg.sampling.max_length}"
+    )
+    log.info(
+        "Reference: "
+        f"split={reference_split}, reference_count={len(ref_smiles)}"
+    )
+    log.info("=" * 70)
 
     # Configure tokenizer from checkpoint (force-corrects max_num_nodes
     # after any inflation by datamodule.setup())
@@ -489,6 +598,10 @@ def main(cfg: DictConfig) -> None:
         "functional_group_tv": fg_metrics["total_variation"],
         "functional_group_kl": fg_metrics["kl_divergence"],
         "reference_split": reference_split,
+        # Training metadata (from checkpoint + co-located config.yaml)
+        "global_step": training_info["global_step"],
+        "effective_batch_size": training_info["effective_batch_size"],
+        "samples_seen": training_info["samples_seen"],
     }
 
     results_file = output_dir / "results.json"

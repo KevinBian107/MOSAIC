@@ -4,7 +4,7 @@
 Used by eval_benchmarks_auto.sh so that each checkpoint eval can load the same
 reference graphs instead of reconverting SMILES every time. Set
 metrics.reference_graphs_path to the printed path in test.yaml or pass it to test.py.
-See docs/commands_reference.md.
+See bash_scripts/README.md.
 
 Usage:
     python scripts/preprocess/precompute_reference_graphs.py experiment=moses reference_graphs.output_dir=outputs/eval_run
@@ -82,15 +82,24 @@ def main_with_overrides(overrides: list[str]) -> str:
     )
     datamodule.setup(stage="test")
 
-    ref_size = cfg.metrics.get("reference_size", 100000)
+    configured_ref_size = cfg.metrics.get("reference_size")
     train_smiles = list(datamodule.train_smiles)
+    if configured_ref_size is None or int(configured_ref_size) <= 0:
+        target_ref_size = max(1, int(0.1 * len(train_smiles)))
+    else:
+        target_ref_size = int(configured_ref_size)
+
     if ref_split == "full" and train_smiles:
         import random
         combined = train_smiles + list(datamodule.test_smiles)
         random.Random(cfg.seed).shuffle(combined)
-        reference_smiles = combined[:ref_size]
+        reference_pool_available = len(combined)
+        actual_ref_size = min(target_ref_size, reference_pool_available)
+        reference_smiles = combined[:actual_ref_size]
     else:
-        reference_smiles = list(datamodule.test_smiles[:ref_size])
+        reference_pool_available = len(datamodule.test_smiles)
+        actual_ref_size = min(target_ref_size, reference_pool_available)
+        reference_smiles = list(datamodule.test_smiles[:actual_ref_size])
     pgd_smiles = reference_smiles[:pgd_size]
 
     reference_graphs = []

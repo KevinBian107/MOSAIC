@@ -3,7 +3,6 @@
 This guide covers environment setup, configuration, and training workflows for MOSAIC.
 
 - **UCSD DSMLP / GCP:** [Server Quick Reference](server_setup.md), [GCP Setup](setup_gcp.md)
-- **Command cheat sheet (GCP, DSMLP, setup, precompute, training, eval):** [commands_reference.md](commands_reference.md)
 
 ---
 
@@ -61,7 +60,7 @@ python scripts/preprocess/export_moses_smiles.py
 # Creates data/moses_smiles/moses_smiles.txt
 ```
 
-Then use `data.use_precomputed_smiles=true` in training/test, or `--use-precomputed-smiles` with `eval_benchmarks_auto.sh`. See [commands_reference.md](commands_reference.md).
+Then use `data.use_precomputed_smiles=true` in training/test, or `--use-precomputed-smiles` with `eval_benchmarks_auto.sh`.
 
 ### Optional: Precomputed PGD reference graphs (faster evaluation)
 
@@ -81,9 +80,9 @@ python scripts/preprocess/precompute_reference_graphs.py experiment=moses refere
 | Parameter | Default | Options |
 |-----------|---------|---------|
 | `model.model_name` | `gpt2-xs` | `gpt2-xxs` (2.7M), `gpt2-xs` (11M), `gpt2-s` (50M), `gpt2-m` (100M) |
-| `model.learning_rate` | `6e-4` | float |
-| `model.weight_decay` | `0.01` | float |
-| `model.warmup_steps` | `1000` | int |
+| `model.learning_rate` | `8.49e-4` | float |
+| `model.weight_decay` | `0.1` | float |
+| `model.warmup_steps` | `1414` | int |
 
 ### Data Parameters
 
@@ -91,7 +90,7 @@ python scripts/preprocess/precompute_reference_graphs.py experiment=moses refere
 |-----------|---------|-------------|
 | `experiment` | `moses` | Dataset config: `moses`, `qm9`, `coconut` |
 | `data.batch_size` | `32` | Training batch size |
-| `data.num_workers` | `4` | DataLoader workers |
+| `data.num_workers` | `8` | DataLoader workers |
 | `data.num_train` | (from experiment) | Training samples (override with CLI) |
 | `data.num_val` | (from experiment) | Validation samples |
 | `data.num_test` | (from experiment) | Test samples |
@@ -116,10 +115,15 @@ python scripts/preprocess/precompute_reference_graphs.py experiment=moses refere
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `trainer.max_steps` | `100000` | Total training steps |
-| `trainer.val_check_interval` | `1000` | Validation frequency |
-| `trainer.precision` | `bf16-mixed` | `32`, `16-mixed`, `bf16-mixed` |
+| `trainer.target_samples_seen` | `16000000` | Primary training budget (hardware-agnostic) |
+| `trainer.max_steps` | `250000` | Fallback when `target_samples_seen=null` |
+| `trainer.val_checks_per_epoch` | `5` | Preferred validation cadence |
+| `trainer.validate_every_n_epochs` | `1` | Validate every N epochs |
+| `trainer.precision` | `32` | `32`, `16-mixed`, `bf16-mixed` |
 | `trainer.gradient_clip_val` | `1.0` | Gradient clipping |
+
+Preferred validation controls are epoch-based (`val_checks_per_epoch`, `validate_every_n_epochs`).
+Legacy step-based controls (`val_check_interval`, `check_val_every_n_epoch`) remain supported for old runs.
 
 ### Sampling Parameters
 
@@ -152,7 +156,7 @@ python scripts/train.py \
     experiment=moses \
     model.model_name=gpt2-xxs \
     data.num_train=1000 \
-    trainer.max_steps=100 \
+    trainer.target_samples_seen=32000 \
     wandb.enabled=false
 ```
 
@@ -163,7 +167,7 @@ python scripts/train.py \
     experiment=moses \
     tokenizer=sent \
     model.model_name=gpt2-xs \
-    trainer.max_steps=500000 \
+    trainer.target_samples_seen=16000000 \
     wandb.enabled=true \
     wandb.project=mosaic-sent
 ```
@@ -243,7 +247,7 @@ Results are saved to:
 - `outputs/test/YYYY-MM-DD/HH-MM-SS/results.json`
 - `outputs/test/YYYY-MM-DD/HH-MM-SS/generated_smiles.txt`
 
-For evaluating multiple checkpoints with a mapping file, precomputed SMILES, and cached reference graphs, use `./bash_scripts/eval_benchmarks_auto.sh`; see [commands_reference.md](commands_reference.md) and [bash_scripts/README.md](../bash_scripts/README.md).
+For evaluating multiple checkpoints with a mapping file, precomputed SMILES, and cached reference graphs, use `./bash_scripts/eval/eval_benchmarks_auto.sh`; see [bash_scripts/README.md](../../bash_scripts/README.md).
 
 ---
 

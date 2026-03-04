@@ -14,7 +14,7 @@ import pytorch_lightning as pl
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from src.data.molecular import MolecularDataset
+from src.data.molecular import MolecularDataset, load_moses_dataset
 
 log = logging.getLogger(__name__)
 
@@ -485,9 +485,12 @@ class MolecularDataModule(pl.LightningDataModule):
                         f"Precomputed SMILES not found: {single_path}, falling back to loading from CSV"
                     )
 
-            # Load train SMILES for metrics even in test mode
+            # Load train SMILES for metrics even in test mode.
+            # Only SMILES strings are needed (for novelty, FCD, etc.) — skip
+            # the expensive smiles_to_graph() conversion that MolecularDataset
+            # performs.  This reduces MOSES train loading from ~30 min to ~5 s.
             if stage == "test" and len(self.train_smiles) == 0:
-                # Try cache first
+                # Try cache first (has graphs, but we just grab smiles_list)
                 cached_train = self._try_load_cache("train", self.num_train)
                 if cached_train is not None:
                     self.train_smiles = cached_train.smiles_list
@@ -495,17 +498,16 @@ class MolecularDataModule(pl.LightningDataModule):
                         self.max_num_nodes, cached_train.max_num_nodes
                     )
                 else:
-                    train_mol = MolecularDataset.from_moses(
+                    # Load SMILES only — no graph conversion needed
+                    self.train_smiles = load_moses_dataset(
                         split="train",
                         max_molecules=self.num_train,
-                        include_hydrogens=self.include_hydrogens,
-                        labeled=labeled,
                         use_precomputed_smiles=self.use_precomputed_smiles,
                         precomputed_smiles_dir=str(self.precomputed_smiles_dir) if self.precomputed_smiles_dir else None,
                     )
-                    self.train_smiles = train_mol.smiles_list
-                    self.max_num_nodes = max(
-                        self.max_num_nodes, train_mol.max_num_nodes
+                    log.info(
+                        f"Loaded {len(self.train_smiles)} train SMILES for metrics "
+                        f"(skipped graph conversion)"
                     )
 
             # Try to load cached test data
@@ -851,7 +853,8 @@ class MolecularDataModule(pl.LightningDataModule):
                 )
 
         if stage == "test" or stage is None:
-            # Load train SMILES for metrics even in test mode
+            # Load train SMILES for metrics even in test mode.
+            # Only SMILES strings are needed — skip graph conversion.
             if stage == "test" and len(self.train_smiles) == 0:
                 cached_train = self._try_load_cache("train", total_train)
                 if cached_train is not None:
@@ -860,15 +863,12 @@ class MolecularDataModule(pl.LightningDataModule):
                         self.max_num_nodes, cached_train.max_num_nodes
                     )
                 else:
-                    train_mol = MolecularDataset(
-                        train_smiles,
-                        dataset_name="coconut_train",
-                        include_hydrogens=self.include_hydrogens,
-                        labeled=labeled,
-                    )
-                    self.train_smiles = train_mol.smiles_list
-                    self.max_num_nodes = max(
-                        self.max_num_nodes, train_mol.max_num_nodes
+                    # train_smiles is already a list of SMILES from the split
+                    # logic above — just assign it, no graph conversion needed
+                    self.train_smiles = train_smiles
+                    log.info(
+                        f"Loaded {len(self.train_smiles)} train SMILES for metrics "
+                        f"(skipped graph conversion)"
                     )
 
             # Try to load cached test data
