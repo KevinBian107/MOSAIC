@@ -179,6 +179,15 @@ def main(cfg: DictConfig) -> None:
     """
     log.info(f"Configuration:\n{OmegaConf.to_yaml(cfg)}")
 
+    # Optional two-phase eval flags:
+    # - metrics.generate_only: run generation + save SMILES only (no metrics)
+    # - metrics.metrics_only: skip generation/model load; load SMILES from disk and run metrics only
+    metrics_cfg = cfg.get("metrics", {})
+    generate_only = bool(metrics_cfg.get("generate_only", False))
+    metrics_only = bool(metrics_cfg.get("metrics_only", False))
+    if generate_only and metrics_only:
+        raise ValueError("metrics.generate_only and metrics.metrics_only cannot both be true")
+
     if cfg.model.checkpoint_path is None:
         raise ValueError("model.checkpoint_path must be specified")
 
@@ -295,155 +304,192 @@ def main(cfg: DictConfig) -> None:
 
     datamodule.setup(stage="test")
 
-    # Detect checkpoint type
-    use_autograph = cfg.model.get("is_autograph", False)
-    if not use_autograph:
-        use_autograph = is_autograph_checkpoint(cfg.model.checkpoint_path)
+    # Generation + SMILES
+    INVALID_SMILES_SENTINEL = "INVALID"
+    generated_smiles: list[str] = []
+    generated_graphs: list = []
+    gen_time: float = 0.0
+    token_lengths = None
 
-    # For MOSAIC checkpoints, extract vocab size and update tokenizer
-    checkpoint_max_length = None
-    if not use_autograph:
-        log.info(f"Extracting vocab size from checkpoint: {cfg.model.checkpoint_path}")
-        checkpoint = torch.load(
-            cfg.model.checkpoint_path, map_location="cpu", weights_only=False
-        )
-        if "state_dict" in checkpoint:
-            # Extract vocab size from embedding weight shape
-            wte_key = "model.model.transformer.wte.weight"
-            if wte_key in checkpoint["state_dict"]:
-                checkpoint_vocab_size = checkpoint["state_dict"][wte_key].shape[0]
-                log.info(f"Checkpoint vocab size: {checkpoint_vocab_size}")
+    if not metrics_only:
+        # Detect checkpoint type
+        use_autograph = cfg.model.get("is_autograph", False)
+        if not use_autograph:
+            use_autograph = is_autograph_checkpoint(cfg.model.checkpoint_path)
 
-                # Determine vocab layout from tokenizer's labeled_graph setting
-                # Unlabeled: vocab_size = idx_offset + max_num_nodes
-                # Labeled: vocab_size = idx_offset + max_num_nodes + num_node_types + num_edge_types
-                from src.data.molecular import NUM_ATOM_TYPES, NUM_BOND_TYPES
+        # For MOSAIC checkpoints, extract vocab size and update tokenizer
+        checkpoint_max_length = None
+        if not use_autograph:
+            log.info(f"Extracting vocab size from checkpoint: {cfg.model.checkpoint_path}")
+            checkpoint = torch.load(
+                cfg.model.checkpoint_path, map_location="cpu", weights_only=False
+            )
+            if "state_dict" in checkpoint:
+                # Extract vocab size from embedding weight shape
+                wte_key = "model.model.transformer.wte.weight"
+                if wte_key in checkpoint["state_dict"]:
+                    checkpoint_vocab_size = checkpoint["state_dict"][wte_key].shape[0]
+                    log.info(f"Checkpoint vocab size: {checkpoint_vocab_size}")
 
-                # Get idx_offset (handle both lowercase and uppercase)
-                idx_offset = getattr(tokenizer, "idx_offset", None) or getattr(
-                    tokenizer, "IDX_OFFSET", 6
-                )
+                    # Determine vocab layout from tokenizer's labeled_graph setting
+                    # Unlabeled: vocab_size = idx_offset + max_num_nodes
+                    # Labeled: vocab_size = idx_offset + max_num_nodes + num_node_types + num_edge_types
+                    from src.data.molecular import NUM_ATOM_TYPES, NUM_BOND_TYPES
 
-                is_labeled = getattr(tokenizer, "labeled_graph", False)
-
-                if is_labeled:
-                    checkpoint_max_num_nodes = (
-                        checkpoint_vocab_size
-                        - idx_offset
-                        - NUM_ATOM_TYPES
-                        - NUM_BOND_TYPES
+                    # Get idx_offset (handle both lowercase and uppercase)
+                    idx_offset = getattr(tokenizer, "idx_offset", None) or getattr(
+                        tokenizer, "IDX_OFFSET", 6
                     )
-                    if checkpoint_max_num_nodes <= 0:
-                        log.warning(
-                            f"Labeled formula gives non-positive max_num_nodes "
-                            f"({checkpoint_max_num_nodes}), falling back to unlabeled"
-                        )
-                        is_labeled = False
-                        tokenizer.labeled_graph = False
-                        checkpoint_max_num_nodes = checkpoint_vocab_size - idx_offset
+
+                    is_labeled = getattr(tokenizer, "labeled_graph", False)
 
                     if is_labeled:
-                        # Force-set max_num_nodes to match checkpoint exactly;
-                        # set_num_nodes() only increases and won't shrink a value
-                        # inflated by datamodule.setup()
-                        tokenizer.max_num_nodes = checkpoint_max_num_nodes
-                        tokenizer.set_num_node_and_edge_types(
-                            num_node_types=NUM_ATOM_TYPES,
-                            num_edge_types=NUM_BOND_TYPES,
+                        checkpoint_max_num_nodes = (
+                            checkpoint_vocab_size
+                            - idx_offset
+                            - NUM_ATOM_TYPES
+                            - NUM_BOND_TYPES
                         )
-                        log.info(
-                            f"Set tokenizer: max_num_nodes={checkpoint_max_num_nodes}, labeled_graph=True"
-                        )
+                        if checkpoint_max_num_nodes <= 0:
+                            log.warning(
+                                f"Labeled formula gives non-positive max_num_nodes "
+                                f"({checkpoint_max_num_nodes}), falling back to unlabeled"
+                            )
+                            is_labeled = False
+                            tokenizer.labeled_graph = False
+                            checkpoint_max_num_nodes = checkpoint_vocab_size - idx_offset
+
+                        if is_labeled:
+                            # Force-set max_num_nodes to match checkpoint exactly;
+                            # set_num_nodes() only increases and won't shrink a value
+                            # inflated by datamodule.setup()
+                            tokenizer.max_num_nodes = checkpoint_max_num_nodes
+                            tokenizer.set_num_node_and_edge_types(
+                                num_node_types=NUM_ATOM_TYPES,
+                                num_edge_types=NUM_BOND_TYPES,
+                            )
+                            log.info(
+                                f"Set tokenizer: max_num_nodes={checkpoint_max_num_nodes}, labeled_graph=True"
+                            )
+                        else:
+                            tokenizer.max_num_nodes = checkpoint_max_num_nodes
+                            log.info(
+                                f"Setting tokenizer max_num_nodes to {checkpoint_max_num_nodes}"
+                            )
                     else:
-                        tokenizer.max_num_nodes = checkpoint_max_num_nodes
+                        # Unlabeled model
+                        checkpoint_max_num_nodes = checkpoint_vocab_size - idx_offset
                         log.info(
                             f"Setting tokenizer max_num_nodes to {checkpoint_max_num_nodes}"
                         )
-                else:
-                    # Unlabeled model
-                    checkpoint_max_num_nodes = checkpoint_vocab_size - idx_offset
-                    log.info(
-                        f"Setting tokenizer max_num_nodes to {checkpoint_max_num_nodes}"
-                    )
-                    # Force-set to match checkpoint exactly
-                    tokenizer.max_num_nodes = checkpoint_max_num_nodes
+                        # Force-set to match checkpoint exactly
+                        tokenizer.max_num_nodes = checkpoint_max_num_nodes
 
-            # Extract max position embeddings from checkpoint (GPT-2 wpe)
-            wpe_key = "model.model.transformer.wpe.weight"
-            if wpe_key in checkpoint["state_dict"]:
-                checkpoint_max_length = checkpoint["state_dict"][wpe_key].shape[0]
-                log.info(f"Checkpoint max position embeddings: {checkpoint_max_length}")
+                # Extract max position embeddings from checkpoint (GPT-2 wpe)
+                wpe_key = "model.model.transformer.wpe.weight"
+                if wpe_key in checkpoint["state_dict"]:
+                    checkpoint_max_length = checkpoint["state_dict"][wpe_key].shape[0]
+                    log.info(f"Checkpoint max position embeddings: {checkpoint_max_length}")
 
-    if use_autograph:
-        log.info(f"Detected AutoGraph checkpoint at {cfg.model.checkpoint_path}")
-        log.info("Loading model using AutoGraph adapter...")
-        from src.models.autograph_adapter import AutoGraphAdapter
+        if use_autograph:
+            log.info(f"Detected AutoGraph checkpoint at {cfg.model.checkpoint_path}")
+            log.info("Loading model using AutoGraph adapter...")
+            from src.models.autograph_adapter import AutoGraphAdapter
 
-        model = AutoGraphAdapter.load_from_checkpoint(
-            cfg.model.checkpoint_path,
-            tokenizer=tokenizer,
-            sampling_batch_size=cfg.sampling.get("batch_size", 32),
-            sampling_top_k=cfg.sampling.get("top_k", 10),
-            sampling_temperature=cfg.sampling.get("temperature", 1.0),
-            sampling_max_length=cfg.sampling.get("max_length", 2048),
-        )
-    else:
-        log.info(f"Loading MOSAIC model from {cfg.model.checkpoint_path}...")
-        load_kwargs: dict = {"tokenizer": tokenizer, "weights_only": False}
-        if checkpoint_max_length is not None:
-            load_kwargs["sampling_max_length"] = checkpoint_max_length
-        model = GraphGeneratorModule.load_from_checkpoint(
-            cfg.model.checkpoint_path,
-            **load_kwargs,
-        )
-    model.eval()
+            model = AutoGraphAdapter.load_from_checkpoint(
+                cfg.model.checkpoint_path,
+                tokenizer=tokenizer,
+                sampling_batch_size=cfg.sampling.get("batch_size", 32),
+                sampling_top_k=cfg.sampling.get("top_k", 10),
+                sampling_temperature=cfg.sampling.get("temperature", 1.0),
+                sampling_max_length=cfg.sampling.get("max_length", 2048),
+            )
+        else:
+            log.info(f"Loading MOSAIC model from {cfg.model.checkpoint_path}...")
+            load_kwargs: dict = {"tokenizer": tokenizer, "weights_only": False}
+            if checkpoint_max_length is not None:
+                load_kwargs["sampling_max_length"] = checkpoint_max_length
+            model = GraphGeneratorModule.load_from_checkpoint(
+                cfg.model.checkpoint_path,
+                **load_kwargs,
+            )
+        model.eval()
 
-    num_test = len(datamodule.test_smiles)
+        num_test = len(datamodule.test_smiles)
 
-    num_samples = cfg.sampling.num_samples
-    if num_samples < 0:
-        num_samples = num_test
+        num_samples = cfg.sampling.num_samples
+        if num_samples < 0:
+            num_samples = num_test
 
-    log.info(f"Generating {num_samples} molecules...")
-    log.info(
-        "(Progress bar shows batches; slow because generation is autoregressive, one token per step.)"
-    )
-    gen_result = model.generate(num_samples=num_samples, show_progress=True)
-    generated_graphs = gen_result[0]
-    gen_time = gen_result[1]
-    token_lengths = gen_result[2] if len(gen_result) > 2 else None
-    log.info(f"Generated {len(generated_graphs)} graphs")
-    log.info(f"Average generation time: {gen_time:.4f}s per sample")
-    if token_lengths:
+        log.info(f"Generating {num_samples} molecules...")
         log.info(
-            f"Token lengths per generation: min={min(token_lengths)}, max={max(token_lengths)}, "
-            f"mean={statistics.mean(token_lengths):.1f}, median={statistics.median(token_lengths):.0f}"
+            "(Progress bar shows batches; slow because generation is autoregressive, one token per step.)"
+        )
+        gen_result = model.generate(num_samples=num_samples, show_progress=True)
+        generated_graphs = gen_result[0]
+        gen_time = gen_result[1]
+        token_lengths = gen_result[2] if len(gen_result) > 2 else None
+        log.info(f"Generated {len(generated_graphs)} graphs")
+        log.info(f"Average generation time: {gen_time:.4f}s per sample")
+        if token_lengths:
+            log.info(
+                f"Token lengths per generation: min={min(token_lengths)}, max={max(token_lengths)}, "
+                f"mean={statistics.mean(token_lengths):.1f}, median={statistics.median(token_lengths):.0f}"
+            )
+
+        # Convert to SMILES using appropriate converter
+        # IMPORTANT: Include all attempts (even failures) for accurate validity metric
+        # Use a sentinel value for failed conversions that RDKit will reject
+        if use_autograph:
+            # AutoGraph models - use AutoGraph's conversion functions
+            # MOSES atom decoder (from AutoGraph's MOSESDataset): ['C', 'N', 'S', 'O', 'F', 'Cl', 'Br', 'H']
+            atom_decoder = ["C", "N", "S", "O", "F", "Cl", "Br", "H"]
+            log.info("Converting AutoGraph graphs to SMILES...")
+            for g in tqdm(generated_graphs, desc="Converting to SMILES"):
+                smiles = autograph_graph_to_smiles(g, atom_decoder)
+                generated_smiles.append(smiles if smiles else INVALID_SMILES_SENTINEL)
+        else:
+            # MOSAIC models - use MOSAIC's conversion function
+            log.info("Converting MOSAIC graphs to SMILES...")
+            for g in tqdm(generated_graphs, desc="Converting to SMILES"):
+                smiles = graph_to_smiles(g)
+                generated_smiles.append(smiles if smiles else INVALID_SMILES_SENTINEL)
+
+        valid_count = sum(1 for s in generated_smiles if s != INVALID_SMILES_SENTINEL)
+        log.info(
+            f"Successfully converted {valid_count}/{len(generated_smiles)} graphs to SMILES"
         )
 
-    # Convert to SMILES using appropriate converter
-    # IMPORTANT: Include all attempts (even failures) for accurate validity metric
-    # Use a sentinel value for failed conversions that RDKit will reject
-    INVALID_SMILES_SENTINEL = "INVALID"
-    generated_smiles = []
-    if use_autograph:
-        # AutoGraph models - use AutoGraph's conversion functions
-        # MOSES atom decoder (from AutoGraph's MOSESDataset): ['C', 'N', 'S', 'O', 'F', 'Cl', 'Br', 'H']
-        atom_decoder = ["C", "N", "S", "O", "F", "Cl", "Br", "H"]
-        log.info("Converting AutoGraph graphs to SMILES...")
-        for g in tqdm(generated_graphs, desc="Converting to SMILES"):
-            smiles = autograph_graph_to_smiles(g, atom_decoder)
-            generated_smiles.append(smiles if smiles else INVALID_SMILES_SENTINEL)
-    else:
-        # MOSAIC models - use MOSAIC's conversion function
-        log.info("Converting MOSAIC graphs to SMILES...")
-        for g in tqdm(generated_graphs, desc="Converting to SMILES"):
-            smiles = graph_to_smiles(g)
-            generated_smiles.append(smiles if smiles else INVALID_SMILES_SENTINEL)
+        # Save generated SMILES for possible metrics-only runs
+        smiles_file = output_dir / "generated_smiles.txt"
+        with open(smiles_file, "w") as f:
+            for smi in generated_smiles:
+                if smi != INVALID_SMILES_SENTINEL:
+                    f.write(smi + "\n")
+        log.info(f"Generated SMILES saved to {smiles_file}")
 
-    valid_count = sum(1 for s in generated_smiles if s != INVALID_SMILES_SENTINEL)
-    log.info(
-        f"Successfully converted {valid_count}/{len(generated_smiles)} graphs to SMILES"
-    )
+        if generate_only:
+            log.info("generate_only=true: skipping all metrics (generation + SMILES only).")
+            return
+    else:
+        # Metrics-only mode: load previously generated SMILES from disk
+        log.info("metrics_only=true: loading generated SMILES from disk (skipping generation).")
+        smiles_file = output_dir / "generated_smiles.txt"
+        if not smiles_file.exists():
+            raise FileNotFoundError(
+                f"metrics_only mode: generated_smiles.txt not found at {smiles_file}. "
+                "Run with metrics.generate_only=true first to create it."
+            )
+        with open(smiles_file, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    generated_smiles.append(line)
+        valid_count = len(generated_smiles)
+        num_samples = len(generated_smiles)
+        log.info(
+            f"metrics_only: loaded {len(generated_smiles)} generated SMILES from {smiles_file}"
+        )
 
     # Core-only mode: compute only validity, uniqueness, novelty (no FCD, PGD, motif, etc.)
     if cfg.metrics.get("core_only", False):
@@ -481,8 +527,8 @@ def main(cfg: DictConfig) -> None:
         log.info("\nEvaluation complete (core only: validity, uniqueness, novelty).")
         return
 
-    # Visualization (if enabled)
-    if cfg.get("visualization", {}).get("enabled", False):
+    # Visualization (if enabled) - only in full mode (not metrics_only)
+    if (not metrics_only) and cfg.get("visualization", {}).get("enabled", False):
         log.info("Generating molecule visualizations...")
         viz_dir = output_dir / "visualizations"
         viz_dir.mkdir(exist_ok=True)
