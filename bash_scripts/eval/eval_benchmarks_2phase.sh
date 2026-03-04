@@ -174,6 +174,7 @@ if [ "$RUN_TEST" = true ]; then
             echo "Skipping phase1 test (already has results + generated_smiles): $RUN_DIR_NAME"
         else
             echo "Running phase1 test for $RUN_DIR_NAME (compute_motif=false)..."
+            export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
             python scripts/test.py \
               model.checkpoint_path="$ckpt" \
               tokenizer="$TOKENIZER" \
@@ -218,6 +219,7 @@ if [ "$RUN_TEST" = true ]; then
         echo "Starting motif-only metrics in screen session '$SESSION_NAME'..."
         /usr/bin/screen -S "$SESSION_NAME" -dm bash -lc "
 cd \"$PROJECT_ROOT\" && \
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH" && \
 python scripts/test.py \
   model.checkpoint_path=\"$ckpt\" \
   tokenizer=\"$TOKENIZER\" \
