@@ -102,25 +102,33 @@ def extract_gpt2_state_dict(checkpoint_path: str) -> tuple[OrderedDict, dict]:
     return cleaned, metadata
 
 
-def create_hf_model(state_dict: OrderedDict, metadata: dict) -> GPT2LMHeadModel:
+def create_hf_model(
+    state_dict: OrderedDict, metadata: dict, tokenizer_type: str = "hdtc"
+) -> GPT2LMHeadModel:
     """Create a HuggingFace GPT2LMHeadModel from extracted weights.
 
     Args:
         state_dict: Cleaned state dict with HF-compatible keys.
         metadata: Dict with vocab_size, n_embd, n_positions, n_layer, n_head.
+        tokenizer_type: "hdtc" or "sent" (affects special token IDs in config).
 
     Returns:
         Initialized GPT2LMHeadModel.
     """
+    if tokenizer_type == "sent":
+        bos, eos, pad = 0, 4, 5
+    else:
+        bos, eos, pad = 0, 1, 2
+
     config = GPT2Config(
         vocab_size=metadata["vocab_size"],
         n_embd=metadata["n_embd"],
         n_layer=metadata["n_layer"],
         n_head=metadata["n_head"],
         n_positions=metadata["n_positions"],
-        bos_token_id=0,  # SOS
-        eos_token_id=1,  # EOS
-        pad_token_id=2,  # PAD
+        bos_token_id=bos,
+        eos_token_id=eos,
+        pad_token_id=pad,
     )
 
     model = GPT2LMHeadModel(config)
@@ -130,45 +138,76 @@ def create_hf_model(state_dict: OrderedDict, metadata: dict) -> GPT2LMHeadModel:
     return model
 
 
-def export_tokenizer_config(output_dir: Path, metadata: dict) -> None:
-    """Export HDTC tokenizer configuration for the JavaScript tokenizer.
+def export_tokenizer_config(
+    output_dir: Path, metadata: dict, tokenizer_type: str = "hdtc"
+) -> None:
+    """Export tokenizer configuration for the JavaScript tokenizer.
 
     Args:
         output_dir: Directory to write tokenizer_config.json.
         metadata: Model metadata dict.
+        tokenizer_type: "hdtc" or "sent".
     """
-    # HDTC token constants
-    config = {
-        "tokenizer_type": "hdtc",
-        "special_tokens": {
-            "SOS": 0,
-            "EOS": 1,
-            "PAD": 2,
-            "COMM_START": 3,
-            "COMM_END": 4,
-            "LEDGE": 5,
-            "REDGE": 6,
-            "SUPER_START": 7,
-            "SUPER_END": 8,
-            "TYPE_RING": 9,
-            "TYPE_FUNC": 10,
-            "TYPE_SINGLETON": 11,
-        },
-        "IDX_OFFSET": 12,
-        "vocab_size": metadata["vocab_size"],
-        "labeled_graph": True,
-        "num_atom_types": 10,  # NUM_ATOM_TYPES (9 + 1 unknown)
-        "num_bond_types": 5,   # NUM_BOND_TYPES (4 + 1 unknown)
-        "atom_types": ["C", "N", "O", "F", "P", "S", "Cl", "Br", "I", "Unknown"],
-        "bond_types": ["SINGLE", "DOUBLE", "TRIPLE", "AROMATIC", "Unknown"],
-        "max_num_nodes": metadata["vocab_size"] - 12 - 10 - 5,  # vocab - offset - atoms - bonds
-        "n_positions": metadata["n_positions"],
-    }
+    atom_types = ["C", "N", "O", "F", "P", "S", "Cl", "Br", "I", "Unknown"]
+    bond_types = ["SINGLE", "DOUBLE", "TRIPLE", "AROMATIC", "Unknown"]
+    num_atom_types = 10
+    num_bond_types = 5
+
+    if tokenizer_type == "sent":
+        idx_offset = 6
+        config = {
+            "tokenizer_type": "sent",
+            "special_tokens": {
+                "SOS": 0,
+                "RESET": 1,
+                "LADJ": 2,
+                "RADJ": 3,
+                "EOS": 4,
+                "PAD": 5,
+            },
+            "IDX_OFFSET": idx_offset,
+            "vocab_size": metadata["vocab_size"],
+            "labeled_graph": True,
+            "num_atom_types": num_atom_types,
+            "num_bond_types": num_bond_types,
+            "atom_types": atom_types,
+            "bond_types": bond_types,
+            "max_num_nodes": metadata["vocab_size"] - idx_offset - num_atom_types - num_bond_types,
+            "n_positions": metadata["n_positions"],
+        }
+    else:
+        idx_offset = 12
+        config = {
+            "tokenizer_type": "hdtc",
+            "special_tokens": {
+                "SOS": 0,
+                "EOS": 1,
+                "PAD": 2,
+                "COMM_START": 3,
+                "COMM_END": 4,
+                "LEDGE": 5,
+                "REDGE": 6,
+                "SUPER_START": 7,
+                "SUPER_END": 8,
+                "TYPE_RING": 9,
+                "TYPE_FUNC": 10,
+                "TYPE_SINGLETON": 11,
+            },
+            "IDX_OFFSET": idx_offset,
+            "vocab_size": metadata["vocab_size"],
+            "labeled_graph": True,
+            "num_atom_types": num_atom_types,
+            "num_bond_types": num_bond_types,
+            "atom_types": atom_types,
+            "bond_types": bond_types,
+            "max_num_nodes": metadata["vocab_size"] - idx_offset - num_atom_types - num_bond_types,
+            "n_positions": metadata["n_positions"],
+        }
 
     with open(output_dir / "tokenizer_config.json", "w") as f:
         json.dump(config, f, indent=2)
 
-    print(f"  Saved tokenizer_config.json (max_num_nodes={config['max_num_nodes']})")
+    print(f"  Saved tokenizer_config.json (type={tokenizer_type}, max_num_nodes={config['max_num_nodes']})")
 
 
 def verify_onnx_export(hf_model_dir: Path, onnx_dir: Path) -> None:
@@ -243,18 +282,26 @@ def main():
         action="store_true",
         help="Verify ONNX output matches PyTorch",
     )
+    parser.add_argument(
+        "--tokenizer_type",
+        type=str,
+        default="hdtc",
+        choices=["hdtc", "sent"],
+        help="Tokenizer type (hdtc or sent)",
+    )
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
     hf_dir = output_dir / "hf_model"
     onnx_dir = output_dir / "onnx"
+    tokenizer_type = args.tokenizer_type
 
     # Step 1: Extract weights and create HF model
-    print("Step 1: Extracting GPT-2 weights from Lightning checkpoint...")
+    print(f"Step 1: Extracting GPT-2 weights from Lightning checkpoint (type={tokenizer_type})...")
     state_dict, metadata = extract_gpt2_state_dict(args.checkpoint)
     print(f"  Model config: {metadata}")
 
-    model = create_hf_model(state_dict, metadata)
+    model = create_hf_model(state_dict, metadata, tokenizer_type)
     print(f"  Model parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # Step 2: Save as HuggingFace format
@@ -266,7 +313,7 @@ def main():
     # Step 3: Export tokenizer config
     print("Step 3: Exporting tokenizer config...")
     output_dir.mkdir(parents=True, exist_ok=True)
-    export_tokenizer_config(output_dir, metadata)
+    export_tokenizer_config(output_dir, metadata, tokenizer_type)
 
     # Step 4: Export to ONNX
     print("Step 4: Exporting to ONNX...")
@@ -341,10 +388,14 @@ def main():
         shutil.copy(config_src, onnx_dir / "config.json")
 
     # Create generation_config.json
+    if tokenizer_type == "sent":
+        bos, eos, pad = 0, 4, 5
+    else:
+        bos, eos, pad = 0, 1, 2
     gen_config = {
-        "bos_token_id": 0,
-        "eos_token_id": 1,
-        "pad_token_id": 2,
+        "bos_token_id": bos,
+        "eos_token_id": eos,
+        "pad_token_id": pad,
         "max_length": metadata["n_positions"],
         "do_sample": True,
         "top_k": 10,
