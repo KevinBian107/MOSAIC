@@ -2,8 +2,8 @@
 
 This project explores a simple idea: instead of asking generative models to recover motif-level structure implicitly, we encode motifs directly into the representation used for graph generation, independent of the sequence transformer's processing. We are interesting in constructing a representation in the form of flat tokens.
 
-![HDT](/docs/figure/pipeline_overview_camptothecin.png)
-> Schematic of the pipeline for a sample (Camptothecin) molecule.
+![HDT](/docs/figure/pipeline_overview_camptothecin_encoding.png)
+![HDT](/docs/figure/pipeline_overview_camptothecin_decoding.png)
 
 ## Core Approach
 
