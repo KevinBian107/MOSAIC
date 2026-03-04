@@ -1,11 +1,8 @@
 #!/bin/bash
-# Two-phase benchmark evaluation:
-#   Phase 1 (GPU, sequential): generate molecules + save SMILES (no metrics)
-#   Phase 2 (CPU, parallel):   load SMILES + run metrics_only for each model
-#
-# Usage:
-#   ./bash_scripts/eval/eval_benchmarks_2phase.sh [--coconut] [--full-ref] [--force]
-#
+# Two-phase benchmark evaluation with motif-only parallelization:
+#   Phase 1 (GPU, sequential): run test.py WITHOUT motif metrics
+#   Phase 2 (CPU, parallel):   run motif-only metrics in screen sessions
+#   Optional realistic_gen + comparison chart (same style as eval_benchmarks.sh)
 
 set -e
 
@@ -14,12 +11,20 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 DATASET="moses"
 REFERENCE_SPLIT="test"
+RUN_TEST=true
+RUN_GEN=true
 USE_COCONUT=false
 USE_FULL_REF=false
 FORCE_REEVAL=false
 
 for arg in "$@"; do
     case $arg in
+        --test-only)
+            RUN_GEN=false
+            ;;
+        --gen-only)
+            RUN_TEST=false
+            ;;
         --coconut)
             USE_COCONUT=true
             DATASET="coconut"
@@ -32,11 +37,12 @@ for arg in "$@"; do
             FORCE_REEVAL=true
             ;;
         --help|-h)
-            echo "Usage: $0 [--coconut] [--full-ref] [--force]"
+            echo "Usage: $0 [--test-only] [--gen-only] [--coconut] [--full-ref] [--force]"
             echo ""
-            echo "Runs test.py in two phases:"
-            echo "  1) metrics.generate_only=true  (sequential, uses GPU)"
-            echo "  2) metrics.metrics_only=true   (parallel, CPU only)"
+            echo "Two-phase behavior:"
+            echo "  Phase 1 (sequential/GPU): test.py WITHOUT motif metrics"
+            echo "  Phase 2 (parallel/CPU):   motif-only test.py in detached screen sessions"
+            echo "Then optional realistic_gen.py and final comparison chart."
             exit 0
             ;;
     esac
@@ -55,9 +61,10 @@ if [ "$USE_FULL_REF" = true ]; then
 fi
 
 TEST_OUTPUT_DIR="outputs/test${DIR_SUFFIX}"
+REALISTIC_GEN_OUTPUT_DIR="outputs/realistic_gen${DIR_SUFFIX}"
+COMPARISON_OUTPUT="${TEST_OUTPUT_DIR}/comparison.png"
 
 CHECKPOINTS=$(find "$BENCHMARK_DIR" -name "last.ckpt" -type f 2>/dev/null)
-
 if [ -z "$CHECKPOINTS" ]; then
     echo "Error: No checkpoints found in $BENCHMARK_DIR"
     exit 1
@@ -82,6 +89,23 @@ get_tokenizer_type() {
     fi
 }
 
+get_coarsening_strategy() {
+    local ckpt_path="$1"
+    local dir_name
+    dir_name=$(basename "$(dirname "$ckpt_path")")
+    if [[ "$dir_name" == *"_mc_"* ]] || [[ "$dir_name" =~ _mc[^a-z] ]]; then
+        echo "motif_community"
+    elif [[ "$dir_name" == *"_sc_"* ]] || [[ "$dir_name" =~ _sc[^a-z] ]]; then
+        echo "spectral"
+    elif [[ "$dir_name" == *"_hac_"* ]] || [[ "$dir_name" =~ _hac[^a-z] ]]; then
+        echo "hac"
+    elif [[ "$dir_name" == *"_mas_"* ]] || [[ "$dir_name" =~ _mas[^a-z] ]]; then
+        echo "motif_aware_spectral"
+    else
+        echo "spectral"
+    fi
+}
+
 supports_coarsening() {
     local tokenizer="$1"
     if [[ "$tokenizer" == "hsent" ]] || [[ "$tokenizer" == "hdt" ]]; then
@@ -91,9 +115,34 @@ supports_coarsening() {
     fi
 }
 
-is_already_generated() {
+is_test_phase1_done() {
     local run_dir="$1"
-    [ -f "$run_dir/generated_smiles.txt" ] && [ -s "$run_dir/generated_smiles.txt" ]
+    [ -f "$run_dir/results.json" ] && [ -f "$run_dir/generated_smiles.txt" ] && [ -s "$run_dir/generated_smiles.txt" ]
+}
+
+is_motif_done() {
+    local run_dir="$1"
+    local results_file="$run_dir/results.json"
+    if [ ! -f "$results_file" ]; then
+        return 1
+    fi
+    python - <<PY
+import json, sys
+path = "$results_file"
+try:
+    with open(path) as f:
+        r = json.load(f)
+    needed = ["motif_fg_mmd", "motif_smarts_mmd", "motif_ring_mmd", "motif_brics_mmd"]
+    ok = all(k in r and r[k] is not None for k in needed)
+    sys.exit(0 if ok else 1)
+except Exception:
+    sys.exit(1)
+PY
+}
+
+is_realistic_done() {
+    local run_dir="$1"
+    [ -f "$run_dir/results.json" ]
 }
 
 echo "Dataset: $DATASET"
@@ -101,59 +150,73 @@ echo "Reference split: $REFERENCE_SPLIT"
 echo "Benchmark dir: $BENCHMARK_DIR"
 echo ""
 echo "Found checkpoints:"
-echo "$CHECKPOINTS" | while read -r ckpt; do echo "  - $ckpt"; done
+while read -r ckpt; do
+    [ -z "$ckpt" ] && continue
+    echo "  - $ckpt"
+done <<< "$CHECKPOINTS"
 echo ""
 
-echo "========== PHASE 1: GENERATION ONLY (sequential, GPU) =========="
-echo "$CHECKPOINTS" | while read -r ckpt; do
-    TOKENIZER=$(get_tokenizer_type "$ckpt")
-    RUN_DIR_NAME=$(basename "$(dirname "$ckpt")")
-    LOGS_PATH_TEST="${TEST_OUTPUT_DIR}/${RUN_DIR_NAME}"
+if [ "$RUN_TEST" = true ]; then
+    echo "========== PHASE 1: TEST (sequential, GPU), motif disabled =========="
+    while read -r ckpt; do
+        [ -z "$ckpt" ] && continue
+        TOKENIZER=$(get_tokenizer_type "$ckpt")
+        COARSENING=$(get_coarsening_strategy "$ckpt")
+        RUN_DIR_NAME=$(basename "$(dirname "$ckpt")")
+        LOGS_PATH_TEST="${TEST_OUTPUT_DIR}/${RUN_DIR_NAME}"
 
-    COARSENING_ARGS=""
-    if supports_coarsening "$TOKENIZER"; then
-        # Let test.py infer coarsening from directory name via tokenizer.coarsening_strategy if desired
-        :
-    fi
+        COARSENING_ARGS=""
+        if supports_coarsening "$TOKENIZER"; then
+            COARSENING_ARGS="tokenizer.coarsening_strategy=$COARSENING"
+        fi
 
-    mkdir -p "$LOGS_PATH_TEST"
+        if [ "$FORCE_REEVAL" = false ] && is_test_phase1_done "$LOGS_PATH_TEST"; then
+            echo "Skipping phase1 test (already has results + generated_smiles): $RUN_DIR_NAME"
+        else
+            echo "Running phase1 test for $RUN_DIR_NAME (compute_motif=false)..."
+            python scripts/test.py \
+              model.checkpoint_path="$ckpt" \
+              tokenizer="$TOKENIZER" \
+              experiment="$DATASET" \
+              logs.path="$LOGS_PATH_TEST" \
+              metrics.reference_split="$REFERENCE_SPLIT" \
+              metrics.compute_motif=false \
+              metrics.generate_only=false \
+              metrics.metrics_only=false \
+              metrics.motif_only=false \
+              $COARSENING_ARGS
+        fi
+    done <<< "$CHECKPOINTS"
 
-    if [ "$FORCE_REEVAL" = false ] && is_already_generated "$LOGS_PATH_TEST"; then
-        echo "Skipping generation (already have generated_smiles.txt) for $RUN_DIR_NAME"
-    else
-        echo "Generating for $RUN_DIR_NAME ..."
-        python scripts/test.py \
-          model.checkpoint_path="$ckpt" \
-          tokenizer="$TOKENIZER" \
-          experiment="$DATASET" \
-          logs.path="$LOGS_PATH_TEST" \
-          metrics.reference_split="$REFERENCE_SPLIT" \
-          metrics.generate_only=true \
-          metrics.metrics_only=false \
-          $COARSENING_ARGS
-    fi
-done
+    echo ""
+    echo "========== PHASE 2: MOTIF-ONLY (parallel CPU in screen) =========="
+    declare -a SESSIONS=()
+    while read -r ckpt; do
+        [ -z "$ckpt" ] && continue
+        TOKENIZER=$(get_tokenizer_type "$ckpt")
+        COARSENING=$(get_coarsening_strategy "$ckpt")
+        RUN_DIR_NAME=$(basename "$(dirname "$ckpt")")
+        LOGS_PATH_TEST="${TEST_OUTPUT_DIR}/${RUN_DIR_NAME}"
 
-echo ""
-echo "========== PHASE 2: METRICS ONLY (parallel, CPU, one screen per run) =========="
-echo "Spawning a detached screen session for each checkpoint (attach with: screen -r <name>)"
+        COARSENING_ARGS=""
+        if supports_coarsening "$TOKENIZER"; then
+            COARSENING_ARGS="tokenizer.coarsening_strategy=$COARSENING"
+        fi
 
-echo "$CHECKPOINTS" | while read -r ckpt; do
-    TOKENIZER=$(get_tokenizer_type "$ckpt")
-    RUN_DIR_NAME=$(basename "$(dirname "$ckpt")")
-    LOGS_PATH_TEST="${TEST_OUTPUT_DIR}/${RUN_DIR_NAME}"
+        if [ ! -f "$LOGS_PATH_TEST/generated_smiles.txt" ]; then
+            echo "Skipping motif phase (missing generated_smiles): $RUN_DIR_NAME"
+            continue
+        fi
 
-    if ! is_already_generated "$LOGS_PATH_TEST"; then
-        echo "Warning: Skipping metrics for $RUN_DIR_NAME (no generated_smiles.txt)."
-        continue
-    fi
+        if [ "$FORCE_REEVAL" = false ] && is_motif_done "$LOGS_PATH_TEST"; then
+            echo "Skipping motif phase (already has motif metrics): $RUN_DIR_NAME"
+            continue
+        fi
 
-    SESSION_NAME="mosaic_metrics_${RUN_DIR_NAME}"
-    echo "Starting metrics_only for $RUN_DIR_NAME in screen session '$SESSION_NAME' ..."
-
-    # Use a detached screen session running bash -lc so it inherits the env/conda activation.
-    # If 'screen' is not in PATH, adjust to full path (e.g., /usr/bin/screen).
-    usr/bin/screen -S "$SESSION_NAME" -dm bash -lc "
+        SESSION_NAME="mosaic_motif_${RUN_DIR_NAME}"
+        SESSIONS+=("$SESSION_NAME")
+        echo "Starting motif-only metrics in screen session '$SESSION_NAME'..."
+        /usr/bin/screen -S "$SESSION_NAME" -dm bash -lc "
 cd \"$PROJECT_ROOT\" && \
 python scripts/test.py \
   model.checkpoint_path=\"$ckpt\" \
@@ -161,14 +224,83 @@ python scripts/test.py \
   experiment=\"$DATASET\" \
   logs.path=\"$LOGS_PATH_TEST\" \
   metrics.reference_split=\"$REFERENCE_SPLIT\" \
+  metrics.compute_motif=true \
+  metrics.compute_fcd=false \
+  metrics.compute_pgd=false \
   metrics.generate_only=false \
   metrics.metrics_only=true \
+  metrics.motif_only=true \
   $COARSENING_ARGS
 "
-done
+    done <<< "$CHECKPOINTS"
+
+    if [ "${#SESSIONS[@]}" -gt 0 ]; then
+        echo "Waiting for motif-only screen sessions to finish..."
+        while true; do
+            any_running=0
+            for s in "${SESSIONS[@]}"; do
+                if /usr/bin/screen -ls | awk '{print $1}' | sed 's/^[[:space:]]*//' | grep -q "\\.${s}$"; then
+                    any_running=1
+                    break
+                fi
+            done
+            if [ "$any_running" -eq 0 ]; then
+                break
+            fi
+            sleep 10
+        done
+    fi
+fi
+
+if [ "$RUN_GEN" = true ]; then
+    echo ""
+    echo "========== REALISTIC_GEN (sequential) =========="
+    while read -r ckpt; do
+        [ -z "$ckpt" ] && continue
+        TOKENIZER=$(get_tokenizer_type "$ckpt")
+        COARSENING=$(get_coarsening_strategy "$ckpt")
+        RUN_DIR_NAME=$(basename "$(dirname "$ckpt")")
+        LOGS_PATH_GEN="${REALISTIC_GEN_OUTPUT_DIR}/${RUN_DIR_NAME}"
+
+        COARSENING_ARGS=""
+        if supports_coarsening "$TOKENIZER"; then
+            COARSENING_ARGS="tokenizer.coarsening_strategy=$COARSENING"
+        fi
+
+        if [ "$FORCE_REEVAL" = false ] && is_realistic_done "$LOGS_PATH_GEN"; then
+            echo "Skipping realistic_gen (already has results): $RUN_DIR_NAME"
+        else
+            echo "Running realistic_gen for $RUN_DIR_NAME ..."
+            python scripts/realistic_gen.py \
+              model.checkpoint_path="$ckpt" \
+              tokenizer="$TOKENIZER" \
+              experiment="$DATASET" \
+              logs.path="$LOGS_PATH_GEN" \
+              metrics.reference_split="$REFERENCE_SPLIT" \
+              $COARSENING_ARGS
+        fi
+    done <<< "$CHECKPOINTS"
+fi
 
 echo ""
-echo "Phase 2 metrics_only jobs have been started in screen sessions."
-echo "Attach to a session with:  screen -r mosaic_metrics_<run_dir_name>"
-echo "Logs and results are under $TEST_OUTPUT_DIR"
+echo "========== GENERATING COMPARISON CHART =========="
+if [ "$RUN_GEN" = true ]; then
+    python scripts/comparison/compare_results.py \
+      --test-dir "$TEST_OUTPUT_DIR" \
+      --realistic-gen-dir "$REALISTIC_GEN_OUTPUT_DIR" \
+      --output "$COMPARISON_OUTPUT"
+else
+    python scripts/comparison/compare_results.py \
+      --test-dir "$TEST_OUTPUT_DIR" \
+      --output "$COMPARISON_OUTPUT" \
+      --test-only
+fi
+
+echo ""
+echo "Done. Results saved to:"
+echo "  - Test results:      $TEST_OUTPUT_DIR/"
+if [ "$RUN_GEN" = true ]; then
+    echo "  - Realistic gen:     $REALISTIC_GEN_OUTPUT_DIR/"
+fi
+echo "  - Comparison table:  $COMPARISON_OUTPUT"
 

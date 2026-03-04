@@ -45,6 +45,7 @@ metrics:
   motif_n_workers: null  # Processes for motif feature extraction (null/1 = serial; integer > 1 = parallel)
   generate_only: false    # NEW: allow GPU-only generation phase
   metrics_only: false     # NEW: allow CPU-only metrics phase
+  motif_only: false       # If true, run only motif metrics (used with metrics_only for parallel motif phase)
 
 # Visualization configuration
 visualization:

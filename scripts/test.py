@@ -182,9 +182,11 @@ def main(cfg: DictConfig) -> None:
     # Optional two-phase eval flags:
     # - metrics.generate_only: run generation + save SMILES only (no metrics)
     # - metrics.metrics_only: skip generation/model load; load SMILES from disk and run metrics only
+    # - metrics.motif_only: run only motif metrics (for metrics_only CPU phase)
     metrics_cfg = cfg.get("metrics", {})
     generate_only = bool(metrics_cfg.get("generate_only", False))
     metrics_only = bool(metrics_cfg.get("metrics_only", False))
+    motif_only = bool(metrics_cfg.get("motif_only", False))
     if generate_only and metrics_only:
         raise ValueError("metrics.generate_only and metrics.metrics_only cannot both be true")
 
@@ -652,18 +654,20 @@ def main(cfg: DictConfig) -> None:
     )
     log.info("=" * 70)
 
-    log.info("\n" + "=" * 50)
-    log.info("MOLECULAR METRICS")
-    log.info("=" * 50)
+    mol_results = {}
+    if not motif_only:
+        log.info("\n" + "=" * 50)
+        log.info("MOLECULAR METRICS")
+        log.info("=" * 50)
 
-    mol_metrics = MolecularMetrics(
-        reference_smiles=reference_smiles,
-        train_smiles=train_smiles,
-    )
-    mol_results = mol_metrics(generated_smiles)
+        mol_metrics = MolecularMetrics(
+            reference_smiles=reference_smiles,
+            train_smiles=train_smiles,
+        )
+        mol_results = mol_metrics(generated_smiles)
 
-    for name, value in mol_results.items():
-        log.info(f"  {name:20s}: {value:.6f}")
+        for name, value in mol_results.items():
+            log.info(f"  {name:20s}: {value:.6f}")
 
     # Motif Distribution Metrics
     log.info("\n" + "=" * 50)
@@ -672,7 +676,8 @@ def main(cfg: DictConfig) -> None:
 
     motif_results = {}
     motif_summary = {}
-    if cfg.metrics.get("compute_motif", True):  # Default enabled
+    should_compute_motif = bool(cfg.metrics.get("compute_motif", True)) or motif_only
+    if should_compute_motif:
         try:
             motif_metrics = MotifDistributionMetric(
                 reference_smiles=reference_smiles,
@@ -699,13 +704,11 @@ def main(cfg: DictConfig) -> None:
     else:
         log.info("  [Motif metrics computation disabled in config]")
 
-    # PolyGraph Discrepancy Metric
-    log.info("\n" + "=" * 50)
-    log.info("POLYGRAPH DISCREPANCY METRIC")
-    log.info("=" * 50)
-
     pgd_score = None
-    if cfg.metrics.get("compute_pgd", True):  # Default enabled
+    if (not motif_only) and cfg.metrics.get("compute_pgd", True):  # Default enabled
+        log.info("\n" + "=" * 50)
+        log.info("POLYGRAPH DISCREPANCY METRIC")
+        log.info("=" * 50)
         try:
             max_ref_size = cfg.metrics.get("pgd_reference_size", 100)
             ref_graphs_path = cfg.metrics.get("reference_graphs_path")
@@ -779,16 +782,14 @@ def main(cfg: DictConfig) -> None:
         except Exception as e:
             log.error(f"  PGD computation failed: {e}")
             pgd_score = None
-    else:
+    elif not motif_only:
         log.info("  [PGD computation disabled in config]")
 
-    # Try to compute FCD if available
-    log.info("\n" + "=" * 50)
-    log.info("FCD METRIC")
-    log.info("=" * 50)
-
     fcd_score = None
-    if cfg.metrics.get("compute_fcd", True):  # Default enabled
+    if (not motif_only) and cfg.metrics.get("compute_fcd", True):  # Default enabled
+        log.info("\n" + "=" * 50)
+        log.info("FCD METRIC")
+        log.info("=" * 50)
         try:
             fcd_score = compute_fcd(generated_smiles, reference_smiles)
             if not (fcd_score != fcd_score):  # Check for NaN
@@ -802,11 +803,11 @@ def main(cfg: DictConfig) -> None:
             log.error(f"  FCD: Failed with error: {e}")
             log.info("  FCD: Skipping due to error")
             fcd_score = None
-    else:
+    elif not motif_only:
         log.info("  [FCD computation disabled in config]")
 
     # Get motif summary for reference (if motif metrics were computed)
-    if cfg.metrics.get("compute_motif", True) and len(motif_summary) > 0:
+    if should_compute_motif and len(motif_summary) > 0:
         log.info("\n" + "=" * 50)
         log.info("MOTIF SUMMARY (Top 10)")
         log.info("=" * 50)
@@ -852,6 +853,21 @@ def main(cfg: DictConfig) -> None:
     output_path.mkdir(parents=True, exist_ok=True)
 
     results_file = output_path / "results.json"
+    if motif_only and results_file.exists():
+        # In motif-only mode, preserve previously computed non-motif metrics and only update motif fields.
+        try:
+            with open(results_file, "r") as f:
+                previous_results = json.load(f)
+            previous_results.update(motif_results)
+            if len(motif_summary) > 0:
+                previous_results["motif_summary"] = motif_summary
+            previous_results["reference_split"] = reference_split
+            previous_results["reference_size"] = actual_ref_size
+            previous_results["reference_size_target"] = target_ref_size
+            previous_results["reference_pool_available"] = reference_pool_available
+            all_results = previous_results
+        except Exception as e:
+            log.warning(f"Could not merge motif-only results with existing results.json: {e}")
     with open(results_file, "w") as f:
         json.dump(all_results, f, indent=2)
     log.info(f"\nResults saved to {results_file}")
