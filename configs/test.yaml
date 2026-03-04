@@ -43,6 +43,8 @@ metrics:
   reference_graphs_path: null  # If set, load PGD reference graphs from this .pt file (skip SMILES->graph conversion)
   motif_cache_dir: data/motif_cache  # Cache reference motif features here (null = disable); reused across model runs
   motif_n_workers: null  # Processes for motif feature extraction (null/1 = serial; integer > 1 = parallel)
+  generate_only: false    # NEW: allow GPU-only generation phase
+  metrics_only: false     # NEW: allow CPU-only metrics phase
 
 # Visualization configuration
 visualization:
