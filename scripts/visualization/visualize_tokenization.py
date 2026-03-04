@@ -604,13 +604,23 @@ def plot_hdt_tree(
     num_partitions = len(hg.partitions)
     num_atoms = data.num_nodes
 
-    # Fixed level height - reasonable spacing between levels
-    level_height = 2.5
+    # Fixed level height - taller for square aspect
+    level_height = 3.5
 
     # Adaptive sizing based on complexity - use larger nodes
     if num_atoms > 20 or num_partitions > 6:
-        node_spacing = 0.5
-        part_gap = 0.7
+        node_spacing = 0.35
+        part_gap = 0.5
+        root_radius = 0.26
+        part_radius = 0.20
+        atom_radius = 0.15
+        font_size_root = 9
+        font_size_part = 7
+        font_size_atom = 6
+        font_size_level = 7
+    else:
+        node_spacing = 0.45
+        part_gap = 0.6
         root_radius = 0.30
         part_radius = 0.24
         atom_radius = 0.18
@@ -618,16 +628,6 @@ def plot_hdt_tree(
         font_size_part = 8
         font_size_atom = 7
         font_size_level = 8
-    else:
-        node_spacing = 0.6
-        part_gap = 0.8
-        root_radius = 0.35
-        part_radius = 0.28
-        atom_radius = 0.20
-        font_size_root = 11
-        font_size_part = 9
-        font_size_atom = 8
-        font_size_level = 9
 
     positions = {}
     node_to_partition = {}
@@ -708,7 +708,7 @@ def plot_hdt_tree(
                     v = nodes[dst_local]
                     draw_curved_edge(
                         ax, positions[u], positions[v],
-                        color="#FF8C00", linewidth=3.5,
+                        color="#FF8C00", linewidth=2,
                         curve_amount=0.2, zorder=3
                     )
 
@@ -724,7 +724,7 @@ def plot_hdt_tree(
                 v = right_part.global_node_indices[right_local]
                 draw_curved_edge(
                     ax, positions[u], positions[v],
-                    color="#FF8C00", linewidth=3, linestyle="--",
+                    color="#FF8C00", linewidth=1.5, linestyle="--",
                     curve_amount=0.3, zorder=3
                 )
 
@@ -773,8 +773,8 @@ def plot_hdt_tree(
 
     # Legend
     legend_elements = [
-        plt.Line2D([0], [0], color="#FF8C00", linewidth=3, label="Graph edges"),
-        plt.Line2D([0], [0], color="#FF8C00", linewidth=2.5, linestyle="--", label="Cross-partition"),
+        plt.Line2D([0], [0], color="#FF8C00", linewidth=2, label="Intra-partition"),
+        plt.Line2D([0], [0], color="#FF8C00", linewidth=1.5, linestyle="--", label="Cross-partition"),
         plt.Line2D([0], [0], color="#333333", linewidth=1.5, marker=">",
                    markersize=5, label="DFS traversal"),
     ]
@@ -813,26 +813,26 @@ def plot_hdtc_structure(
 
     # Adaptive sizing based on complexity
     if num_atoms > 20 or num_communities > 6:
-        node_spacing = 0.5
-        comm_gap = 0.7
+        node_spacing = 0.35
+        comm_gap = 0.5
+        root_radius = 0.26
+        comm_radius = 0.20
+        atom_radius = 0.15
+        font_size_root = 9
+        font_size_comm = 7
+        font_size_atom = 6
+    else:
+        node_spacing = 0.45
+        comm_gap = 0.6
         root_radius = 0.30
         comm_radius = 0.24
         atom_radius = 0.18
         font_size_root = 10
         font_size_comm = 8
         font_size_atom = 7
-    else:
-        node_spacing = 0.6
-        comm_gap = 0.8
-        root_radius = 0.35
-        comm_radius = 0.28
-        atom_radius = 0.20
-        font_size_root = 11
-        font_size_comm = 9
-        font_size_atom = 8
 
-    # Fixed level height
-    level_height = 2.5
+    # Fixed level height - taller for square aspect
+    level_height = 3.5
 
     # Community type colors
     type_colors = {
@@ -910,7 +910,7 @@ def plot_hdtc_structure(
                 dst_pos = comm_positions[dst_comm]
                 draw_curved_edge(
                     ax, src_pos, dst_pos,
-                    color="#2E86AB", linewidth=3.5, linestyle="-",
+                    color="#2E86AB", linewidth=2, linestyle="-",
                     curve_amount=0.3, zorder=4
                 )
 
@@ -923,7 +923,7 @@ def plot_hdtc_structure(
                 drawn.add(edge_key)
                 draw_curved_edge(
                     ax, positions[src], positions[dst],
-                    color="#FF8C00", linewidth=3,
+                    color="#FF8C00", linewidth=2,
                     curve_amount=0.2, zorder=3
                 )
 
@@ -934,7 +934,7 @@ def plot_hdtc_structure(
             dst_pos = positions[se.target_atom]
             draw_curved_edge(
                 ax, src_pos, dst_pos,
-                color="#FF8C00", linewidth=2.5, linestyle="--",
+                color="#FF8C00", linewidth=1.5, linestyle="--",
                 curve_amount=0.3, zorder=3
             )
 
@@ -994,9 +994,9 @@ def plot_hdtc_structure(
         mpatches.Patch(facecolor="#FF6B6B", edgecolor="black", label="Ring"),
         mpatches.Patch(facecolor="#4ECDC4", edgecolor="black", label="Functional"),
         mpatches.Patch(facecolor="#95A5A6", edgecolor="black", label="Singleton"),
-        plt.Line2D([0], [0], color="#2E86AB", linewidth=3.5, label="Super-edges"),
-        plt.Line2D([0], [0], color="#FF8C00", linewidth=3, label="Graph edges"),
-        plt.Line2D([0], [0], color="#FF8C00", linewidth=2.5, linestyle="--", label="Cross-comm"),
+        plt.Line2D([0], [0], color="#2E86AB", linewidth=2, label="Super-edges"),
+        plt.Line2D([0], [0], color="#FF8C00", linewidth=2, label="Intra-community"),
+        plt.Line2D([0], [0], color="#FF8C00", linewidth=1.5, linestyle="--", label="Cross-community"),
         plt.Line2D([0], [0], color="#333333", linewidth=1.5, marker=">",
                    markersize=5, label="DFS traversal"),
     ]
@@ -1103,12 +1103,16 @@ def compare_all_tokenizations(
     output: str | None = None,
     show: bool = True,
     seed: int = 42,
+    skip_sent: bool = False,
 ) -> plt.Figure | None:
     """Create comparison of H-SENT, SENT, HDT, and HDTC tokenization.
 
-    Layout (2x2 grid):
-        (A) H-SENT community graph  |  (B) SENT walks
+    Layout with all four (default):
+        (A) SENT walks               |  (B) H-SENT community graph
         (C) HDT tree                 |  (D) HDTC functional hierarchy
+
+    Layout with --no-sent:
+        (A) H-SENT community graph  |  (B) HDT tree  |  (C) HDTC hierarchy
     """
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
@@ -1123,8 +1127,9 @@ def compare_all_tokenizations(
     pos = get_consistent_layout(data, seed)
 
     # Create tokenizers
-    sent_tokenizer = SENTTokenizer(seed=seed)
-    sent_tokenizer.set_num_nodes(max(100, data.num_nodes + 20))
+    if not skip_sent:
+        sent_tokenizer = SENTTokenizer(seed=seed)
+        sent_tokenizer.set_num_nodes(max(100, data.num_nodes + 20))
 
     hsent_tokenizer = HSENTTokenizer(seed=seed)
     hsent_tokenizer.set_num_nodes(max(100, data.num_nodes + 20))
@@ -1140,7 +1145,8 @@ def compare_all_tokenizations(
     shared_hg = hsent_tokenizer.coarsener.build_hierarchy(data)
 
     # Tokenize
-    sent_tokens = sent_tokenizer.tokenize(data).tolist()
+    if not skip_sent:
+        sent_tokens = sent_tokenizer.tokenize(data).tolist()
 
     hsent_tokens = None
     hsent_hg = None
@@ -1157,79 +1163,133 @@ def compare_all_tokenizations(
     hdt_hg = shared_hg
     hdtc_hierarchy = hdtc_tokenizer.hierarchy_builder.build(data)
 
-    # Create 2x2 figure
-    fig = plt.figure(figsize=(20, 18))
-
     title = name or smiles[:35]
     if len(smiles) > 35:
         title += "..."
-    fig.suptitle(
-        f"{title}  ({mol.GetNumAtoms()} atoms, {mol.GetNumBonds()} bonds)",
-        fontsize=14, fontweight="bold"
-    )
 
     from matplotlib.gridspec import GridSpec
-    gs = GridSpec(
-        2, 2, figure=fig,
-        height_ratios=[1, 2],
-        hspace=0.25, wspace=0.15
-    )
 
-    # (A) Top-left: H-SENT community graph
-    ax_a = fig.add_subplot(gs[0, 0])
-    if hsent_hg is not None and hsent_tokens is not None:
-        plot_hsent_structure(ax_a, data, hsent_hg, hsent_tokens, hsent_tokenizer, pos)
-    else:
-        ax_a.text(
-            0.5, 0.5, "H-SENT failed\n(spectral coarsening error)",
-            ha="center", va="center", fontsize=10, color="gray", style="italic",
-            transform=ax_a.transAxes
+    if skip_sent:
+        # 3-column layout: H-SENT | HDT | HDTC
+        fig = plt.figure(figsize=(36, 12))
+        fig.suptitle(
+            f"{title}  ({mol.GetNumAtoms()} atoms, {mol.GetNumBonds()} bonds)",
+            fontsize=14, fontweight="bold"
         )
-        ax_a.set_title("H-SENT: Error", fontsize=11, fontweight="bold")
-        ax_a.axis("off")
-    ax_a.text(
-        -0.02, 1.05, "(A)", transform=ax_a.transAxes,
-        fontsize=14, fontweight="bold", va="bottom", ha="right"
-    )
+        gs = GridSpec(
+            2, 3, figure=fig,
+            width_ratios=[1, 1.5, 1.5],
+            height_ratios=[4, 1],
+            hspace=-0.15, wspace=0.12
+        )
 
-    # (B) Top-right: SENT walks
-    ax_b = fig.add_subplot(gs[0, 1])
-    plot_sent_walks(ax_b, data, sent_tokens, sent_tokenizer, pos)
-    ax_b.text(
-        -0.02, 1.05, "(B)", transform=ax_b.transAxes,
-        fontsize=14, fontweight="bold", va="bottom", ha="right"
-    )
+        # (A) H-SENT community graph
+        ax_a = fig.add_subplot(gs[0, 0])
+        if hsent_hg is not None and hsent_tokens is not None:
+            plot_hsent_structure(ax_a, data, hsent_hg, hsent_tokens, hsent_tokenizer, pos)
+        else:
+            ax_a.text(
+                0.5, 0.5, "H-SENT failed\n(spectral coarsening error)",
+                ha="center", va="center", fontsize=10, color="gray", style="italic",
+                transform=ax_a.transAxes
+            )
+            ax_a.set_title("H-SENT: Error", fontsize=11, fontweight="bold")
+            ax_a.axis("off")
+        ax_a.text(
+            -0.02, 1.05, "(A)", transform=ax_a.transAxes,
+            fontsize=14, fontweight="bold", va="bottom", ha="right"
+        )
 
-    # (C) Bottom-left: HDT tree
-    ax_c = fig.add_subplot(gs[1, 0])
-    plot_hdt_tree(ax_c, data, hdt_hg, hdt_tokens, hdt_tokenizer)
-    ax_c.text(
-        -0.02, 1.03, "(C)", transform=ax_c.transAxes,
-        fontsize=14, fontweight="bold", va="bottom", ha="right"
-    )
+        # (B) HDT tree
+        ax_b = fig.add_subplot(gs[0, 1])
+        plot_hdt_tree(ax_b, data, hdt_hg, hdt_tokens, hdt_tokenizer)
+        ax_b.text(
+            -0.02, 1.03, "(B)", transform=ax_b.transAxes,
+            fontsize=14, fontweight="bold", va="bottom", ha="right"
+        )
 
-    # (D) Bottom-right: HDTC functional hierarchy
-    ax_d = fig.add_subplot(gs[1, 1])
-    plot_hdtc_structure(ax_d, data, hdtc_hierarchy, hdtc_tokens, hdtc_tokenizer)
-    ax_d.text(
-        -0.02, 1.03, "(D)", transform=ax_d.transAxes,
-        fontsize=14, fontweight="bold", va="bottom", ha="right"
-    )
+        # (C) HDTC functional hierarchy
+        ax_c = fig.add_subplot(gs[0, 2])
+        plot_hdtc_structure(ax_c, data, hdtc_hierarchy, hdtc_tokens, hdtc_tokenizer)
+        ax_c.text(
+            -0.02, 1.03, "(C)", transform=ax_c.transAxes,
+            fontsize=14, fontweight="bold", va="bottom", ha="right"
+        )
 
-    # Stats at bottom
-    hdtc_info = hdtc_hierarchy.get_level_info()
-    hsent_stats = (
-        f"H-SENT: {len(hsent_tokens)} tokens ({hsent_hg.num_communities} comm)"
-        if hsent_tokens is not None and hsent_hg is not None
-        else "H-SENT: failed"
-    )
-    stats = (
-        f"SENT: {len(sent_tokens)} tokens | "
-        f"{hsent_stats} | "
-        f"HDT: {len(hdt_tokens)} tokens ({hdt_hg.num_communities} comm) | "
-        f"HDTC: {len(hdtc_tokens)} tokens ({hdtc_info['num_communities']} comm)"
-    )
-    fig.text(0.5, 0.01, stats, ha="center", fontsize=11, style="italic", color="gray")
+        axes_with_cols = [(0, ax_a), (1, ax_b), (2, ax_c)]
+    else:
+        # 4-column layout: SENT | H-SENT | HDT | HDTC
+        fig = plt.figure(figsize=(40, 12))
+        fig.suptitle(
+            f"{title}  ({mol.GetNumAtoms()} atoms, {mol.GetNumBonds()} bonds)",
+            fontsize=14, fontweight="bold"
+        )
+        gs = GridSpec(
+            2, 4, figure=fig,
+            width_ratios=[1, 1, 1.5, 1.5],
+            height_ratios=[4, 1],
+            hspace=-0.15, wspace=0.12
+        )
+
+        # (A) SENT walks
+        ax_a = fig.add_subplot(gs[0, 0])
+        plot_sent_walks(ax_a, data, sent_tokens, sent_tokenizer, pos)
+        ax_a.text(
+            -0.02, 1.05, "(A)", transform=ax_a.transAxes,
+            fontsize=14, fontweight="bold", va="bottom", ha="right"
+        )
+
+        # (B) H-SENT community graph
+        ax_b = fig.add_subplot(gs[0, 1])
+        if hsent_hg is not None and hsent_tokens is not None:
+            plot_hsent_structure(ax_b, data, hsent_hg, hsent_tokens, hsent_tokenizer, pos)
+        else:
+            ax_b.text(
+                0.5, 0.5, "H-SENT failed\n(spectral coarsening error)",
+                ha="center", va="center", fontsize=10, color="gray", style="italic",
+                transform=ax_b.transAxes
+            )
+            ax_b.set_title("H-SENT: Error", fontsize=11, fontweight="bold")
+            ax_b.axis("off")
+        ax_b.text(
+            -0.02, 1.05, "(B)", transform=ax_b.transAxes,
+            fontsize=14, fontweight="bold", va="bottom", ha="right"
+        )
+
+        # (C) HDT tree
+        ax_c = fig.add_subplot(gs[0, 2])
+        plot_hdt_tree(ax_c, data, hdt_hg, hdt_tokens, hdt_tokenizer)
+        ax_c.text(
+            -0.02, 1.03, "(C)", transform=ax_c.transAxes,
+            fontsize=14, fontweight="bold", va="bottom", ha="right"
+        )
+
+        # (D) HDTC functional hierarchy
+        ax_d = fig.add_subplot(gs[0, 3])
+        plot_hdtc_structure(ax_d, data, hdtc_hierarchy, hdtc_tokens, hdtc_tokenizer)
+        ax_d.text(
+            -0.02, 1.03, "(D)", transform=ax_d.transAxes,
+            fontsize=14, fontweight="bold", va="bottom", ha="right"
+        )
+
+        axes_with_cols = [(0, ax_a), (1, ax_b), (2, ax_c), (3, ax_d)]
+
+    # Move legends from inside axes to dedicated legend row beneath
+    for col, ax in axes_with_cols:
+        leg = ax.get_legend()
+        if leg is not None:
+            handles = leg.legend_handles
+            labels = [t.get_text() for t in leg.get_texts()]
+            leg.remove()
+            ax_leg = fig.add_subplot(gs[1, col])
+            ax_leg.axis("off")
+            # Use 2 rows for legends with many items
+            ncols = (len(handles) + 1) // 2
+            ax_leg.legend(
+                handles, labels, loc="upper center",
+                fontsize=10, ncol=ncols,
+                frameon=False, handlelength=1.5
+            )
 
     if output:
         fig.savefig(output, dpi=150, bbox_inches="tight")
@@ -1241,7 +1301,7 @@ def compare_all_tokenizations(
     return fig
 
 
-def run_demo(output_dir: str | None = None, show: bool = True):
+def run_demo(output_dir: str | None = None, show: bool = True, skip_sent: bool = False):
     """Run demo with complex molecules containing multiple motifs."""
     demo_molecules = [
         ("cholesterol", MOLECULES["cholesterol"]),
@@ -1266,6 +1326,7 @@ def run_demo(output_dir: str | None = None, show: bool = True):
             name=name.replace("_", " ").title(),
             output=output,
             show=show,
+            skip_sent=skip_sent,
         )
 
 
@@ -1289,6 +1350,7 @@ Available molecules: {', '.join(sorted(MOLECULES.keys()))}
     parser.add_argument("--demo", action="store_true", help="Run demo")
     parser.add_argument("--list", action="store_true", help="List available molecules")
     parser.add_argument("--no-show", action="store_true", help="Don't display")
+    parser.add_argument("--no-sent", action="store_true", help="Skip SENT baseline panel")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
     args = parser.parse_args()
@@ -1302,7 +1364,7 @@ Available molecules: {', '.join(sorted(MOLECULES.keys()))}
         return
 
     if args.demo:
-        run_demo(output_dir=args.output_dir, show=not args.no_show)
+        run_demo(output_dir=args.output_dir, show=not args.no_show, skip_sent=args.no_sent)
         return
 
     smiles = args.smiles
@@ -1323,6 +1385,7 @@ Available molecules: {', '.join(sorted(MOLECULES.keys()))}
     compare_all_tokenizations(
         smiles, name=name, output=args.output,
         show=not args.no_show, seed=args.seed,
+        skip_sent=args.no_sent,
     )
 
 
