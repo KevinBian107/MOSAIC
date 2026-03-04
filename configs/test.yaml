@@ -41,6 +41,8 @@ metrics:
   reference_size: null  # Auto: 10% of train size (sampled from test when reference_split='test')
   reference_split: "test"  # Reference population: "test" (default) or "full" (train+test combined)
   reference_graphs_path: null  # If set, load PGD reference graphs from this .pt file (skip SMILES->graph conversion)
+  motif_cache_dir: data/motif_cache  # Cache reference motif features here (null = disable); reused across model runs
+  motif_n_workers: null  # Processes for motif feature extraction (null/1 = serial; integer > 1 = parallel)
 
 # Visualization configuration
 visualization:

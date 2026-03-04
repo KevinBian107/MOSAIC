@@ -601,6 +601,11 @@ def main(cfg: DictConfig) -> None:
         try:
             motif_metrics = MotifDistributionMetric(
                 reference_smiles=reference_smiles,
+                cache_dir=cfg.metrics.get("motif_cache_dir"),
+                dataset_name=cfg.data.dataset_name,
+                reference_split=reference_split,
+                actual_ref_size=actual_ref_size,
+                n_workers=cfg.metrics.get("motif_n_workers"),
             )
             motif_results = motif_metrics(generated_smiles)
 
