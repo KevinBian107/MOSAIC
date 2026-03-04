@@ -712,6 +712,8 @@ class MotifDistributionMetric:
                 kernel=gaussian,
                 is_hist=False,
                 sigma=1.0,
+                show_progress=True,
+                progress_desc="  MMD FG",
             )
             t_mmd_fg = time.perf_counter() - t0
             log.info("  MMD (FG): %.1fs", t_mmd_fg)
@@ -725,6 +727,8 @@ class MotifDistributionMetric:
                 kernel=gaussian,
                 is_hist=False,
                 sigma=1.0,
+                show_progress=True,
+                progress_desc="  MMD SMARTS",
             )
             t_mmd_smarts = time.perf_counter() - t0
             log.info("  MMD (SMARTS): %.1fs", t_mmd_smarts)
@@ -738,6 +742,8 @@ class MotifDistributionMetric:
                 kernel=gaussian,
                 is_hist=False,
                 sigma=1.0,
+                show_progress=True,
+                progress_desc="  MMD ring",
             )
             t_mmd_ring = time.perf_counter() - t0
             log.info("  MMD (ring): %.1fs", t_mmd_ring)
