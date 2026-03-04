@@ -229,7 +229,26 @@ class MotifDistributionMetric:
         self.use_smarts_motifs = use_smarts_motifs
         self.use_ring_systems = use_ring_systems
         self.use_brics = use_brics
-        self._n_workers = n_workers if n_workers is not None and n_workers > 1 else 1
+
+        # Normalize n_workers (Hydra/CLI may pass it as a string)
+        n_workers_normalized: Optional[int]
+        if isinstance(n_workers, str):
+            try:
+                n_workers_normalized = int(n_workers)
+            except ValueError:
+                log.warning(
+                    "MotifDistributionMetric: invalid n_workers=%r; falling back to 1",
+                    n_workers,
+                )
+                n_workers_normalized = 1
+        else:
+            n_workers_normalized = n_workers
+
+        self._n_workers = (
+            n_workers_normalized
+            if n_workers_normalized is not None and n_workers_normalized > 1
+            else 1
+        )
 
         # Precompute reference distributions
         self._ref_fg_vectors: Optional[np.ndarray] = None

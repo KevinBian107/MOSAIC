@@ -503,12 +503,27 @@ def main(cfg: DictConfig) -> None:
     reference_split = cfg.metrics.get("reference_split", "test")
     train_smiles = list(datamodule.train_smiles)
 
+    # Auto reference sizing:
+    # - test split: 10% of train (capped by test pool size)
+    # - full split: fixed 5000 train + 500 test (avoids 10% of MOSES train => ~50k)
+    fullref_train_target = 5000
+    fullref_test_target = 500
+
     if configured_ref_size is None or int(configured_ref_size) <= 0:
-        target_ref_size = max(1, int(0.1 * len(train_smiles)))
-        log.info(
-            "Auto reference_size enabled: using 10%% of train size "
-            f"({len(train_smiles):,}) => target {target_ref_size:,} reference molecules"
-        )
+        if reference_split == "full":
+            target_ref_size = fullref_train_target + fullref_test_target
+            log.info(
+                "Auto reference_size enabled (full-ref): using %d train + %d test => target %d reference molecules",
+                fullref_train_target,
+                fullref_test_target,
+                target_ref_size,
+            )
+        else:
+            target_ref_size = max(1, int(0.1 * len(train_smiles)))
+            log.info(
+                "Auto reference_size enabled: using 10%% of train size "
+                f"({len(train_smiles):,}) => target {target_ref_size:,} reference molecules"
+            )
     else:
         target_ref_size = int(configured_ref_size)
         log.info(f"Using configured reference_size target={target_ref_size:,}")
@@ -525,9 +540,23 @@ def main(cfg: DictConfig) -> None:
             actual_ref_size = min(target_ref_size, reference_pool_available)
             reference_smiles = datamodule.test_smiles[:actual_ref_size]
         else:
-            combined = list(train_smiles) + list(datamodule.test_smiles)
-            random.Random(cfg.seed).shuffle(combined)
-            reference_smiles = combined[:actual_ref_size]
+            # If reference_size is not explicitly configured, use a fixed (train,test) split.
+            if configured_ref_size is None or int(configured_ref_size) <= 0:
+                rng = random.Random(cfg.seed)
+                train_pool = list(train_smiles)
+                test_pool = list(datamodule.test_smiles)
+                rng.shuffle(train_pool)
+                rng.shuffle(test_pool)
+
+                train_n = min(fullref_train_target, len(train_pool))
+                test_n = min(fullref_test_target, len(test_pool))
+                reference_smiles = train_pool[:train_n] + test_pool[:test_n]
+                rng.shuffle(reference_smiles)
+                actual_ref_size = len(reference_smiles)
+            else:
+                combined = list(train_smiles) + list(datamodule.test_smiles)
+                random.Random(cfg.seed).shuffle(combined)
+                reference_smiles = combined[:actual_ref_size]
         ref_label = "train+test"
     else:
         reference_pool_available = len(datamodule.test_smiles)
