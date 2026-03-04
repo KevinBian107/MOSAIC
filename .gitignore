@@ -4,7 +4,7 @@ AutoGraph/
 # Scratch/exploration
 scratch/
 tmp/
-figures/
+/figures/
 .claude/
 paper/
 
@@ -64,7 +64,8 @@ logs/
 *.log
 wandb/
 .ruff_cache
-*.png
+# *.png
+# !docs/figures/*.png
 *.json
 
 # Data
