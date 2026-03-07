@@ -17,14 +17,49 @@ USE_COCONUT=false
 USE_FULL_REF=false
 FORCE_REEVAL=false
 REUSE_GENERATED=false
+RUN_PHASE1=true
+RUN_PHASE2=true
+RUN_PHASE3=true
+PHASE_FLAGS_USED=false
 
 for arg in "$@"; do
     case $arg in
         --test-only)
             RUN_GEN=false
+            RUN_PHASE3=false
             ;;
         --gen-only)
             RUN_TEST=false
+            RUN_PHASE1=false
+            RUN_PHASE2=false
+            RUN_PHASE3=true
+            ;;
+        --phase1)
+            if [ "$PHASE_FLAGS_USED" = false ]; then
+                RUN_PHASE1=false
+                RUN_PHASE2=false
+                RUN_PHASE3=false
+                PHASE_FLAGS_USED=true
+            fi
+            RUN_PHASE1=true
+            ;;
+        --phase2)
+            if [ "$PHASE_FLAGS_USED" = false ]; then
+                RUN_PHASE1=false
+                RUN_PHASE2=false
+                RUN_PHASE3=false
+                PHASE_FLAGS_USED=true
+            fi
+            RUN_PHASE2=true
+            ;;
+        --phase3)
+            if [ "$PHASE_FLAGS_USED" = false ]; then
+                RUN_PHASE1=false
+                RUN_PHASE2=false
+                RUN_PHASE3=false
+                PHASE_FLAGS_USED=true
+            fi
+            RUN_PHASE3=true
             ;;
         --coconut)
             USE_COCONUT=true
@@ -41,7 +76,7 @@ for arg in "$@"; do
             REUSE_GENERATED=true
             ;;
         --help|-h)
-            echo "Usage: $0 [--test-only] [--gen-only] [--coconut] [--full-ref] [--force] [--reuse-generated]"
+            echo "Usage: $0 [--test-only] [--gen-only] [--phase1] [--phase2] [--phase3] [--coconut] [--full-ref] [--force] [--reuse-generated]"
             echo ""
             echo "Two-phase behavior:"
             echo "  Phase 1 (sequential/GPU): test.py WITHOUT motif metrics"
@@ -51,6 +86,7 @@ for arg in "$@"; do
             echo "  --reuse-generated: run phase 1 in metrics_only mode using existing"
             echo "                     generated_smiles.txt (no generation)."
             echo "                     Also runs realistic_gen.py in reuse mode."
+            echo "  --phase1 / --phase2 / --phase3: run only selected phases (combinable)"
             exit 0
             ;;
     esac
@@ -157,6 +193,7 @@ echo "Dataset: $DATASET"
 echo "Reference split: $REFERENCE_SPLIT"
 echo "Benchmark dir: $BENCHMARK_DIR"
 echo "Reuse generated: $REUSE_GENERATED"
+echo "Run phases: phase1=$RUN_PHASE1 phase2=$RUN_PHASE2 phase3=$RUN_PHASE3"
 echo ""
 echo "Found checkpoints:"
 while read -r ckpt; do
@@ -165,7 +202,7 @@ while read -r ckpt; do
 done <<< "$CHECKPOINTS"
 echo ""
 
-if [ "$RUN_TEST" = true ]; then
+if [ "$RUN_PHASE1" = true ]; then
     if [ "$REUSE_GENERATED" = true ]; then
         echo "========== PHASE 1: TEST (sequential), motif disabled, reusing generated_smiles =========="
     else
@@ -224,6 +261,9 @@ if [ "$RUN_TEST" = true ]; then
         fi
     done <<< "$CHECKPOINTS"
 
+fi
+
+if [ "$RUN_PHASE2" = true ]; then
     echo ""
     echo "========== PHASE 2: MOTIF-ONLY (parallel CPU in screen) =========="
     declare -a SESSIONS=()
@@ -289,7 +329,7 @@ python scripts/test.py \
     fi
 fi
 
-if [ "$RUN_GEN" = true ]; then
+if [ "$RUN_PHASE3" = true ]; then
     echo ""
     echo "========== REALISTIC_GEN (sequential) =========="
     while read -r ckpt; do
@@ -339,7 +379,7 @@ fi
 
 echo ""
 echo "========== GENERATING COMPARISON CHART =========="
-if [ "$RUN_GEN" = true ]; then
+if [ "$RUN_PHASE3" = true ]; then
     python scripts/comparison/compare_results.py \
       --test-dir "$TEST_OUTPUT_DIR" \
       --realistic-gen-dir "$REALISTIC_GEN_OUTPUT_DIR" \
@@ -354,7 +394,7 @@ fi
 echo ""
 echo "Done. Results saved to:"
 echo "  - Test results:      $TEST_OUTPUT_DIR/"
-if [ "$RUN_GEN" = true ]; then
+if [ "$RUN_PHASE3" = true ]; then
     echo "  - Realistic gen:     $REALISTIC_GEN_OUTPUT_DIR/"
 fi
 echo "  - Comparison table:  $COMPARISON_OUTPUT"

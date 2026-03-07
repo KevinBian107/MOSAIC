@@ -423,6 +423,7 @@ def main(cfg: DictConfig) -> None:
     generated_graphs = []
     generated_smiles = []
     gen_time = 0.0
+    num_attempted = 0
 
     if reuse_generated:
         if generated_smiles_path_cfg:
@@ -440,6 +441,28 @@ def main(cfg: DictConfig) -> None:
             generated_smiles = [line.strip() for line in f if line.strip()]
         log.info(f"Loaded {len(generated_smiles)} generated SMILES from {smiles_file}")
 
+        # Require explicit attempted-count metadata from the source directory
+        # so denominator semantics are preserved exactly in reuse mode.
+        source_metadata_file = smiles_file.parent / "generated_metadata.json"
+        if not source_metadata_file.exists():
+            raise FileNotFoundError(
+                "reuse_generated_smiles=true requires generated_metadata.json next to the source SMILES file "
+                f"(missing: {source_metadata_file})."
+            )
+        with open(source_metadata_file, "r") as f:
+            metadata = json.load(f)
+        num_attempted = int(metadata.get("num_attempted"))
+        metadata_num_valid = int(metadata.get("num_valid", len(generated_smiles)))
+        if metadata_num_valid != len(generated_smiles):
+            raise ValueError(
+                "reuse artifact mismatch: generated_metadata.json num_valid "
+                f"({metadata_num_valid}) != loaded valid SMILES count ({len(generated_smiles)}) from {smiles_file}."
+            )
+        log.info(
+            f"Loaded attempted-count denominator from {source_metadata_file} "
+            f"(num_attempted={num_attempted})"
+        )
+
         # Keep a local copy in output_dir for consistency.
         out_smiles_file = output_dir / "generated_smiles.txt"
         if smiles_file.resolve() != out_smiles_file.resolve():
@@ -447,6 +470,17 @@ def main(cfg: DictConfig) -> None:
                 for smi in generated_smiles:
                     f.write(smi + "\n")
             log.info(f"Copied generated SMILES to {out_smiles_file}")
+        metadata_file = output_dir / "generated_metadata.json"
+        with open(metadata_file, "w") as f:
+            json.dump(
+                {
+                    "num_attempted": int(num_attempted),
+                    "num_valid": int(len(generated_smiles)),
+                },
+                f,
+                indent=2,
+            )
+        log.info(f"Generated metadata saved to {metadata_file}")
     else:
         # Configure tokenizer from checkpoint (force-corrects max_num_nodes
         # after any inflation by datamodule.setup())
@@ -468,6 +502,7 @@ def main(cfg: DictConfig) -> None:
 
         # Generate molecules
         num_samples = cfg.generation.num_samples
+        num_attempted = int(num_samples)
         log.info("\n" + "=" * 60)
         log.info("GENERATION")
         log.info("=" * 60)
@@ -496,6 +531,17 @@ def main(cfg: DictConfig) -> None:
             for smi in generated_smiles:
                 f.write(smi + "\n")
         log.info(f"Generated SMILES saved to {smiles_file}")
+        metadata_file = output_dir / "generated_metadata.json"
+        with open(metadata_file, "w") as f:
+            json.dump(
+                {
+                    "num_attempted": int(num_attempted),
+                    "num_valid": int(len(generated_smiles)),
+                },
+                f,
+                indent=2,
+            )
+        log.info(f"Generated metadata saved to {metadata_file}")
 
     # Filter by motif for analysis
     motif_smiles = cfg.analysis.motif_smiles
@@ -617,7 +663,7 @@ def main(cfg: DictConfig) -> None:
     # Save results
     results = {
         "tokenizer_type": tokenizer_type,
-        "num_generated": len(generated_graphs) if generated_graphs else len(generated_smiles),
+        "num_generated": int(num_attempted),
         "num_valid": len(generated_smiles),
         "num_with_motif": len(gen_filtered),
         "motif_rate": len(gen_filtered) / len(generated_smiles)

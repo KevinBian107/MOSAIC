@@ -469,6 +469,23 @@ def main(cfg: DictConfig) -> None:
                 if smi != INVALID_SMILES_SENTINEL:
                     f.write(smi + "\n")
         log.info(f"Generated SMILES saved to {smiles_file}")
+        metadata_file = output_dir / "generated_metadata.json"
+        with open(metadata_file, "w") as f:
+            json.dump(
+                {
+                    "num_attempted": int(num_samples),
+                    "num_valid": int(valid_count),
+                },
+                f,
+                indent=2,
+            )
+        log.info(f"Generated metadata saved to {metadata_file}")
+        graphs_file = output_dir / "generated_graphs.pt"
+        try:
+            torch.save(generated_graphs, graphs_file)
+            log.info(f"Generated graphs saved to {graphs_file}")
+        except Exception as e:
+            log.warning(f"Could not save generated graphs to {graphs_file}: {e}")
 
         if generate_only:
             log.info("generate_only=true: skipping all metrics (generation + SMILES only).")
@@ -488,10 +505,78 @@ def main(cfg: DictConfig) -> None:
                 if line:
                     generated_smiles.append(line)
         valid_count = len(generated_smiles)
-        num_samples = len(generated_smiles)
+
+        # generated_smiles.txt stores only valid molecules. Require generation metadata
+        # so the original attempted-count denominator is preserved exactly.
+        requested_num_samples = None
+        metadata_file = output_dir / "generated_metadata.json"
+        if not metadata_file.exists():
+            raise FileNotFoundError(
+                f"metrics_only mode requires {metadata_file} to preserve attempted-count denominator. "
+                "Regenerate artifacts once with metrics.generate_only=true."
+            )
+        with open(metadata_file, "r") as f:
+            metadata = json.load(f)
+        requested_num_samples = int(metadata.get("num_attempted"))
+        metadata_num_valid = int(metadata.get("num_valid", valid_count))
+        if metadata_num_valid != valid_count:
+            raise ValueError(
+                "metrics_only artifact mismatch: generated_metadata.json num_valid "
+                f"({metadata_num_valid}) != loaded valid SMILES count ({valid_count}) in {smiles_file}. "
+                "Please regenerate artifacts to avoid metric denominator drift."
+            )
         log.info(
-            f"metrics_only: loaded {len(generated_smiles)} generated SMILES from {smiles_file}"
+            "metrics_only: loaded attempted-count denominator from %s (num_attempted=%d)",
+            metadata_file,
+            requested_num_samples,
         )
+
+        if requested_num_samples > 0:
+            if valid_count < requested_num_samples:
+                missing = requested_num_samples - valid_count
+                generated_smiles.extend([INVALID_SMILES_SENTINEL] * missing)
+                num_samples = requested_num_samples
+                log.info(
+                    "metrics_only: reconstructed %d failed generations as INVALID to preserve denominator (%d total attempts).",
+                    missing,
+                    requested_num_samples,
+                )
+            elif valid_count > requested_num_samples:
+                # Keep all loaded molecules but surface the mismatch.
+                num_samples = valid_count
+                log.warning(
+                    "metrics_only: loaded %d SMILES but sampling.num_samples=%d; using loaded count as denominator.",
+                    valid_count,
+                    requested_num_samples,
+                )
+            else:
+                num_samples = requested_num_samples
+        else:
+            # sampling.num_samples <= 0 is ambiguous in metrics_only mode; use loaded count.
+            num_samples = valid_count
+        log.info(
+            "metrics_only: loaded %d valid generated SMILES from %s (effective total=%d)",
+            valid_count,
+            smiles_file,
+            num_samples,
+        )
+        graphs_file = output_dir / "generated_graphs.pt"
+        if graphs_file.exists():
+            try:
+                generated_graphs = torch.load(
+                    graphs_file, map_location="cpu", weights_only=False
+                )
+                log.info(
+                    "metrics_only: loaded %d generated graphs from %s",
+                    len(generated_graphs),
+                    graphs_file,
+                )
+            except Exception as e:
+                log.warning(
+                    "metrics_only: failed to load %s (%s). PGD may fall back to SMILES->graph reconstruction.",
+                    graphs_file,
+                    e,
+                )
 
     # Core-only mode: compute only validity, uniqueness, novelty (no FCD, PGD, motif, etc.)
     if cfg.metrics.get("core_only", False):
@@ -727,34 +812,59 @@ def main(cfg: DictConfig) -> None:
                 log.info(f"Successfully converted {len(reference_graphs)} reference graphs")
 
             if len(reference_graphs) > 0:
-                num_samples = cfg.sampling.num_samples
-                if num_samples < 0:
-                    num_samples = len(generated_graphs)
-                if max_ref_size < num_samples:
+                if len(generated_graphs) == 0:
                     log.warning(
-                        "PGD: metrics.pgd_reference_size (%d) < sampling.num_samples (%d). "
-                        "Only first %d generated will be used. Set metrics.pgd_reference_size >= %d to use all generated.",
-                        max_ref_size,
-                        num_samples,
-                        min(max_ref_size, len(generated_graphs)),
-                        num_samples,
+                        "PGD: generated_graphs not available (likely metrics_only without generated_graphs.pt). "
+                        "Reconstructing generated graphs from valid SMILES for PGD."
                     )
-                polygraph_metric = PolygraphMetric(
-                    reference_graphs=reference_graphs,
-                    max_reference_size=max_ref_size,
-                )
-                polygraph_results = polygraph_metric(generated_graphs)
-                pgd_score = polygraph_results.get("pgd")
-
-                if pgd_score is not None and pgd_score >= 0:
-                    log.info(f"  pgd                 : {pgd_score:.6f}")
+                    reconstructed = []
+                    for smi in generated_smiles:
+                        if not smi or smi == INVALID_SMILES_SENTINEL:
+                            continue
+                        try:
+                            g = smiles_to_graph(smi)
+                            if g is not None and g.num_nodes > 0:
+                                reconstructed.append(g)
+                        except Exception:
+                            continue
+                    generated_graphs = reconstructed
                     log.info(
-                        "  (Lower is better: <0.1 excellent, <0.3 good, <0.5 moderate)"
+                        "PGD: reconstructed %d generated graphs from SMILES.",
+                        len(generated_graphs),
                     )
-                elif pgd_score is not None and pgd_score < 0:
-                    log.info("  pgd                 : N/A (computation failed)")
+
+                if len(generated_graphs) == 0:
+                    log.info("  No valid generated graphs - skipping PGD")
+                    pgd_score = None
                 else:
-                    log.info("  PGD computation returned None")
+                    num_samples = cfg.sampling.num_samples
+                    if num_samples < 0:
+                        num_samples = len(generated_graphs)
+                    if max_ref_size < num_samples:
+                        log.warning(
+                            "PGD: metrics.pgd_reference_size (%d) < sampling.num_samples (%d). "
+                            "Only first %d generated will be used. Set metrics.pgd_reference_size >= %d to use all generated.",
+                            max_ref_size,
+                            num_samples,
+                            min(max_ref_size, len(generated_graphs)),
+                            num_samples,
+                        )
+                    polygraph_metric = PolygraphMetric(
+                        reference_graphs=reference_graphs,
+                        max_reference_size=max_ref_size,
+                    )
+                    polygraph_results = polygraph_metric(generated_graphs)
+                    pgd_score = polygraph_results.get("pgd")
+
+                    if pgd_score is not None and pgd_score >= 0:
+                        log.info(f"  pgd                 : {pgd_score:.6f}")
+                        log.info(
+                            "  (Lower is better: <0.1 excellent, <0.3 good, <0.5 moderate)"
+                        )
+                    elif pgd_score is not None and pgd_score < 0:
+                        log.info("  pgd                 : N/A (computation failed)")
+                    else:
+                        log.info("  PGD computation returned None")
             else:
                 log.info("  No valid reference graphs - skipping PGD")
         except ImportError:
