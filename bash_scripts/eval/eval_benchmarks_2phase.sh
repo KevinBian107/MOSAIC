@@ -16,6 +16,7 @@ RUN_GEN=true
 USE_COCONUT=false
 USE_FULL_REF=false
 FORCE_REEVAL=false
+REUSE_GENERATED=false
 
 for arg in "$@"; do
     case $arg in
@@ -36,13 +37,19 @@ for arg in "$@"; do
         --force)
             FORCE_REEVAL=true
             ;;
+        --reuse-generated)
+            REUSE_GENERATED=true
+            ;;
         --help|-h)
-            echo "Usage: $0 [--test-only] [--gen-only] [--coconut] [--full-ref] [--force]"
+            echo "Usage: $0 [--test-only] [--gen-only] [--coconut] [--full-ref] [--force] [--reuse-generated]"
             echo ""
             echo "Two-phase behavior:"
             echo "  Phase 1 (sequential/GPU): test.py WITHOUT motif metrics"
             echo "  Phase 2 (parallel/CPU):   motif-only test.py in detached screen sessions"
             echo "Then optional realistic_gen.py and final comparison chart."
+            echo ""
+            echo "  --reuse-generated: run phase 1 in metrics_only mode using existing"
+            echo "                     generated_smiles.txt (no generation)."
             exit 0
             ;;
     esac
@@ -148,6 +155,7 @@ is_realistic_done() {
 echo "Dataset: $DATASET"
 echo "Reference split: $REFERENCE_SPLIT"
 echo "Benchmark dir: $BENCHMARK_DIR"
+echo "Reuse generated: $REUSE_GENERATED"
 echo ""
 echo "Found checkpoints:"
 while read -r ckpt; do
@@ -157,7 +165,11 @@ done <<< "$CHECKPOINTS"
 echo ""
 
 if [ "$RUN_TEST" = true ]; then
-    echo "========== PHASE 1: TEST (sequential, GPU), motif disabled =========="
+    if [ "$REUSE_GENERATED" = true ]; then
+        echo "========== PHASE 1: TEST (sequential), motif disabled, reusing generated_smiles =========="
+    else
+        echo "========== PHASE 1: TEST (sequential, GPU), motif disabled =========="
+    fi
     while read -r ckpt; do
         [ -z "$ckpt" ] && continue
         TOKENIZER=$(get_tokenizer_type "$ckpt")
@@ -173,19 +185,41 @@ if [ "$RUN_TEST" = true ]; then
         if [ "$FORCE_REEVAL" = false ] && is_test_phase1_done "$LOGS_PATH_TEST"; then
             echo "Skipping phase1 test (already has results + generated_smiles): $RUN_DIR_NAME"
         else
-            echo "Running phase1 test for $RUN_DIR_NAME (compute_motif=false)..."
-            export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
-            python scripts/test.py \
-              model.checkpoint_path="$ckpt" \
-              tokenizer="$TOKENIZER" \
-              experiment="$DATASET" \
-              logs.path="$LOGS_PATH_TEST" \
-              metrics.reference_split="$REFERENCE_SPLIT" \
-              metrics.compute_motif=false \
-              metrics.generate_only=false \
-              metrics.metrics_only=false \
-              metrics.motif_only=false \
-              $COARSENING_ARGS
+            if [ "$REUSE_GENERATED" = true ]; then
+                if [ ! -f "$LOGS_PATH_TEST/generated_smiles.txt" ]; then
+                    echo "Skipping phase1 for $RUN_DIR_NAME (missing generated_smiles.txt for reuse)."
+                    continue
+                fi
+                echo "Running phase1 test for $RUN_DIR_NAME in metrics_only mode (compute_motif=false)..."
+                export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
+                python scripts/test.py \
+                  model.checkpoint_path="$ckpt" \
+                  tokenizer="$TOKENIZER" \
+                  experiment="$DATASET" \
+                  logs.path="$LOGS_PATH_TEST" \
+                  metrics.reference_split="$REFERENCE_SPLIT" \
+                  metrics.compute_motif=false \
+                  metrics.compute_fcd=true \
+                  metrics.compute_pgd=true \
+                  metrics.generate_only=false \
+                  metrics.metrics_only=true \
+                  metrics.motif_only=false \
+                  $COARSENING_ARGS
+            else
+                echo "Running phase1 test for $RUN_DIR_NAME (compute_motif=false)..."
+                export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
+                python scripts/test.py \
+                  model.checkpoint_path="$ckpt" \
+                  tokenizer="$TOKENIZER" \
+                  experiment="$DATASET" \
+                  logs.path="$LOGS_PATH_TEST" \
+                  metrics.reference_split="$REFERENCE_SPLIT" \
+                  metrics.compute_motif=false \
+                  metrics.generate_only=false \
+                  metrics.metrics_only=false \
+                  metrics.motif_only=false \
+                  $COARSENING_ARGS
+            fi
         fi
     done <<< "$CHECKPOINTS"
 
