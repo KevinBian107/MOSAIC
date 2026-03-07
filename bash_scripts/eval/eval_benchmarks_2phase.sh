@@ -50,6 +50,7 @@ for arg in "$@"; do
             echo ""
             echo "  --reuse-generated: run phase 1 in metrics_only mode using existing"
             echo "                     generated_smiles.txt (no generation)."
+            echo "                     Also runs realistic_gen.py in reuse mode."
             exit 0
             ;;
     esac
@@ -306,14 +307,32 @@ if [ "$RUN_GEN" = true ]; then
         if [ "$FORCE_REEVAL" = false ] && is_realistic_done "$LOGS_PATH_GEN"; then
             echo "Skipping realistic_gen (already has results): $RUN_DIR_NAME"
         else
-            echo "Running realistic_gen for $RUN_DIR_NAME ..."
-            python scripts/realistic_gen.py \
-              model.checkpoint_path="$ckpt" \
-              tokenizer="$TOKENIZER" \
-              experiment="$DATASET" \
-              logs.path="$LOGS_PATH_GEN" \
-              metrics.reference_split="$REFERENCE_SPLIT" \
-              $COARSENING_ARGS
+            if [ "$REUSE_GENERATED" = true ]; then
+                SMILES_SRC="${TEST_OUTPUT_DIR}/${RUN_DIR_NAME}/generated_smiles.txt"
+                if [ ! -f "$SMILES_SRC" ]; then
+                    echo "Skipping realistic_gen for $RUN_DIR_NAME (missing $SMILES_SRC for reuse)."
+                    continue
+                fi
+                echo "Running realistic_gen for $RUN_DIR_NAME using reused generated_smiles ..."
+                python scripts/realistic_gen.py \
+                  model.checkpoint_path="$ckpt" \
+                  tokenizer="$TOKENIZER" \
+                  experiment="$DATASET" \
+                  logs.path="$LOGS_PATH_GEN" \
+                  metrics.reference_split="$REFERENCE_SPLIT" \
+                  generation.reuse_generated_smiles=true \
+                  generation.generated_smiles_path="$SMILES_SRC" \
+                  $COARSENING_ARGS
+            else
+                echo "Running realistic_gen for $RUN_DIR_NAME ..."
+                python scripts/realistic_gen.py \
+                  model.checkpoint_path="$ckpt" \
+                  tokenizer="$TOKENIZER" \
+                  experiment="$DATASET" \
+                  logs.path="$LOGS_PATH_GEN" \
+                  metrics.reference_split="$REFERENCE_SPLIT" \
+                  $COARSENING_ARGS
+            fi
         fi
     done <<< "$CHECKPOINTS"
 fi
