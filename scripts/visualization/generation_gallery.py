@@ -139,42 +139,42 @@ def load_reference_molecules(
 
 MOSES_CHECKPOINTS = {
     "SENT": {
-        "path": "outputs/benchmark/moses_sent_20260221-021200/best.ckpt",
+        "path": "outputs/benchmark/moses_sent_20260221-021200/last.ckpt",
         "tokenizer_type": "sent",
         "coarsening_strategy": "spectral",
     },
     "HSENT_SC": {
-        "path": "outputs/benchmark/moses_500k_hsent_sc_20260227-013849/best.ckpt",
+        "path": "outputs/benchmark/moses_500k_hsent_sc_20260227-013849/last.ckpt",
         "tokenizer_type": "hsent",
         "coarsening_strategy": "spectral",
     },
     "HSENT_HAC": {
-        "path": "outputs/benchmark/moses_500k_hsent_hac_20260227-014850/best.ckpt",
+        "path": "outputs/benchmark/moses_500k_hsent_hac_20260227-014850/last.ckpt",
         "tokenizer_type": "hsent",
         "coarsening_strategy": "hac",
     },
     "HSENT_MC": {
-        "path": "outputs/benchmark/moses_hsent_mc_20260221-060545/best.ckpt",
+        "path": "outputs/benchmark/moses_hsent_mc_20260221-060545/last.ckpt",
         "tokenizer_type": "hsent",
         "coarsening_strategy": "motif_community",
     },
     "HDT_SC": {
-        "path": "outputs/benchmark/moses_500k_hdt_sc_20260227-015353/best.ckpt",
+        "path": "outputs/benchmark/moses_500k_hdt_sc_20260227-015353/last.ckpt",
         "tokenizer_type": "hdt",
         "coarsening_strategy": "spectral",
     },
     "HDT_HAC": {
-        "path": "outputs/benchmark/moses_500k_hdt_hac_20260227-015913/best.ckpt",
+        "path": "outputs/benchmark/moses_500k_hdt_hac_20260227-015913/last.ckpt",
         "tokenizer_type": "hdt",
         "coarsening_strategy": "hac",
     },
     "HDT_MC": {
-        "path": "outputs/benchmark/moses_hdt_mc_20260221-124557/best.ckpt",
+        "path": "outputs/benchmark/moses_hdt_mc_20260221-124557/last.ckpt",
         "tokenizer_type": "hdt",
         "coarsening_strategy": "motif_community",
     },
     "HDTC": {
-        "path": "outputs/benchmark/moses_hdtc_20260221-224537/best.ckpt",
+        "path": "outputs/benchmark/moses_hdtc_20260221-224537/last.ckpt",
         "tokenizer_type": "hdtc",
         "coarsening_strategy": "spectral",
     },
@@ -182,42 +182,42 @@ MOSES_CHECKPOINTS = {
 
 COCONUT_CHECKPOINTS = {
     "SENT": {
-        "path": "outputs/benchmark_coconut/coconut_sent_20260305-015418/best.ckpt",
+        "path": "outputs/benchmark_coconut/coconut_sent_20260305-015418/last.ckpt",
         "tokenizer_type": "sent",
         "coarsening_strategy": "spectral",
     },
     "HSENT_SC": {
-        "path": "outputs/benchmark_coconut/coconut_hsent_sc_20260306-033600/best.ckpt",
+        "path": "outputs/benchmark_coconut/coconut_hsent_sc_20260306-033600/last.ckpt",
         "tokenizer_type": "hsent",
         "coarsening_strategy": "spectral",
     },
     "HSENT_HAC": {
-        "path": "outputs/benchmark_coconut/coconut_hsent_hac_20260306-033435/best.ckpt",
+        "path": "outputs/benchmark_coconut/coconut_hsent_hac_20260306-033435/last.ckpt",
         "tokenizer_type": "hsent",
         "coarsening_strategy": "hac",
     },
     "HSENT_MC": {
-        "path": "outputs/benchmark_coconut/coconut_hsent_mc_20260305-015514/best.ckpt",
+        "path": "outputs/benchmark_coconut/coconut_hsent_mc_20260305-015514/last.ckpt",
         "tokenizer_type": "hsent",
         "coarsening_strategy": "motif_community",
     },
     "HDT_SC": {
-        "path": "outputs/benchmark_coconut/coconut_hdt_sc_20260306-033705/best.ckpt",
+        "path": "outputs/benchmark_coconut/coconut_hdt_sc_20260306-033705/last.ckpt",
         "tokenizer_type": "hdt",
         "coarsening_strategy": "spectral",
     },
     "HDT_HAC": {
-        "path": "outputs/benchmark_coconut/coconut_hdt_hac_20260306-033803/best.ckpt",
+        "path": "outputs/benchmark_coconut/coconut_hdt_hac_20260306-033803/last.ckpt",
         "tokenizer_type": "hdt",
         "coarsening_strategy": "hac",
     },
     "HDT_MC": {
-        "path": "outputs/benchmark_coconut/coconut_hdt_mc_20260305-015609/best.ckpt",
+        "path": "outputs/benchmark_coconut/coconut_hdt_mc_20260305-015609/last.ckpt",
         "tokenizer_type": "hdt",
         "coarsening_strategy": "motif_community",
     },
     "HDTC": {
-        "path": "outputs/benchmark_coconut/coconut_hdtc_20260305-015709/best.ckpt",
+        "path": "outputs/benchmark_coconut/coconut_hdtc_20260305-015709/last.ckpt",
         "tokenizer_type": "hdtc",
         "coarsening_strategy": "spectral",
     },
