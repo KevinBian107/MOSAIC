@@ -541,7 +541,7 @@ def main() -> None:
         "--output-dir", type=str, default="./figures",
         help="Output directory (default: ./figures)",
     )
-    parser.add_argument("--dpi", type=int, default=200, help="Output DPI (default: 200)")
+    parser.add_argument("--dpi", type=int, default=600, help="Output DPI (default: 600)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
     parser.add_argument(
         "--no-show", action="store_true", help="Suppress plt.show()",
@@ -619,7 +619,7 @@ def main() -> None:
     fig.savefig(str(output_path), dpi=args.dpi, bbox_inches="tight")
     print(f"Saved: {output_path}")
     pdf_path = output_dir / f"generation_gallery_{args.dataset}.pdf"
-    fig.savefig(str(pdf_path), dpi=600, bbox_inches="tight")
+    fig.savefig(str(pdf_path), dpi=args.dpi, bbox_inches="tight")
     print(f"Saved: {pdf_path}")
 
     if not args.no_show:
