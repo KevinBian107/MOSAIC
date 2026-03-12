@@ -85,6 +85,12 @@ Runs independent training jobs on separate MIG GPU instances. Used by `train_lr_
 
 ### Evaluation
 
+Use the evaluation environment for all eval scripts:
+
+```bash
+conda activate mosaic-eval
+```
+
 ```bash
 # Evaluate all trained models
 ./bash_scripts/eval/eval_benchmarks.sh
@@ -95,7 +101,43 @@ Runs independent training jobs on separate MIG GPU instances. Used by `train_lr_
 
 # Core metrics only (fast: validity, uniqueness, novelty)
 ./bash_scripts/eval/eval_benchmarks_auto.sh MAPPING.txt outputs/eval --core-only
+
+# Two-phase evaluation with parallel motif metrics
+./bash_scripts/eval/eval_benchmarks_2phase.sh            # MOSES
+./bash_scripts/eval/eval_benchmarks_2phase.sh --coconut  # COCONUT
 ```
+
+#### `eval/eval_benchmarks_2phase.sh`
+
+Two-phase evaluation script that separates GPU-bound work from CPU-bound motif metrics, and preserves the original comparison chart behavior:
+The primary goal is to **speed up end-to-end evaluation wall time** when you have one GPU but many CPU cores.
+
+- **Phase 1 (GPU, sequential)**:
+  - Runs `scripts/test.py` *without motif metrics* for each checkpoint.
+  - Computes core metrics, FCD, PGD, and saves:
+    - `generated_smiles.txt`
+    - `generated_metadata.json` (attempted + valid counts)
+    - `generated_graphs.pt` (for PGD)
+- **Phase 2 (CPU, parallel)**:
+  - Runs `scripts/test.py` in motif-only + `metrics_only` mode for each checkpoint.
+  - Each run is launched in its own detached `/usr/bin/screen` session.
+- **Phase 3 (Realistic generation + chart)**:
+  - Optionally runs `scripts/realistic_gen.py` for each checkpoint.
+  - Calls `scripts/comparison/compare_results.py` to regenerate the comparison image.
+
+Common flags:
+
+- `--coconut`: switch to COCONUT benchmarks (`outputs/benchmark_coconut`, `test_coconut*` trees).
+- `--full-ref`: full-reference metrics (`reference_split=full`).
+- `--force`: recompute even when `results.json` already exists.
+- `--reuse-generated`:
+  - Phase 1 uses existing `generated_smiles.txt` (and `generated_metadata.json`) in `metrics_only` mode.
+  - Phase 3 reuses the same SMILES for `realistic_gen.py` (no generation).
+- `--phase1`, `--phase2`, `--phase3`:
+  - Restrict which phases to run; can be combined (e.g., `--phase2 --phase3`).
+- `--test-only`, `--gen-only`: behave like `eval_benchmarks.sh` (skip realistic_gen or test, respectively).
+
+> **Note:** Reuse modes require the corresponding artifacts (`generated_smiles.txt`, `generated_metadata.json`, and ideally `generated_graphs.pt`) to be present in the test output directory for each run.
 
 ### Tokenizer Variants
 

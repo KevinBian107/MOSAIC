@@ -2,8 +2,8 @@
 """Generation gallery: paper-quality figure comparing molecules across MOSAIC tokenizers.
 
 Produces a grid figure with reference molecules (rows) vs. model variants (columns),
-enabling visual comparison of generation quality across SENT, HSENT (MC/SC),
-HDT (MC/SC), and HDTC.
+enabling visual comparison of generation quality across SENT, HSENT (SC/HAC/MC),
+HDT (SC/HAC/MC), and HDTC.
 
 Usage:
     python scripts/visualization/generation_gallery.py --dataset moses --num-samples 5
@@ -139,32 +139,42 @@ def load_reference_molecules(
 
 MOSES_CHECKPOINTS = {
     "SENT": {
-        "path": "outputs/benchmark/moses_sent_n500000_20260131-06043/best.ckpt",
+        "path": "outputs/benchmark/moses_sent_20260221-021200/last.ckpt",
         "tokenizer_type": "sent",
         "coarsening_strategy": "spectral",
     },
-    "HSENT_MC": {
-        "path": "outputs/benchmark/moses_hsent_mc_n500000_20260130-171221/best.ckpt",
-        "tokenizer_type": "hsent",
-        "coarsening_strategy": "motif",
-    },
     "HSENT_SC": {
-        "path": "outputs/benchmark/moses_hsent_sc_n500000_20260206-153543/moses_hsent_n500000_20260206-153543/best.ckpt",
+        "path": "outputs/benchmark/moses_500k_hsent_sc_20260227-013849/last.ckpt",
         "tokenizer_type": "hsent",
         "coarsening_strategy": "spectral",
     },
-    "HDT_MC": {
-        "path": "outputs/benchmark/moses_hdt_mc_n500000_20260130-074038/best.ckpt",
-        "tokenizer_type": "hdt",
-        "coarsening_strategy": "motif",
+    "HSENT_HAC": {
+        "path": "outputs/benchmark/moses_500k_hsent_hac_20260227-014850/last.ckpt",
+        "tokenizer_type": "hsent",
+        "coarsening_strategy": "hac",
+    },
+    "HSENT_MC": {
+        "path": "outputs/benchmark/moses_hsent_mc_20260221-060545/last.ckpt",
+        "tokenizer_type": "hsent",
+        "coarsening_strategy": "motif_community",
     },
     "HDT_SC": {
-        "path": "outputs/benchmark/moses_hdt_sc_n500000_20260206-073319/best.ckpt",
+        "path": "outputs/benchmark/moses_500k_hdt_sc_20260227-015353/last.ckpt",
         "tokenizer_type": "hdt",
         "coarsening_strategy": "spectral",
     },
+    "HDT_HAC": {
+        "path": "outputs/benchmark/moses_500k_hdt_hac_20260227-015913/last.ckpt",
+        "tokenizer_type": "hdt",
+        "coarsening_strategy": "hac",
+    },
+    "HDT_MC": {
+        "path": "outputs/benchmark/moses_hdt_mc_20260221-124557/last.ckpt",
+        "tokenizer_type": "hdt",
+        "coarsening_strategy": "motif_community",
+    },
     "HDTC": {
-        "path": "outputs/benchmark/moses_hdtc_n500000_20260129-171812/best.ckpt",
+        "path": "outputs/benchmark/moses_hdtc_20260221-224537/last.ckpt",
         "tokenizer_type": "hdtc",
         "coarsening_strategy": "spectral",
     },
@@ -172,32 +182,42 @@ MOSES_CHECKPOINTS = {
 
 COCONUT_CHECKPOINTS = {
     "SENT": {
-        "path": "outputs/benchmark_coconut/coconut_sent_20260209-050645/best.ckpt",
+        "path": "outputs/benchmark_coconut/coconut_sent_20260305-015418/last.ckpt",
         "tokenizer_type": "sent",
         "coarsening_strategy": "spectral",
     },
-    "HSENT_MC": {
-        "path": "outputs/benchmark_coconut/coconut_hsent_mc_20260209-065827/best.ckpt",
-        "tokenizer_type": "hsent",
-        "coarsening_strategy": "motif",
-    },
     "HSENT_SC": {
-        "path": "outputs/benchmark_coconut/coconut_hsent_sc_20260216-102500/best.ckpt",
+        "path": "outputs/benchmark_coconut/coconut_hsent_sc_20260306-033600/last.ckpt",
         "tokenizer_type": "hsent",
         "coarsening_strategy": "spectral",
     },
-    "HDT_MC": {
-        "path": "outputs/benchmark_coconut/coconut_hdt_mc_20260209-130951/best.ckpt",
-        "tokenizer_type": "hdt",
-        "coarsening_strategy": "motif",
+    "HSENT_HAC": {
+        "path": "outputs/benchmark_coconut/coconut_hsent_hac_20260306-033435/last.ckpt",
+        "tokenizer_type": "hsent",
+        "coarsening_strategy": "hac",
+    },
+    "HSENT_MC": {
+        "path": "outputs/benchmark_coconut/coconut_hsent_mc_20260305-015514/last.ckpt",
+        "tokenizer_type": "hsent",
+        "coarsening_strategy": "motif_community",
     },
     "HDT_SC": {
-        "path": "outputs/benchmark_coconut/coconut_hdt_sc_20260217-092827/best.ckpt",
+        "path": "outputs/benchmark_coconut/coconut_hdt_sc_20260306-033705/last.ckpt",
         "tokenizer_type": "hdt",
         "coarsening_strategy": "spectral",
     },
+    "HDT_HAC": {
+        "path": "outputs/benchmark_coconut/coconut_hdt_hac_20260306-033803/last.ckpt",
+        "tokenizer_type": "hdt",
+        "coarsening_strategy": "hac",
+    },
+    "HDT_MC": {
+        "path": "outputs/benchmark_coconut/coconut_hdt_mc_20260305-015609/last.ckpt",
+        "tokenizer_type": "hdt",
+        "coarsening_strategy": "motif_community",
+    },
     "HDTC": {
-        "path": "outputs/benchmark_coconut/coconut_hdtc_20260209-170216/best.ckpt",
+        "path": "outputs/benchmark_coconut/coconut_hdtc_20260305-015709/last.ckpt",
         "tokenizer_type": "hdtc",
         "coarsening_strategy": "spectral",
     },
@@ -521,7 +541,7 @@ def main() -> None:
         "--output-dir", type=str, default="./figures",
         help="Output directory (default: ./figures)",
     )
-    parser.add_argument("--dpi", type=int, default=200, help="Output DPI (default: 200)")
+    parser.add_argument("--dpi", type=int, default=600, help="Output DPI (default: 600)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
     parser.add_argument(
         "--no-show", action="store_true", help="Suppress plt.show()",
@@ -598,6 +618,9 @@ def main() -> None:
     output_path = output_dir / f"generation_gallery_{args.dataset}.png"
     fig.savefig(str(output_path), dpi=args.dpi, bbox_inches="tight")
     print(f"Saved: {output_path}")
+    pdf_path = output_dir / f"generation_gallery_{args.dataset}.pdf"
+    fig.savefig(str(pdf_path), dpi=args.dpi, bbox_inches="tight")
+    print(f"Saved: {pdf_path}")
 
     if not args.no_show:
         plt.show()

@@ -9,6 +9,7 @@ from functools import partial
 
 import numpy as np
 from scipy.linalg import toeplitz
+from tqdm import tqdm
 
 
 def gaussian(x: np.ndarray, y: np.ndarray, sigma: float = 1.0) -> float:
@@ -122,9 +123,18 @@ def disc(
     Returns:
         Average kernel value between sample sets.
     """
+    # Extract optional progress kwargs (do not pass them to the kernel)
+    show_progress = kwargs.pop("show_progress", False)
+    progress_desc = kwargs.pop("progress_desc", "")
+
     if not is_parallel:
         d = 0.0
-        for s1 in samples1:
+        iterable = (
+            tqdm(samples1, desc=progress_desc or "disc", unit="sample")
+            if show_progress
+            else samples1
+        )
+        for s1 in iterable:
             for s2 in samples2:
                 d += kernel(s1, s2, **kwargs)
     else:
@@ -132,7 +142,18 @@ def disc(
         args_list = [(s1, samples2, kernel_fn) for s1 in samples1]
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            d = sum(executor.map(_kernel_worker, args_list))
+            results_iter = executor.map(_kernel_worker, args_list)
+            if show_progress:
+                d = 0.0
+                for val in tqdm(
+                    results_iter,
+                    total=len(args_list),
+                    desc=progress_desc or "disc",
+                    unit="chunk",
+                ):
+                    d += val
+            else:
+                d = sum(results_iter)
 
     n1, n2 = len(samples1), len(samples2)
     if n1 * n2 > 0:
