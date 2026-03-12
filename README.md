@@ -31,7 +31,7 @@ conda activate mosaic-eval
 
 ### Training
 
-The configs in `configs/` are the default hyperparameters used for our experiments. Training uses [Hydra](https://hydra.cc/) for configuration — experiment-specific overrides (dataset size, LR, steps) are in `configs/experiment/`, and tokenizer defaults in `configs/tokenizer/`.
+The configs in `configs/` are the default hyperparameters used for our experiments. Training uses [Hydra](https://hydra.cc/) for configuration — experiment-specific overrides (dataset size, LR, steps) are in `configs/experiment/`, and tokenizer defaults in `configs/tokenizer/`. View sample training runs on [WandB](https://wandb.ai/androdro/molecular-graph-gen?nw=nwuserandrewhyang).
 
 ```bash
 # Train HDTC on MOSES (default)
@@ -103,6 +103,7 @@ MOSAIC/
 
 See the [docs/](docs/) directory for:
 - [Codebase Guide](docs/codebase.md)
+- [Expected Results](docs/expected_results.md)
 - [Reproducibility Across GPUs](docs/designs/reproducibility_across_gpus.md)
 
 Setup guides (`docs/setups/`):
