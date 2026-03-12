@@ -42,7 +42,7 @@ Experiment configs are applied **last**, so any value defined in both base and e
 | `trainer.max_steps` | 250,000 | 250,000 | 50,000 |
 | `trainer.val_checks_per_epoch` | 5 | 5 | 1 |
 | `tokenizer.truncation_length` | — | 512 | 2,048 |
-| `sampling.num_samples` | 1,000 | 1,000 | 100 |
+| `sampling.num_samples` | 1,000 | 1,000 | 1,000 |
 | `sampling.max_length` | 512 | — | 2,048 |
 
 "—" means the experiment does not override the base value (or the base does not set it, deferring to the experiment).
@@ -56,6 +56,19 @@ Experiment configs are applied **last**, so any value defined in both base and e
 | `metrics.core_only` | false | — | — |
 | `metrics.compute_fcd` | true | — | — |
 | `metrics.compute_pgd` | true | — | — |
+| `metrics.generate_only` | false | — | — |
+| `metrics.metrics_only` | false | — | — |
+| `metrics.motif_only` | false | — | — |
+| `metrics.motif_cache_dir` | `data/motif_cache` | — | — |
+| `metrics.motif_n_workers` | null | — | — |
+
+### Realistic Generation (`realistic_gen.yaml`)
+
+| Parameter | Base (`realistic_gen.yaml`) | Notes |
+|-----------|------------------------------|-------|
+| `generation.num_samples` | 1,000 | Number of generated samples per run |
+| `generation.reuse_generated_smiles` | false | If true, skip generation and reuse existing SMILES |
+| `generation.generated_smiles_path` | null | Optional path to reused SMILES file |
 
 ## Tokenizer Configs
 

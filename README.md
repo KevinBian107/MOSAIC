@@ -20,9 +20,13 @@ For generating graphs using tokens with hierarchical insights, we need 3 things:
 ### Installation
 
 ```bash
-# Create conda environment
+# Create training environment
 conda env create -f environment.yaml
 conda activate mosaic
+
+# Create evaluation/test environment (required for full metrics)
+conda env create -f environment_eval.yaml
+conda activate mosaic-eval
 ```
 
 ### Training
@@ -43,6 +47,7 @@ python scripts/train.py tokenizer=hdtc     # Compositional (default)
 python scripts/train.py experiment=coconut
 
 # Evaluate trained model
+# (Use the eval environment: conda activate mosaic-eval)
 python scripts/test.py model.checkpoint_path=outputs/train/.../best.ckpt
 python scripts/realistic_gen.py model.checkpoint_path=outputs/train/.../best.ckpt
 
@@ -66,6 +71,9 @@ The `bash_scripts/` directory automates the full benchmark pipeline. See [bash_s
 # Evaluate all trained models
 ./bash_scripts/eval/eval_benchmarks.sh
 ./bash_scripts/eval/eval_benchmarks.sh --coconut
+
+# Faster eval flow: GPU sequential + CPU-parallel motif phase
+./bash_scripts/eval/eval_benchmarks_2phase.sh
 ```
 
 ## Project Structure

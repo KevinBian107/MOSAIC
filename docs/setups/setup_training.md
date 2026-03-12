@@ -15,6 +15,17 @@ conda env create -f environment.yaml
 conda activate mosaic
 ```
 
+### Step 1b: Create Evaluation/Test Environment (Required for Full Metrics)
+
+`test.py`, `realistic_gen.py`, and benchmark evaluation scripts require
+metric dependencies that may be missing in the training environment.
+Use `environment_eval.yaml` for evaluation/full tests:
+
+```bash
+conda env create -f environment_eval.yaml
+conda activate mosaic-eval
+```
+
 ### Step 2: Verify Installation
 
 ```bash
