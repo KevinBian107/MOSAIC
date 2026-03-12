@@ -922,7 +922,7 @@ def draw_hdtc_tokenization(ax: plt.Axes) -> None:
 
     # Title
     ax.text(
-        0.5, 0.96, "MOSAIC",
+        0.5, 0.96, "HDTC",
         ha="center", va="center",
         fontsize=13, fontweight="bold", color=dark,
         transform=ax.transAxes, zorder=5,
@@ -1043,7 +1043,7 @@ def draw_hdtc_tokenization(ax: plt.Axes) -> None:
             color="#555555", transform=ax.transAxes, zorder=5)
 
     # =====================================================================
-    # LOWER: Transformer block  (y ~ 0.06 .. 0.40)
+    # LOWER: Transformer Decoder block  (y ~ 0.06 .. 0.40)
     # =====================================================================
     tf_x, tf_y = 0.10, 0.06
     tf_w, tf_h = 0.80, 0.34
@@ -1055,46 +1055,10 @@ def draw_hdtc_tokenization(ax: plt.Axes) -> None:
     )
     ax.add_patch(tf_box)
 
-    # Stacked sub-blocks inside the transformer
-    bw = 0.62
-    bh = 0.050
-    bcx = 0.50
-    gap = 0.015
-    blocks = [
-        ("Linear + Softmax",  dark),
-        ("Feed-Forward",      "#FF8C00"),
-        ("Multi-Head Attn",   "#FF6B6B"),
-        ("Pos. Encoding",     "#4ECDC4"),
-    ]
-    n = len(blocks)
-    total = n * bh + (n - 1) * gap
-    by_start = tf_y + (tf_h - total) / 2
-
-    for i, (label, color) in enumerate(blocks):
-        by = by_start + i * (bh + gap)
-        sub = mpatches.FancyBboxPatch(
-            (bcx - bw / 2, by), bw, bh,
-            boxstyle="round,pad=0.010",
-            facecolor=color, edgecolor="#333333",
-            linewidth=0.8, transform=ax.transAxes, zorder=3,
-        )
-        ax.add_patch(sub)
-        ax.text(bcx, by + bh / 2, label,
-                ha="center", va="center", fontsize=6, fontweight="bold",
-                color="white", transform=ax.transAxes, zorder=4)
-        if i < n - 1:
-            ax.annotate(
-                "", xy=(bcx, by + bh + 0.002),
-                xytext=(bcx, by + bh + gap - 0.002),
-                arrowprops=dict(arrowstyle="-|>", color="#333333", lw=0.8),
-                transform=ax.transAxes, zorder=4,
-            )
-
-    # "GPT-2" label on the side
-    ax.text(tf_x + tf_w - 0.02, tf_y + 0.02, "GPT-2",
-            ha="right", va="bottom", fontsize=7.5, fontweight="bold",
-            fontstyle="italic", color="#777777",
-            transform=ax.transAxes, zorder=5)
+    # Single centered label
+    ax.text(0.50, tf_y + tf_h / 2, "Transformer Decoder",
+            ha="center", va="center", fontsize=11, fontweight="bold",
+            color=dark, transform=ax.transAxes, zorder=4)
 
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
@@ -1202,7 +1166,7 @@ def draw_mosaic_encoding(ax: plt.Axes) -> None:
     )
     ax.add_patch(outer)
     ax.text(
-        0.5, 0.96, "MOSAIC",
+        0.5, 0.96, "HDTC Encoder",
         ha="center", va="center",
         fontsize=13, fontweight="bold", color=dark,
         transform=ax.transAxes, zorder=5,
@@ -1365,14 +1329,14 @@ def draw_mosaic_decoding(ax: plt.Axes) -> None:
     )
     ax.add_patch(outer)
     ax.text(
-        0.5, 0.96, "MOSAIC",
+        0.5, 0.96, "HDTC Decoder",
         ha="center", va="center",
         fontsize=13, fontweight="bold", color=dark,
         transform=ax.transAxes, zorder=5,
     )
 
     # ================================================================
-    # UPPER: Transformer block  (y ~ 0.58 .. 0.92)
+    # UPPER: Transformer Decoder block  (y ~ 0.58 .. 0.92)
     # ================================================================
     tf_x, tf_y = 0.10, 0.56
     tf_w, tf_h = 0.80, 0.34
@@ -1384,45 +1348,10 @@ def draw_mosaic_decoding(ax: plt.Axes) -> None:
     )
     ax.add_patch(tf_box)
 
-    # Stacked sub-blocks
-    bw = 0.62
-    bh = 0.050
-    bcx = 0.50
-    gap = 0.015
-    blocks = [
-        ("Linear + Softmax",  dark),
-        ("Feed-Forward",      "#FF8C00"),
-        ("Multi-Head Attn",   "#FF6B6B"),
-        ("Pos. Encoding",     "#4ECDC4"),
-    ]
-    n = len(blocks)
-    total = n * bh + (n - 1) * gap
-    by_start = tf_y + (tf_h - total) / 2
-
-    for i, (label, color) in enumerate(blocks):
-        by = by_start + i * (bh + gap)
-        sub = mpatches.FancyBboxPatch(
-            (bcx - bw / 2, by), bw, bh,
-            boxstyle="round,pad=0.010",
-            facecolor=color, edgecolor="#333333",
-            linewidth=0.8, transform=ax.transAxes, zorder=3,
-        )
-        ax.add_patch(sub)
-        ax.text(bcx, by + bh / 2, label,
-                ha="center", va="center", fontsize=6, fontweight="bold",
-                color="white", transform=ax.transAxes, zorder=4)
-        if i < n - 1:
-            ax.annotate(
-                "", xy=(bcx, by + bh + 0.002),
-                xytext=(bcx, by + bh + gap - 0.002),
-                arrowprops=dict(arrowstyle="-|>", color="#333333", lw=0.8),
-                transform=ax.transAxes, zorder=4,
-            )
-
-    ax.text(tf_x + tf_w - 0.02, tf_y + 0.02, "GPT-2",
-            ha="right", va="bottom", fontsize=7.5, fontweight="bold",
-            fontstyle="italic", color="#777777",
-            transform=ax.transAxes, zorder=5)
+    # Single centered label
+    ax.text(0.50, tf_y + tf_h / 2, "Transformer Decoder",
+            ha="center", va="center", fontsize=11, fontweight="bold",
+            color=dark, transform=ax.transAxes, zorder=4)
 
     # ================================================================
     # ARROW: transformer -> token sequence ("generate")
