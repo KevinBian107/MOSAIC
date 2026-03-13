@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "mosaic"
+version = "0.1.0"
+description = "Compositional Abstraction for Autoregressive Molecular Generation"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.2",
+    "torch_geometric",
+    "numpy",
+    "scipy",
+    "networkx",
+    "hydra-core",
+    "lightning",
+    "transformers",
+    "matplotlib",
+    "pyprojroot",
+    "pyemd==1.0.0",
+    "PyGSP==0.5.1",
+    "joblib",
+    "wandb",
+    "scikit-learn",
+    "python-louvain",
+    "tqdm",
+    "omegaconf",
+]
+
+[project.optional-dependencies]
+eval = [
+    "molsets",
+    "fcd",
+    "rdkit",
+]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "ruff",
+]
+
+[tool.setuptools.packages.find]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "rdkit: tests that require RDKit (may be slow or unavailable in CI)",
+    "gpu: tests that require a GPU",
+    "slow: tests that take more than 30 seconds",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
