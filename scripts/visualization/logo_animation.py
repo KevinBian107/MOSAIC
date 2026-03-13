@@ -81,62 +81,95 @@ DEFAULT_ELEMENT_COLOR = "#808080"
 BOND_COLOR = "#333333"
 BG_COLOR = "white"
 
-# 5x7 dot grid letter patterns: list of (col, row) positions
-# col in [0..4], row in [0..6]
-LETTER_PATTERNS: dict[str, list[tuple[int, int]]] = {
+# Letter stroke paths: each letter is defined as a list of polylines.
+# Coordinates are in [0..1] x [0..1] (will be scaled to fit).
+# We sample N evenly-spaced points along these strokes to match atom count.
+LETTER_STROKES: dict[str, list[list[tuple[float, float]]]] = {
     "M": [
-        (0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (0, 5), (0, 6),
-        (1, 1),
-        (2, 2),
-        (3, 1),
-        (4, 0), (4, 1), (4, 2), (4, 3), (4, 4), (4, 5), (4, 6),
+        # Left pillar
+        [(0.0, 0.0), (0.0, 1.0)],
+        # Left diagonal
+        [(0.0, 1.0), (0.5, 0.4)],
+        # Right diagonal
+        [(0.5, 0.4), (1.0, 1.0)],
+        # Right pillar
+        [(1.0, 1.0), (1.0, 0.0)],
     ],
     "O": [
-        (1, 0), (2, 0), (3, 0),
-        (0, 1), (4, 1),
-        (0, 2), (4, 2),
-        (0, 3), (4, 3),
-        (0, 4), (4, 4),
-        (0, 5), (4, 5),
-        (1, 6), (2, 6), (3, 6),
+        # Full oval path
+        [(0.5, 1.0), (0.15, 0.85), (0.0, 0.5), (0.15, 0.15), (0.5, 0.0),
+         (0.85, 0.15), (1.0, 0.5), (0.85, 0.85), (0.5, 1.0)],
     ],
     "S": [
-        (1, 0), (2, 0), (3, 0), (4, 0),
-        (0, 1),
-        (1, 2), (2, 2), (3, 2),
-        (4, 3),
-        (4, 4),
-        (0, 5), (1, 5),
-        (0, 6), (1, 6), (2, 6), (3, 6),
+        # Top curve, middle, bottom curve
+        [(0.9, 0.9), (0.5, 1.0), (0.1, 0.85), (0.1, 0.65),
+         (0.5, 0.5),
+         (0.9, 0.35), (0.9, 0.15), (0.5, 0.0), (0.1, 0.1)],
     ],
     "A": [
-        (2, 0),
-        (1, 1), (3, 1),
-        (0, 2), (4, 2),
-        (0, 3), (1, 3), (2, 3), (3, 3), (4, 3),
-        (0, 4), (4, 4),
-        (0, 5), (4, 5),
-        (0, 6), (4, 6),
+        # Left leg
+        [(0.0, 0.0), (0.5, 1.0)],
+        # Right leg
+        [(0.5, 1.0), (1.0, 0.0)],
+        # Crossbar
+        [(0.18, 0.38), (0.82, 0.38)],
     ],
     "I": [
-        (1, 0), (2, 0), (3, 0),
-        (2, 1),
-        (2, 2),
-        (2, 3),
-        (2, 4),
-        (2, 5),
-        (1, 6), (2, 6), (3, 6),
+        # Top serif
+        [(0.2, 1.0), (0.8, 1.0)],
+        # Vertical
+        [(0.5, 1.0), (0.5, 0.0)],
+        # Bottom serif
+        [(0.2, 0.0), (0.8, 0.0)],
     ],
     "C": [
-        (1, 0), (2, 0), (3, 0), (4, 0),
-        (0, 1),
-        (0, 2),
-        (0, 3),
-        (0, 4),
-        (0, 5),
-        (1, 6), (2, 6), (3, 6), (4, 6),
+        # Open curve
+        [(0.9, 0.85), (0.5, 1.0), (0.15, 0.85), (0.0, 0.5),
+         (0.15, 0.15), (0.5, 0.0), (0.9, 0.15)],
     ],
 }
+
+
+def _sample_stroke_points(
+    strokes: list[list[tuple[float, float]]], n_points: int,
+) -> list[tuple[float, float]]:
+    """Sample n_points evenly along the combined stroke paths."""
+    # Compute total length and segment lengths
+    segments: list[tuple[tuple[float, float], tuple[float, float], float]] = []
+    total_length = 0.0
+    for stroke in strokes:
+        for i in range(len(stroke) - 1):
+            p1, p2 = stroke[i], stroke[i + 1]
+            d = np.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2)
+            segments.append((p1, p2, d))
+            total_length += d
+
+    if total_length < 1e-8 or n_points < 1:
+        return [(0.5, 0.5)] * n_points
+
+    # Sample evenly along total path
+    points: list[tuple[float, float]] = []
+    for i in range(n_points):
+        target_dist = (i / max(n_points - 1, 1)) * total_length
+        cumulative = 0.0
+        for p1, p2, d in segments:
+            if cumulative + d >= target_dist - 1e-8:
+                if d < 1e-8:
+                    t = 0.0
+                else:
+                    t = (target_dist - cumulative) / d
+                t = np.clip(t, 0.0, 1.0)
+                x = p1[0] + (p2[0] - p1[0]) * t
+                y = p1[1] + (p2[1] - p1[1]) * t
+                points.append((x, y))
+                break
+            cumulative += d
+        else:
+            # Past end — use last point
+            last_stroke = strokes[-1]
+            points.append(last_stroke[-1])
+
+    return points
 
 
 # ============================================================================
@@ -592,10 +625,11 @@ def compute_letter_positions(
 ) -> dict[int, tuple[float, float]]:
     """Compute target letter positions for each atom.
 
-    Uses a two-step assignment:
-    1. Match communities to letters by size similarity (Hungarian), constrained
-       so that spatial order is roughly preserved (penalizes large reorderings).
-    2. Within each community, match atoms to letter dot positions (Hungarian).
+    Uses stroke-based letter definitions that adapt to community size:
+    each community's atoms are sampled along the letter's stroke paths,
+    guaranteeing every letter uses ALL its atoms and looks complete.
+
+    Communities are assigned to letter slots left-to-right by spatial order.
     """
     letters = "MOSAIC"
 
@@ -603,90 +637,49 @@ def compute_letter_positions(
     centroids = []
     for ci, atoms in enumerate(communities):
         cx = np.mean([mol_pos[a][0] for a in atoms])
-        cy = np.mean([mol_pos[a][1] for a in atoms])
-        centroids.append((cx, cy, ci))
+        centroids.append((cx, ci))
     centroids.sort(key=lambda t: t[0])
-
-    # Compute letter dot counts
-    letter_dots = [len(LETTER_PATTERNS[ch]) for ch in letters]
-    comm_sizes = [len(communities[centroids[i][2]]) for i in range(len(centroids))]
-
-    # Match communities (in spatial order) to letter slots using Hungarian
-    # Cost = |size_diff| + penalty for spatial reordering
-    n = len(letters)
-    cost_matrix = np.zeros((n, n))
-    for i in range(n):
-        for j in range(n):
-            size_diff = abs(comm_sizes[i] - letter_dots[j])
-            order_penalty = abs(i - j) * 3  # keep spatial order mostly intact
-            cost_matrix[i, j] = size_diff + order_penalty
-    row_ind, col_ind = linear_sum_assignment(cost_matrix)
-    # community_order[spatial_rank] = letter_index
-    comm_to_letter = {row_ind[k]: col_ind[k] for k in range(n)}
 
     n_letters = len(letters)
     total_width = 5.5
     letter_spacing = total_width / n_letters
-    letter_width = letter_spacing * 0.65
-    letter_height = letter_width * 1.4  # 5x7 aspect ratio
+    letter_width = letter_spacing * 0.6
+    letter_height = letter_width * 1.5
 
     letter_pos: dict[int, tuple[float, float]] = {}
 
-    for spatial_rank, (_, _, ci) in enumerate(centroids):
+    for order, (_, ci) in enumerate(centroids):
         atoms = communities[ci]
-        letter_idx = comm_to_letter[spatial_rank]
-        letter = letters[letter_idx]
-        pattern = LETTER_PATTERNS[letter]
-
-        # Letter position is determined by its index in "MOSAIC" (not spatial rank)
-        lx_center = -total_width / 2 + letter_spacing * (letter_idx + 0.5)
-        ly_center = 0.0
-
-        # Scale pattern dots to fit
-        scaled_dots = []
-        for col, row in pattern:
-            x = lx_center + (col / 4.0 - 0.5) * letter_width
-            y = ly_center + (0.5 - row / 6.0) * letter_height
-            scaled_dots.append((x, y))
-
+        letter = letters[order]
+        strokes = LETTER_STROKES[letter]
         n_atoms = len(atoms)
-        n_dots = len(scaled_dots)
 
         if n_atoms == 0:
             continue
 
-        if n_atoms <= n_dots:
-            # More dots than atoms: pick best n_atoms dots
-            cost = np.zeros((n_atoms, n_dots))
-            for ai, atom in enumerate(atoms):
-                ax, ay = mol_pos[atom]
-                for di, (dx, dy) in enumerate(scaled_dots):
-                    cost[ai, di] = (ax - dx) ** 2 + (ay - dy) ** 2
-            row_ind, col_ind = linear_sum_assignment(cost)
-            for ai, di in zip(row_ind, col_ind):
-                letter_pos[atoms[ai]] = scaled_dots[di]
-        else:
-            # More atoms than dots: assign all dots, extras on outline
-            cost = np.zeros((n_dots, n_atoms))
-            for di, (dx, dy) in enumerate(scaled_dots):
-                for ai, atom in enumerate(atoms):
-                    ax, ay = mol_pos[atom]
-                    cost[di, ai] = (ax - dx) ** 2 + (ay - dy) ** 2
-            row_ind, col_ind = linear_sum_assignment(cost)
-            assigned_atoms = set()
-            for di, ai in zip(row_ind, col_ind):
-                letter_pos[atoms[ai]] = scaled_dots[di]
-                assigned_atoms.add(ai)
+        # Letter center (each letter in its fixed position)
+        lx_center = -total_width / 2 + letter_spacing * (order + 0.5)
+        ly_center = 0.0
 
-            # Place remaining atoms along the letter outline with jitter
-            rng = np.random.RandomState(42)
-            unassigned = [ai for ai in range(n_atoms) if ai not in assigned_atoms]
-            for ui, ai in enumerate(unassigned):
-                dot_idx = ui % n_dots
-                dx, dy = scaled_dots[dot_idx]
-                jx = rng.uniform(-0.03, 0.03)
-                jy = rng.uniform(-0.03, 0.03)
-                letter_pos[atoms[ai]] = (dx + jx, dy + jy)
+        # Sample exactly n_atoms points along the letter strokes
+        raw_pts = _sample_stroke_points(strokes, n_atoms)
+
+        # Scale [0,1]x[0,1] to letter bounding box
+        scaled_dots = []
+        for px, py in raw_pts:
+            x = lx_center + (px - 0.5) * letter_width
+            y = ly_center + (py - 0.5) * letter_height
+            scaled_dots.append((x, y))
+
+        # Match atoms to dots via Hungarian (minimize travel distance)
+        cost = np.zeros((n_atoms, n_atoms))
+        for ai, atom in enumerate(atoms):
+            ax, ay = mol_pos[atom]
+            for di, (dx, dy) in enumerate(scaled_dots):
+                cost[ai, di] = (ax - dx) ** 2 + (ay - dy) ** 2
+        r_ind, c_ind = linear_sum_assignment(cost)
+        for ai, di in zip(r_ind, c_ind):
+            letter_pos[atoms[ai]] = scaled_dots[di]
 
     return letter_pos
 
