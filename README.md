@@ -1,9 +1,8 @@
 # [Beyond Flat Walks: Compositional Abstraction for Autoregressive Molecular Generation](https://kbian.org/MOSAIC-website/#)
 
-This project explores a simple idea: instead of asking generative models to recover motif-level structure implicitly, we encode motifs directly into the representation used for graph generation, independent of the sequence transformer's processing. We are interesting in constructing a representation in the form of flat tokens.
+![logo](https://kbian.org/MOSAIC-website/mosaic_logo.gif)
 
-![HDT](/docs/figure/encoding.png)
-![HDT](/docs/figure/decoding.png)
+This project explores a simple idea: instead of asking generative models to recover motif-level structure implicitly, we encode motifs directly into the representation used for graph generation, independent of the sequence transformer's processing. We are interesting in constructing a representation in the form of flat tokens.
 
 ## Core Approach
 
@@ -14,6 +13,9 @@ For generating graphs using tokens with hierarchical insights, we need 3 things:
 2. **Tokenize the input H-graph**: Convert the hierarchy to a token sequence using H-SENT (Vanilla HiGen) or HDT (DFS-based). Note that we need to preserve enough information (leaf edge connections) for the inverse problem to flatten the H-graph.
 
 3. **Flatten the generated H-graph**: Reconstruct the flat graph from tokens via bipartite edge union for H-SENT, or union of back edges for HDT.
+
+![HDT](/docs/figure/encoding.png)
+![HDT](/docs/figure/decoding.png)
 
 ## Quick Start
 

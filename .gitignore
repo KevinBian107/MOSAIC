@@ -69,7 +69,8 @@ wandb/
 *.json
 
 # Data
-/data/
+/data/*
+!/data/ci_moses/
 /datasets/
 *.pt
 *.pth

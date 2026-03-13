@@ -42,6 +42,7 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -e ".[dev]"
+          pip install rdkit
 
       - name: Run tests (RDKit tests auto-skip via skipif guards)
         run: |
@@ -69,6 +70,12 @@ jobs:
           pip install --upgrade pip
           pip install -e ".[dev]"
           pip install rdkit
+
+      - name: Set up CI test data
+        run: |
+          mkdir -p data/moses
+          cp data/ci_moses/train.csv data/moses/train.csv
+          cp data/ci_moses/test.csv data/moses/test.csv
 
       - name: Smoke train HSENT (5 steps)
         run: |
@@ -116,6 +123,12 @@ jobs:
           pip install --upgrade pip
           pip install -e ".[dev]"
           pip install rdkit fcd
+
+      - name: Set up CI test data
+        run: |
+          mkdir -p data/moses
+          cp data/ci_moses/train.csv data/moses/train.csv
+          cp data/ci_moses/test.csv data/moses/test.csv
 
       - name: Train tiny HSENT model
         run: |

@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=68.0", "wheel", "Cython", "numpy"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -28,6 +28,8 @@ dependencies = [
     "python-louvain",
     "tqdm",
     "omegaconf",
+    "Cython",
+    "pandas",
 ]
 
 [project.optional-dependencies]
