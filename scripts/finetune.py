@@ -169,12 +169,12 @@ def main(cfg: DictConfig) -> None:
                 )
 
                 # Log generated SMILES samples
-                log.info(f"  [Eval] Generated SMILES (sample):")
+                log.info("  [Eval] Generated SMILES (sample):")
                 for i, smi in enumerate(generated_smiles[:3]):
                     log.info(f"    {i + 1}. {smi[:80]}...")
 
                 # Log reference SMILES samples for comparison
-                log.info(f"  [Eval] Reference SMILES (sample):")
+                log.info("  [Eval] Reference SMILES (sample):")
                 import random
 
                 ref_sample = random.sample(
@@ -451,7 +451,7 @@ def main(cfg: DictConfig) -> None:
                     old_node_off = IDX_OFFSET + old_max_nodes
                     old_edge_off = old_node_off + NUM_ATOM_TYPES
 
-                    log.info(f"  Semantic embedding mapping (labeled graph):")
+                    log.info("  Semantic embedding mapping (labeled graph):")
                     log.info(
                         f"    Old layout: nodes@[{IDX_OFFSET},{old_node_off}) "
                         f"atoms@[{old_node_off},{old_edge_off}) "

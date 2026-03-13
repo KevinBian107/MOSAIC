@@ -1,14 +1,14 @@
-import torch
 import numpy as np
-from torch_geometric import utils
 import pyximport
+import torch
+from torch_geometric import utils
 
 pyximport.install(setup_args={"include_dirs": np.get_include()}, inplace=True)
 from .sent_utils import (
-    sample_sent,
-    sample_labeled_sent,
+    reconstruct_graph_from_labeled_sent,
     reconstruct_graph_from_sent,
-    reconstruct_graph_from_labeled_sent
+    sample_labeled_sent,
+    sample_sent,
 )
 
 

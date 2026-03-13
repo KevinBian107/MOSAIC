@@ -31,12 +31,10 @@ from tqdm import tqdm
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from rdkit import Chem
+# Suppress RDKit warnings
+from rdkit import Chem, RDLogger
 from rdkit.Chem import rdMolDescriptors
 from rdkit.Chem.Scaffolds import MurckoScaffold
-
-# Suppress RDKit warnings
-from rdkit import RDLogger
 
 RDLogger.DisableLog("rdApp.*")
 

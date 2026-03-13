@@ -27,7 +27,6 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import yaml
 
-
 # Metrics to display in the table (organized by section)
 METRIC_SECTIONS = [
     (

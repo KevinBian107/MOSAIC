@@ -36,9 +36,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.data.coconut_loader import CoconutLoader
 from src.data.molecular import (
-    MolecularDataset,
     NUM_ATOM_TYPES,
     NUM_BOND_TYPES,
+    MolecularDataset,
     load_moses_dataset,
 )
 from src.tokenizers import HDTTokenizer, HSENTTokenizer

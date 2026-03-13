@@ -17,12 +17,10 @@ import torch
 from torch_geometric.data import Data
 
 from src.tokenizers import (
-    SpectralCoarsening,
+    Bipartite,
+    HDTTokenizer,
     HierarchicalGraph,
     Partition,
-    Bipartite,
-    order_partition_nodes,
-    HDTTokenizer,
 )
 
 # Optional imports for molecular tests

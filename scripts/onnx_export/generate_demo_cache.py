@@ -37,8 +37,8 @@ from rdkit.Chem import AllChem
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.data.molecular import ATOM_TYPES, BOND_TYPES, graph_to_smiles
 from scripts.visualization.pipeline_overview import load_model
+from src.data.molecular import ATOM_TYPES, graph_to_smiles
 
 
 def molecule_to_demo_data(

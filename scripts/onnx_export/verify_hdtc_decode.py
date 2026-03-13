@@ -10,21 +10,22 @@ This script:
 Usage:
     python scripts/verify_hdtc_decode.py
 """
-import sys
-import os
 import json
+import os
+import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from collections import OrderedDict
+
 import torch
 from rdkit import Chem
-from rdkit.Chem import Draw, AllChem
-from collections import OrderedDict
+from rdkit.Chem import AllChem, Draw
 from transformers import GPT2Config, GPT2LMHeadModel
 
+from src.data.molecular import ATOM_TYPES, NUM_ATOM_TYPES, NUM_BOND_TYPES, graph_to_smiles
 from src.tokenizers.hdtc.tokenizer import HDTCTokenizer
-from src.data.molecular import graph_to_smiles, ATOM_TYPES, NUM_ATOM_TYPES, NUM_BOND_TYPES
 
 
 def load_hf_model(checkpoint_path: str):
@@ -184,12 +185,13 @@ def main():
             all_smiles.append(smiles)
         except Exception as e:
             print(f"  Decode error: {e}")
-            import traceback; traceback.print_exc()
+            import traceback
+            traceback.print_exc()
             all_smiles.append(None)
 
     # Summary
     valid = sum(1 for s in all_smiles if s is not None)
-    print(f"\n--- Summary ---")
+    print("\n--- Summary ---")
     print(f"Generated: {len(all_smiles)}, Valid SMILES: {valid} ({100*valid/max(len(all_smiles),1):.0f}%)")
 
     # Render valid molecules
@@ -214,7 +216,7 @@ def main():
     token_dump = [{"id": i, "tokens": t, "smiles": s} for i, (t, s) in enumerate(zip(all_tokens, all_smiles))]
     with open("verify_hdtc_tokens.json", "w") as f:
         json.dump(token_dump, f, indent=2)
-    print(f"Saved token dump to verify_hdtc_tokens.json")
+    print("Saved token dump to verify_hdtc_tokens.json")
 
 
 if __name__ == "__main__":

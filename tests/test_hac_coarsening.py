@@ -16,7 +16,7 @@ import torch
 from torch_geometric.data import Data
 
 from src.tokenizers import HDTTokenizer, HSENTTokenizer
-from src.tokenizers.coarsening.hac import AffinityCoarsening, BOND_WEIGHT_MAP
+from src.tokenizers.coarsening.hac import BOND_WEIGHT_MAP, AffinityCoarsening
 
 # Optional RDKit import
 try:

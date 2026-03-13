@@ -5,13 +5,13 @@ generation quality, including validity, uniqueness, novelty, FCD, SNN,
 fragment similarity, and scaffold similarity.
 """
 
+import warnings
 from collections import Counter
 from typing import Optional
-import warnings
 
 import numpy as np
 from rdkit import Chem, DataStructs, RDLogger
-from rdkit.Chem import AllChem, BRICS
+from rdkit.Chem import BRICS, AllChem
 from rdkit.Chem.Scaffolds import MurckoScaffold
 
 # Suppress RDKit deprecation warnings globally
@@ -502,9 +502,9 @@ def compute_fcd(
 
     try:
         # Try using fcd package directly first (more reliable than MOSES)
-        from fcd import get_fcd, load_ref_model, canonical_smiles
-        from rdkit import Chem
         import torch
+        from fcd import get_fcd, load_ref_model
+        from rdkit import Chem
 
         # Disable PyTorch multiprocessing
         torch.set_num_threads(1)

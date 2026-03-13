@@ -48,7 +48,6 @@ from src.tokenizers.coarsening.motif_community import (  # noqa: E402
 from src.tokenizers.coarsening.spectral import SpectralCoarsening  # noqa: E402
 from src.tokenizers.structures import (  # noqa: E402
     Bipartite,
-    FunctionalCommunity,
     HierarchicalGraph,
     Partition,
     TwoLevelHierarchy,

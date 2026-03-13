@@ -376,7 +376,7 @@ def main() -> None:
         json.dump(summary, f, indent=2)
 
     log.info("Done!")
-    log.info(f"\nSummary preview:")
+    log.info("\nSummary preview:")
     log.info(f"  Molecules analyzed: {summary['num_molecules']}")
     log.info(
         f"  Functional groups: {len(summary['motif_summary']['functional_groups'])}"

@@ -5,6 +5,7 @@ generation models using next-token prediction.
 """
 
 import logging
+import math
 import os
 import sys
 import threading
@@ -18,7 +19,6 @@ import transformers
 from torch import nn
 from torch_geometric.data import Data
 from tqdm import tqdm
-import math
 
 from src.tokenizers.base import Tokenizer
 

@@ -7,7 +7,6 @@ pretrained checkpoints using MOSAIC's test scripts.
 
 import sys
 from pathlib import Path
-from timeit import default_timer as timer
 from typing import Optional
 
 import pytorch_lightning as pl

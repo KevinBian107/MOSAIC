@@ -1,18 +1,14 @@
 """Tests for molecular data module."""
 
 import pytest
-import torch
 
 from src.data.molecular import (
-    smiles_to_graph,
-    graph_to_smiles,
-    MolecularDataset,
-    ATOM_TYPES,
-    BOND_TYPES,
     NUM_ATOM_TYPES,
     NUM_BOND_TYPES,
+    MolecularDataset,
+    graph_to_smiles,
+    smiles_to_graph,
 )
-
 
 # Test SMILES strings
 ETHANOL = "CCO"

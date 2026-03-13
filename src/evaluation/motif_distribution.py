@@ -20,9 +20,9 @@ from typing import Optional
 
 import numpy as np
 from rdkit import Chem
-from tqdm import tqdm
 from rdkit.Chem import BRICS, Fragments, rdMolDescriptors
 from scipy.stats import wasserstein_distance as scipy_wasserstein
+from tqdm import tqdm
 
 from src.evaluation.dist_helper import compute_mmd, gaussian
 

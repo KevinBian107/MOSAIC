@@ -26,6 +26,12 @@ from rdkit import Chem, RDLogger
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+# Import drawing utilities from pipeline_overview (safe, no Hydra)
+from pipeline_overview import (  # noqa: E402
+    compute_rdkit_2d_layout,
+    draw_molecule,
+)
+
 from src.data.coconut_loader import CoconutLoader  # noqa: E402
 from src.data.molecular import (  # noqa: E402
     NUM_ATOM_TYPES,
@@ -40,12 +46,6 @@ from src.tokenizers import (  # noqa: E402
     HDTTokenizer,
     HSENTTokenizer,
     SENTTokenizer,
-)
-
-# Import drawing utilities from pipeline_overview (safe, no Hydra)
-from pipeline_overview import (  # noqa: E402
-    compute_rdkit_2d_layout,
-    draw_molecule,
 )
 
 RDLogger.DisableLog("rdApp.*")
@@ -572,7 +572,7 @@ def main() -> None:
         print(f"  Checkpoint: {ckpt_path}")
 
         if not Path(ckpt_path).exists():
-            print(f"  SKIPPED (checkpoint not found)")
+            print("  SKIPPED (checkpoint not found)")
             model_results[mname] = [None] * len(references)
             continue
 

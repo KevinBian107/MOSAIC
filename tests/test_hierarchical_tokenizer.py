@@ -13,10 +13,10 @@ import torch
 from torch_geometric.data import Data
 
 from src.tokenizers import (
-    HSENTTokenizer,
-    HierarchicalGraph,
-    Partition,
     Bipartite,
+    HierarchicalGraph,
+    HSENTTokenizer,
+    Partition,
     SpectralCoarsening,
     order_partition_nodes,
 )

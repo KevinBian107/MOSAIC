@@ -18,7 +18,6 @@ import numpy as np
 from rdkit import Chem
 from rdkit.Chem import Draw
 
-
 # Common functional groups attached to benzene (as SMARTS patterns)
 # The [#6] at the end matches the benzene carbon attachment point
 FUNCTIONAL_GROUPS = {

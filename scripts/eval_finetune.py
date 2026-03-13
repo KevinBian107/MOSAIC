@@ -293,10 +293,11 @@ def main(cfg: DictConfig) -> None:
     # Compute structural retention metrics (ring count, scaffold, atom type, functional group distributions)
     log.info("Computing structural retention metrics...")
     from collections import Counter
+
+    import numpy as np
     from rdkit import Chem
     from rdkit.Chem import rdMolDescriptors
     from rdkit.Chem.Scaffolds import MurckoScaffold
-    import numpy as np
 
     def compute_distribution_kl(gen_counts: Counter, ref_counts: Counter) -> float:
         """Compute KL divergence between two count distributions."""

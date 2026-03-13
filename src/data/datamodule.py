@@ -536,8 +536,8 @@ class MolecularDataModule(pl.LightningDataModule):
 
     def _setup_qm9(self, stage: Optional[str] = None) -> None:
         """Set up QM9 dataset with train/val/test splits."""
-        from torch_geometric.datasets import QM9
         import numpy as np
+        from torch_geometric.datasets import QM9
 
         labeled = (
             self.tokenizer is not None

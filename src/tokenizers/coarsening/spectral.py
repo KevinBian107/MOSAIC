@@ -11,7 +11,6 @@ from typing import Optional
 
 import numpy as np
 import torch
-from torch import Tensor
 from torch_geometric.data import Data
 from torch_geometric.utils import subgraph, to_dense_adj
 
