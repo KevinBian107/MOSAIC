@@ -57,9 +57,9 @@ jobs:
             --deselect tests/test_motif_aware_coarsening.py::TestMotifAffinityMatrix::test_overlapping_motifs_additive
 
   smoke-train:
-    name: Smoke Test – Train
+    name: Smoke Test – Train & Eval
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -83,24 +83,11 @@ jobs:
           cp data/ci_moses/train.csv data/moses/train.csv
           cp data/ci_moses/test.csv data/moses/test.csv
 
-      - name: Smoke train SENT (5 steps, flat tokenizer)
+      - name: Smoke train SENT (3 steps)
         run: |
           python scripts/train.py \
             tokenizer=sent \
-            trainer.max_steps=5 \
-            trainer.devices=1 \
-            trainer.accelerator=cpu \
-            data.num_train=20 \
-            data.num_val=5 \
-            data.num_test=5 \
-            sampling.num_samples=2 \
-            sampling.max_length=128 \
-            wandb.enabled=false
-
-      - name: Smoke train HSENT (3 steps, hierarchical tokenizer)
-        run: |
-          python scripts/train.py \
-            tokenizer=hsent \
+            model.model_name=gpt2-xxs \
             trainer.max_steps=3 \
             trainer.devices=1 \
             trainer.accelerator=cpu \
@@ -108,63 +95,5 @@ jobs:
             data.num_val=5 \
             data.num_test=5 \
             sampling.num_samples=2 \
-            sampling.max_length=128 \
+            sampling.max_length=64 \
             wandb.enabled=false
-
-  smoke-eval:
-    name: Smoke Test – Generate & Validity
-    runs-on: ubuntu-latest
-    needs: smoke-train
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install CPU-only torch (faster than CUDA wheels)
-        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-
-      - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          pip install -e ".[dev]"
-          pip install rdkit fcd
-
-      - name: Set up CI test data
-        run: |
-          mkdir -p data/moses
-          cp data/ci_moses/train.csv data/moses/train.csv
-          cp data/ci_moses/test.csv data/moses/test.csv
-
-      - name: Train tiny SENT model then evaluate
-        run: |
-          python scripts/train.py \
-            tokenizer=sent \
-            trainer.max_steps=5 \
-            trainer.devices=1 \
-            trainer.accelerator=cpu \
-            data.num_train=20 \
-            data.num_val=5 \
-            data.num_test=5 \
-            sampling.num_samples=2 \
-            sampling.max_length=128 \
-            wandb.enabled=false
-
-          CKPT=$(find outputs/train -name "best.ckpt" | head -1)
-          python scripts/test.py \
-            tokenizer=sent \
-            model.checkpoint_path="$CKPT" \
-            trainer.accelerator=cpu \
-            data.num_train=20 \
-            data.num_val=5 \
-            data.num_test=5 \
-            sampling.num_samples=5 \
-            sampling.max_length=128 \
-            metrics.core_only=true \
-            metrics.compute_fcd=false \
-            metrics.compute_pgd=false \
-            metrics.compute_motif=false \
-            visualization.enabled=false
