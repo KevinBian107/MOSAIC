@@ -49,13 +49,12 @@ warnings.filterwarnings("ignore", category=UserWarning)
 # Constants
 # ============================================================================
 
-# Vancomycin: 101 heavy atoms, 3 benzene rings + many amide/ether groups.
-# ~17 atoms per community after merging → clear letter shapes.
+# Ginsenoside Rb1: 82 heavy atoms, triterpene core + 4 sugar chains.
+# COCONUT-style natural product with chain-like branching topology.
 MOLECULE_SMILES = (
-    "CC1C(O)CC(NC(=O)C(CC(=O)N)NC(=O)C2CC(O)C(OC3OC(CO)C(O)C(O)"
-    "C3NC(C)=O)C(Oc4cc5cc(Oc6ccc(cc6Cl)C(O)C6NC(=O)C(NC(=O)"
-    "C(CC(N)=O)NC1=O)C(O)C1=CC(O)=CC(O)=C1C1CC(C(NC6=O)C(=O)O)"
-    "NC1=O)c5cc4Cl)O2)C(O)=O"
+    "CC(=CCC1C(C)(C)C2CCC3(C)C(CC(O)C4C3(C)CCC3C(C)(C)"
+    "C(OC5OC(CO)C(O)C(O)C5OC5OC(CO)C(O)C(O)C5O)CCC34C)"
+    "C2(C)CC1OC1OC(CO)C(O)C(O)C1OC1OC(CO)C(O)C(O)C1O)C"
 )
 
 # Community type colors (matching pipeline_overview.py)
@@ -724,24 +723,24 @@ def lerp_pos(
 # Frame state computation
 # ============================================================================
 
-# Frame layout (palindrome: forward + reverse for seamless loop)
-FRAMES_FADE_IN = 15
-FRAMES_HOLD_MOL = 15
+# Frame layout: seamless palindrome loop (no fade in/out)
+# Forward: hold_mol → coarsen → hold_coarsened → form_letters → hold_mosaic
+# Reverse: same in reverse → back to hold_mol (seamless)
+FRAMES_HOLD_MOL = 20
 FRAMES_COARSEN = 30
 FRAMES_HOLD_COARSENED = 15
-FRAMES_LETTER_FORM = 45
+FRAMES_LETTER_FORM = 40
 FRAMES_HOLD_MOSAIC = 30
 
-# Cumulative boundaries (forward half only)
+# Cumulative boundaries (forward half)
 F0 = 0
-F1 = F0 + FRAMES_FADE_IN         # 15
-F2 = F1 + FRAMES_HOLD_MOL        # 30
-F3 = F2 + FRAMES_COARSEN         # 60
-F4 = F3 + FRAMES_HOLD_COARSENED  # 75
-F5 = F4 + FRAMES_LETTER_FORM     # 120
-F6 = F5 + FRAMES_HOLD_MOSAIC     # 150
+F1 = F0 + FRAMES_HOLD_MOL        # 20
+F2 = F1 + FRAMES_COARSEN         # 50
+F3 = F2 + FRAMES_HOLD_COARSENED  # 65
+F4 = F3 + FRAMES_LETTER_FORM     # 105
+F5 = F4 + FRAMES_HOLD_MOSAIC     # 135
 
-FORWARD_FRAMES = F6
+FORWARD_FRAMES = F5
 TOTAL_FRAMES = FORWARD_FRAMES * 2  # palindrome
 
 
@@ -755,9 +754,11 @@ def get_frame_state(
 ) -> dict:
     """Compute animation state for a given frame.
 
+    Seamless palindrome loop — no fade in/out. Starts and ends with
+    the molecule fully visible, so reversing produces a perfect loop.
+
     Returns dict with: positions, atom_colors (hex), hull_alpha, bond_alpha,
-    global_alpha, show_bonds, show_labels, color_blend (0=element, 1=community),
-    show_mosaic_text.
+    global_alpha, show_bonds, show_labels, show_mosaic_text.
     """
     # Palindrome: reverse second half
     if frame >= FORWARD_FRAMES:
@@ -778,20 +779,7 @@ def get_frame_state(
             comm_colors[a] = cc
 
     if frame < F1:
-        # Fade in molecule
-        t = smoothstep(frame / max(FRAMES_FADE_IN - 1, 1))
-        return {
-            "positions": mol_pos,
-            "atom_colors": elem_colors,
-            "hull_alpha": 0.0,
-            "bond_alpha": t,
-            "global_alpha": t,
-            "show_bonds": True,
-            "show_labels": True,
-            "show_mosaic_text": False,
-        }
-    elif frame < F2:
-        # Hold molecule
+        # Hold molecule (fully visible, element colored)
         return {
             "positions": mol_pos,
             "atom_colors": elem_colors,
@@ -802,9 +790,9 @@ def get_frame_state(
             "show_labels": True,
             "show_mosaic_text": False,
         }
-    elif frame < F3:
+    elif frame < F2:
         # Coarsening: hulls fade in, atoms blend from element -> community color
-        t = smoothstep((frame - F2) / max(FRAMES_COARSEN - 1, 1))
+        t = smoothstep((frame - F1) / max(FRAMES_COARSEN - 1, 1))
         blended = {}
         for a in mol_pos:
             blended[a] = _blend_colors(elem_colors[a], comm_colors.get(a, "#808080"), t)
@@ -815,10 +803,10 @@ def get_frame_state(
             "bond_alpha": 1.0 - t * 0.4,
             "global_alpha": 1.0,
             "show_bonds": True,
-            "show_labels": t < 0.5,  # labels fade out during coarsening
+            "show_labels": t < 0.5,
             "show_mosaic_text": False,
         }
-    elif frame < F4:
+    elif frame < F3:
         # Hold coarsened
         return {
             "positions": mol_pos,
@@ -830,9 +818,9 @@ def get_frame_state(
             "show_labels": False,
             "show_mosaic_text": False,
         }
-    elif frame < F5:
+    elif frame < F4:
         # Letter formation: atoms interpolate, bonds fade out
-        t = smoothstep((frame - F4) / max(FRAMES_LETTER_FORM - 1, 1))
+        t = smoothstep((frame - F3) / max(FRAMES_LETTER_FORM - 1, 1))
         positions = lerp_pos(mol_pos, letter_pos, t)
         return {
             "positions": positions,
