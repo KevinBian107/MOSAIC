@@ -4,14 +4,8 @@ import pytest
 import torch
 from torch_geometric.data import Data
 
-from src.tokenizers.base import BatchConverter, Tokenizer
+from src.tokenizers.base import BatchConverter
 from src.tokenizers.sent import SENTTokenizer
-from tests.fixtures.graphs import (
-    triangle_graph,
-    square_graph,
-    erdos_renyi_graph,
-    disconnected_graph,
-)
 
 
 class TestSENTTokenizer:

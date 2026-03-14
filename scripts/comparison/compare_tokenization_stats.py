@@ -36,7 +36,6 @@ from src.tokenizers import (
     SENTTokenizer,
 )
 
-
 # ============================================================================
 # Tokenizer configurations
 # ============================================================================
@@ -301,7 +300,7 @@ def print_table(results: dict[str, Any]) -> None:
         print(f"{name:<12} {mean:>8.1f} {mn:>8} {mx:>8} {p95:>8} {p99:>8} {std:>8.1f} {comp:>10.2f} {valid:>6}")
 
     print("=" * 100)
-    print(f"Compress = seq_len / num_nodes (lower = more compact)")
+    print("Compress = seq_len / num_nodes (lower = more compact)")
     print("=" * 100)
 
 

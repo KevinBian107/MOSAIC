@@ -11,19 +11,15 @@ Key visualizations:
 
 from typing import Optional, Sequence
 
-import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
-from matplotlib.colors import ListedColormap
 from torch_geometric.data import Data
 
 from src.tokenizers.structures import (
-    Bipartite,
     HierarchicalGraph,
-    Partition,
 )
-
 
 # Color palette for communities (colorblind-friendly)
 COMMUNITY_COLORS = [

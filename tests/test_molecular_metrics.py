@@ -4,28 +4,27 @@ import numpy as np
 import pytest
 
 from src.evaluation.molecular_metrics import (
-    compute_validity,
-    compute_uniqueness,
-    compute_novelty,
-    compute_snn,
-    compute_fragment_similarity,
-    compute_scaffold_similarity,
-    get_brics_fragments,
     MolecularMetrics,
+    compute_fragment_similarity,
+    compute_novelty,
+    compute_scaffold_similarity,
+    compute_snn,
+    compute_uniqueness,
+    compute_validity,
+    get_brics_fragments,
 )
 from src.evaluation.motif_distribution import (
+    MOLECULAR_MOTIFS,
+    MotifCooccurrenceMetric,
+    MotifDistributionMetric,
+    MotifHistogramMetric,
+    compute_cooccurrence_matrix,
+    compute_motif_histogram,
     get_functional_group_counts,
     get_motif_counts,
     get_ring_system_info,
-    MotifDistributionMetric,
-    MotifHistogramMetric,
-    MotifCooccurrenceMetric,
-    compute_motif_histogram,
-    compute_cooccurrence_matrix,
     kl_divergence,
-    MOLECULAR_MOTIFS,
 )
-
 
 # Test SMILES
 VALID_SMILES = ["CCO", "c1ccccc1", "CC(=O)O", "c1ccccc1O"]

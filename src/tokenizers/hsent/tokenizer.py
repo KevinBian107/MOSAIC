@@ -12,7 +12,7 @@ Key features:
 """
 
 import warnings
-from typing import Callable, Literal, Optional, Sequence, Union
+from typing import Callable, Literal, Optional, Sequence
 
 import torch
 from torch import Tensor

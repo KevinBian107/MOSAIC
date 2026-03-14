@@ -24,7 +24,6 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import yaml
 
-
 # Default metrics to display (in order), organized by section
 # Each section is a tuple of (section_name, list_of_metrics)
 # Use None as section_name for metrics without a section header

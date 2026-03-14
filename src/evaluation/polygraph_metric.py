@@ -9,7 +9,6 @@ import logging
 from typing import Optional
 
 import networkx as nx
-import torch
 from torch_geometric.data import Data
 from torch_geometric.utils import to_networkx
 

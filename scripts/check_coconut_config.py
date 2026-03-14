@@ -9,6 +9,7 @@ Merges configs in the same order as train.yaml defaults:
 Run from project root: python scripts/check_coconut_config.py
 """
 from pathlib import Path
+
 import yaml
 
 

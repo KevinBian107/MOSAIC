@@ -12,7 +12,6 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 from torch_geometric.data import Data
 
-
 # Atom types supported (common in drug-like molecules)
 ATOM_TYPES = ["C", "N", "O", "F", "P", "S", "Cl", "Br", "I"]
 ATOM_TYPE_TO_IDX = {a: i for i, a in enumerate(ATOM_TYPES)}
@@ -279,10 +278,10 @@ def load_moses_dataset(
         if precomputed_smiles_dir is None:
             precomputed_smiles_dir = "data/moses_smiles"
         precomputed_file = os.path.join(precomputed_smiles_dir, "moses_smiles.txt")
-        
+
         # Resolve to absolute path for better error messages
         precomputed_file_abs = os.path.abspath(precomputed_file)
-        
+
         if os.path.exists(precomputed_file_abs):
             import logging
             log = logging.getLogger(__name__)
@@ -291,7 +290,7 @@ def load_moses_dataset(
                 first_line = f.readline().strip()
                 train_count = int(first_line)
                 all_smiles = [line.strip() for line in f if line.strip()]
-            
+
             # Extract the requested split
             if split == "train":
                 smiles_list = all_smiles[:train_count]
@@ -300,7 +299,7 @@ def load_moses_dataset(
             else:
                 # For test_scaffolds, fall back to CSV
                 use_precomputed_smiles = False
-            
+
             if use_precomputed_smiles:
                 # Apply max_molecules limit (sequential for chunks, random for sampling)
                 if max_molecules is not None and max_molecules < len(smiles_list):
@@ -308,7 +307,7 @@ def load_moses_dataset(
                     # For random sampling, use random.sample
                     # We'll use sequential by default since preprocess_chunk needs sequential access
                     smiles_list = smiles_list[:max_molecules]
-                
+
                 import logging
                 log = logging.getLogger(__name__)
                 log.info(f"Loaded {len(smiles_list)} SMILES from precomputed file (split={split})")

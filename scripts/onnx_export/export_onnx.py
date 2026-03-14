@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from collections import OrderedDict
 from pathlib import Path
 
@@ -59,7 +58,7 @@ def extract_gpt2_state_dict(checkpoint_path: str) -> tuple[OrderedDict, dict]:
         n_layer += 1
 
     # Get n_head from attention weight shape
-    attn_key = f"model.model.transformer.h.0.attn.c_attn.weight"
+    attn_key = "model.model.transformer.h.0.attn.c_attn.weight"
     if attn_key in state_dict:
         # c_attn projects to 3 * n_embd (Q, K, V), so shape is [n_embd, 3*n_embd]
         n_head = n_embd // (state_dict[attn_key].shape[-1] // 3)
@@ -354,7 +353,7 @@ def main():
     if args.quantize:
         print("Step 5: Quantizing to int8...")
         try:
-            from onnxruntime.quantization import quantize_dynamic, QuantType
+            from onnxruntime.quantization import QuantType, quantize_dynamic
 
             onnx_path = onnx_dir / "model.onnx"
             if not onnx_path.exists():

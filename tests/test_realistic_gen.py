@@ -4,7 +4,6 @@ Tests substitution pattern analysis, functional group detection,
 and distribution comparison metrics.
 """
 
-import pytest
 from collections import Counter
 
 from src.realistic_gen import (
@@ -16,7 +15,6 @@ from src.realistic_gen.analysis import (
     classify_disubstitution,
     get_benzene_substitution_count,
 )
-
 
 # ===========================================================================
 # Substitution Count Tests

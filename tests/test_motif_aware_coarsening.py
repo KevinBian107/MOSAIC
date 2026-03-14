@@ -20,7 +20,6 @@ from src.tokenizers import (
     SpectralCoarsening,
 )
 from src.tokenizers.motif import (
-    CLUSTERING_MOTIFS,
     MotifInstance,
     compute_motif_affinity_matrix,
     compute_motif_cohesion,

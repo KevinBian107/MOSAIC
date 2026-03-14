@@ -314,7 +314,8 @@ class AffinityCoarsening:
             for i in range(data.edge_index.shape[1]):
                 src = int(data.edge_index[0, i])
                 dst = int(data.edge_index[1, i])
-                bond_type = int(data.edge_attr[i])
+                feat = data.edge_attr[i]
+                bond_type = int(feat.argmax()) if feat.dim() > 0 and feat.numel() > 1 else int(feat)
                 edge_features_global[(src, dst)] = bond_type
 
         # Don't coarsen if graph is too small
@@ -445,7 +446,8 @@ class AffinityCoarsening:
             for i in range(data.edge_index.shape[1]):
                 src = int(data.edge_index[0, i])
                 dst = int(data.edge_index[1, i])
-                bond_type = int(data.edge_attr[i])
+                feat = data.edge_attr[i]
+                bond_type = int(feat.argmax()) if feat.dim() > 0 and feat.numel() > 1 else int(feat)
                 edge_features_global[(src, dst)] = bond_type
 
         partition = Partition(

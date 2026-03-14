@@ -15,12 +15,6 @@ import torch
 from torch_geometric.data import Data
 
 from src.tokenizers.hdtc import HDTCTokenizer
-from src.tokenizers.coarsening.functional_hierarchy import FunctionalHierarchyBuilder
-from src.tokenizers.structures import (
-    CommunityCommunityEdge,
-    FunctionalCommunity,
-    TwoLevelHierarchy,
-)
 
 # Optional imports
 try:

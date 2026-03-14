@@ -2,19 +2,14 @@
 
 import numpy as np
 import pytest
-import torch
 from torch_geometric.data import Data
 
 from src.evaluation.dist_helper import compute_mmd, gaussian, gaussian_tv
 from src.evaluation.metrics import (
     GraphMetrics,
     compute_validity_metrics,
-    degree_histogram,
-    spectral_histogram,
-    clustering_histogram,
 )
 from src.evaluation.polygraph_metric import PolygraphMetric
-from tests.fixtures.graphs import sample_graph_list, erdos_renyi_graph
 
 
 class TestDistHelper:

@@ -20,20 +20,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-from matplotlib.patches import FancyArrowPatch, Arc, ConnectionPatch
-from matplotlib.path import Path as MPath
-import matplotlib.patheffects as pe
+import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import torch
+from matplotlib.patches import FancyArrowPatch
+from matplotlib.path import Path as MPath
 from rdkit import Chem
 from torch_geometric.data import Data
 from torch_geometric.utils import to_networkx
 
 from src.tokenizers import HDTCTokenizer, HDTTokenizer, HSENTTokenizer, SENTTokenizer
-
 
 # Common molecules for demos
 MOLECULES = {

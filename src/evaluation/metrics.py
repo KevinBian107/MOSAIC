@@ -4,7 +4,6 @@ This module provides metrics for evaluating graph generation quality,
 including degree distribution, spectral properties, and clustering.
 """
 
-import concurrent.futures
 from typing import Optional
 
 import networkx as nx
@@ -13,7 +12,7 @@ from scipy.linalg import eigvalsh
 from torch_geometric.data import Data
 from torch_geometric.utils import to_networkx
 
-from src.evaluation.dist_helper import compute_mmd, gaussian, gaussian_emd, gaussian_tv
+from src.evaluation.dist_helper import compute_mmd, gaussian_emd, gaussian_tv
 
 
 def degree_histogram(G: nx.Graph) -> np.ndarray:

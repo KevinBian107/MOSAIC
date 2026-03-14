@@ -15,7 +15,6 @@ from torch import Tensor
 
 from src.tokenizers.structures import Partition
 
-
 OrderingMethod = Literal["BFS", "DFS", "BFSAC", "BFSDC"]
 
 
@@ -287,7 +286,6 @@ def compute_canonical_order(
     Returns:
         List of node indices in canonical order.
     """
-    import torch
 
     # Create a temporary partition
     temp_partition = Partition(
