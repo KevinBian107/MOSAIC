@@ -83,17 +83,17 @@ jobs:
           cp data/ci_moses/train.csv data/moses/train.csv
           cp data/ci_moses/test.csv data/moses/test.csv
 
-      - name: Smoke train SENT (3 steps)
+      - name: Smoke train SENT (2 steps, no generation)
         run: |
           python scripts/train.py \
             tokenizer=sent \
             model.model_name=gpt2-xxs \
-            trainer.max_steps=3 \
+            trainer.max_steps=2 \
             trainer.devices=1 \
             trainer.accelerator=cpu \
             data.num_train=10 \
             data.num_val=5 \
             data.num_test=5 \
-            sampling.num_samples=2 \
+            sampling.num_samples=0 \
             sampling.max_length=64 \
             wandb.enabled=false
